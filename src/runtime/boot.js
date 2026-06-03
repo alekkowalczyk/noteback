@@ -47,6 +47,23 @@
    */
   async function boot(cfg) {
     cfg = cfg || {};
+
+    // Single-mount guard. A page can carry BOTH an embedded canvas runtime and
+    // the installed extension's content script — e.g. opening a saved canvas (or
+    // an agent-wrapped doc) while the extension is on. Whichever calls boot first
+    // sets the flag (synchronously, before any await) and wins; a second call
+    // adopts that controller instead of mounting a duplicate overlay, which would
+    // show two launchers/sidebars and split state across two stores (the canvas's
+    // in-file JSON vs chrome.storage). The embedded canvas boots first — its inline
+    // script runs before the content script's document_idle — so a received
+    // canvas's own comments stay authoritative and the extension stands down.
+    const g = (typeof globalThis !== 'undefined') ? globalThis
+      : (typeof window !== 'undefined' ? window : this);
+    if (g && g.__notebackBooted) {
+      return g.__notebackController || null;
+    }
+    if (g) g.__notebackBooted = true;
+
     const modules = rt();
     const stateApi = modules.state;
     const highlightApi = modules.highlight;
@@ -115,9 +132,11 @@
         try { highlightApi.clearHighlights(rootNode); } catch (e) {}
       }
       if (controller && typeof controller.destroy === 'function') controller.destroy();
+      // Release the single-mount guard so a later boot() can re-mount cleanly.
+      if (g) { g.__notebackBooted = false; g.__notebackController = null; }
     }
 
-    return {
+    const bootApi = {
       destroy: destroy,
       repaint: repaint,
       getState: getState,
@@ -129,6 +148,9 @@
       copyMarkdown: function () { return controller.copyMarkdown(); },
       saveCanvas: function () { return controller.saveCanvas(); }
     };
+    // Expose for the single-mount guard so a deferred second boot can adopt it.
+    if (g) g.__notebackController = bootApi;
+    return bootApi;
   }
 
   /** Derive a friendly title from a path/URL (last segment). */

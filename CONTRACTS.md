@@ -282,6 +282,17 @@ Single entry point used by **both** modes.
 async function boot(cfg) { ... }
 ```
 
+**Single-mount guard (cross-module invariant).** `boot()` sets `window.__notebackBooted`
+synchronously on first call (before any `await`) and stores its controller on
+`window.__notebackController`. A second `boot()` returns that existing controller
+instead of mounting again. This matters when a page carries **both** an embedded
+canvas runtime **and** the installed extension (opening a saved/agent-wrapped canvas
+with the extension on): the embedded canvas boots first (its inline script runs before
+the content script's `document_idle`), so it wins and the extension stands down — no
+duplicate launcher/sidebar, and the canvas's in-file state stays authoritative rather
+than competing with `chrome.storage`. `content-script.js` only **reads** the flag
+(early-returns if set); `boot.js` owns writing it, and `destroy()` clears it.
+
 ---
 
 ## 4. `NotebackRuntime` global namespace map

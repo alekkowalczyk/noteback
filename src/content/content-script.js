@@ -31,9 +31,13 @@
 (function () {
   'use strict';
 
-  // Guard: only boot once per page.
+  // Stand down if an overlay is already mounted on this page — most importantly
+  // when the page is itself a Noteback *canvas*, whose embedded runtime booted
+  // first and set this flag. Mounting again would double the UI and split state
+  // between the canvas's in-file JSON and chrome.storage. boot.js OWNS this flag
+  // (sets it synchronously on mount); we only read it here. This also prevents a
+  // duplicate content-script injection from booting twice.
   if (window.__notebackBooted) return;
-  window.__notebackBooted = true;
 
   const RT = window.NotebackRuntime || {};
 
