@@ -114,14 +114,20 @@
     };
   }
 
-  /** Defensive copy of an anchor so stored comments don't alias caller data. */
+  /**
+   * Defensive copy of an anchor so stored comments don't alias caller data.
+   * A null/undefined anchor denotes a DOCUMENT-LEVEL comment (attached to the
+   * whole document rather than a quoted passage) and is preserved as null —
+   * which is distinct from an "orphan" (a real anchor whose quote no longer
+   * matches the current text).
+   */
   function cloneAnchor(anchor) {
-    const a = anchor || {};
+    if (anchor == null) return null;
     return {
-      quote: a.quote == null ? '' : String(a.quote),
-      prefix: a.prefix == null ? '' : String(a.prefix),
-      suffix: a.suffix == null ? '' : String(a.suffix),
-      occurrence: typeof a.occurrence === 'number' ? a.occurrence : 0
+      quote: anchor.quote == null ? '' : String(anchor.quote),
+      prefix: anchor.prefix == null ? '' : String(anchor.prefix),
+      suffix: anchor.suffix == null ? '' : String(anchor.suffix),
+      occurrence: typeof anchor.occurrence === 'number' ? anchor.occurrence : 0
     };
   }
 
@@ -174,10 +180,16 @@
     if (!('author' in c) || c.author !== null) {
       errors.push(at + '.author must be null in v1');
     }
-    const a = c.anchor;
-    if (a == null || typeof a !== 'object') {
-      errors.push(at + '.anchor must be an object');
+    // anchor may be null for a DOCUMENT-LEVEL comment (a whole-doc note);
+    // otherwise it must be a valid text-quote anchor.
+    if (!('anchor' in c)) {
+      errors.push(at + '.anchor must be present (an anchor object or null)');
+    } else if (c.anchor === null) {
+      /* document-level comment — no anchor; valid. */
+    } else if (typeof c.anchor !== 'object') {
+      errors.push(at + '.anchor must be an object or null');
     } else {
+      const a = c.anchor;
       if (typeof a.quote !== 'string' || a.quote === '') {
         errors.push(at + '.anchor.quote must be a non-empty string');
       }

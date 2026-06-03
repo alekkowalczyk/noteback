@@ -194,6 +194,51 @@ test('validateState rejects a comment whose anchor.quote is empty', () => {
 });
 
 // ---------------------------------------------------------------------------
+// document-level comments (anchor === null)
+// ---------------------------------------------------------------------------
+
+test('addComment with anchor:null stores a valid document-level comment', () => {
+  const s = state.createState('file:///x.html', 'x.html');
+  const s2 = state.addComment(s, { anchor: null, body: 'whole-doc note' }, { id: 'c_d', createdAt: TS });
+  const c = s2.comments[0];
+  assert.strictEqual(c.anchor, null, 'anchor preserved as null (document-level)');
+  assert.strictEqual(c.body, 'whole-doc note');
+  assert.strictEqual(state.validateState(s2).valid, true, 'document-level comment is valid');
+});
+
+test('validateState accepts anchor:null but still rejects a missing anchor key', () => {
+  const base = { schemaVersion: 1, docId: 'x', docTitle: 'x' };
+  const ok = state.validateState({
+    ...base,
+    comments: [{ id: 'c_1', anchor: null, body: 'n', createdAt: TS, author: null }]
+  });
+  assert.strictEqual(ok.valid, true);
+
+  const missing = state.validateState({
+    ...base,
+    comments: [{ id: 'c_1', body: 'n', createdAt: TS, author: null }] // no anchor key
+  });
+  assert.strictEqual(missing.valid, false);
+  assert.ok(missing.errors.some((e) => /anchor/i.test(e)));
+});
+
+test('serialize/deserialize round-trips a document-level comment', () => {
+  let s = state.createState('file:///doc.html', 'doc.html');
+  s = state.addComment(s, { anchor: null, body: 'about the whole doc' }, { id: 'c_d', createdAt: TS });
+  const back = state.deserialize(state.serialize(s));
+  assert.deepStrictEqual(back, s);
+  assert.strictEqual(back.comments[0].anchor, null);
+});
+
+test('editComment keeps a document-level comment null-anchored when editing body', () => {
+  let s = state.createState('file:///x.html', 'x.html');
+  s = state.addComment(s, { anchor: null, body: 'first' }, { id: 'c_d', createdAt: TS });
+  const s2 = state.editComment(s, 'c_d', { body: 'edited' });
+  assert.strictEqual(s2.comments[0].anchor, null);
+  assert.strictEqual(s2.comments[0].body, 'edited');
+});
+
+// ---------------------------------------------------------------------------
 // serialize / deserialize
 // ---------------------------------------------------------------------------
 

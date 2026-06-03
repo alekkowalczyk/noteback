@@ -132,7 +132,30 @@
     '.nb-popover textarea{width:100%;min-height:72px;resize:vertical;border:1px solid #d1d5db;',
     '  border-radius:6px;padding:8px;font:14px/1.4 inherit;color:#1f2937;}',
     '.nb-popover textarea:focus{outline:2px solid #2563eb;outline-offset:0;border-color:#2563eb;}',
-    '.nb-pop-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px;}'
+    '.nb-pop-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px;}',
+    /* launcher — always-visible pill that opens the sidebar (both modes) */
+    '.nb-launcher{position:fixed;right:16px;bottom:16px;z-index:2147483646;',
+    '  display:inline-flex;align-items:center;gap:7px;border:none;cursor:pointer;',
+    '  background:#2563eb;color:#fff;border-radius:999px;padding:9px 14px;',
+    '  font:600 13px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;',
+    '  box-shadow:0 4px 14px rgba(37,99,235,.35);}',
+    '.nb-launcher:hover{background:#1d4ed8;}',
+    '.nb-launcher.nb-hidden{display:none;}',
+    '.nb-launcher-icon{font-size:15px;line-height:1;}',
+    '.nb-launcher-count{background:rgba(255,255,255,.25);border-radius:999px;',
+    '  min-width:18px;height:18px;align-items:center;justify-content:center;',
+    '  padding:0 5px;font-size:11px;font-weight:700;}',
+    /* whole-document note composer (top of the sidebar list) */
+    '.nb-doc-composer{margin-bottom:10px;}',
+    '.nb-add-doc{width:100%;border:1px dashed #cbd5e1;background:#fff;color:#2563eb;',
+    '  border-radius:8px;padding:9px 10px;font:600 12px/1 inherit;cursor:pointer;text-align:center;}',
+    '.nb-add-doc:hover{background:#eff6ff;border-color:#93c5fd;}',
+    '.nb-doc-ta{width:100%;min-height:64px;resize:vertical;border:1px solid #d1d5db;',
+    '  border-radius:6px;padding:8px;font:14px/1.4 inherit;color:#1f2937;}',
+    '.nb-doc-ta:focus{outline:2px solid #2563eb;outline-offset:0;border-color:#2563eb;}',
+    '.nb-item.nb-doc{border-color:#dbeafe;background:#f8fafc;}',
+    '.nb-doc-tag{display:inline-block;font-size:11px;font-weight:700;color:#2563eb;',
+    '  background:#eff6ff;border-radius:4px;padding:3px 6px;margin-bottom:6px;}'
   ].join('');
 
   /* ----------------------------------------------------------------------- *
@@ -238,9 +261,34 @@
     sidebar.querySelector('.nb-copy').addEventListener('click', copyMarkdown);
     sidebar.querySelector('.nb-save').addEventListener('click', saveCanvas);
 
+    /* --- launcher (always-visible pill that opens the sidebar) ---------- */
+    const launcher = doc.createElement('button');
+    launcher.type = 'button';
+    launcher.className = 'nb-launcher';
+    launcher.setAttribute(UI_ATTR, 'launcher');
+    launcher.title = 'Open Noteback';
+    launcher.innerHTML =
+      '<span class="nb-launcher-icon">🗨</span>' +
+      '<span class="nb-launcher-label">Noteback</span>' +
+      '<span class="nb-launcher-count"></span>';
+    uiRoot.appendChild(launcher);
+    launcher.addEventListener('click', openSidebar);
+
+    /** Reflect the comment count on the launcher badge (hidden when zero). */
+    function updateLauncher() {
+      const s = getState();
+      const n = (s && Array.isArray(s.comments)) ? s.comments.length : 0;
+      const countEl = launcher.querySelector('.nb-launcher-count');
+      countEl.textContent = n > 0 ? String(n) : '';
+      countEl.style.display = n > 0 ? 'inline-flex' : 'none';
+    }
+
     /* --- popover (in shadow root) --------------------------------------- */
     let popover = null;
     let editingId = null;
+    // Inline "note about the whole document" composer state (lives in the sidebar).
+    let docComposerOpen = false;
+    let docComposerDraft = '';
 
     /* ------------------------------------------------------------------- *
      * Selection → floating button                                         *
@@ -468,7 +516,8 @@
         '  <button type="button" class="nb-link nb-cancel">Cancel</button>' +
         '  <button type="button" class="nb-btn nb-savecomment">Save</button>' +
         '</div>';
-      popover.querySelector('.nb-pq').textContent = '“' + truncate(quote, 140) + '”';
+      const pq = popover.querySelector('.nb-pq');
+      pq.textContent = quote ? ('“' + truncate(quote, 140) + '”') : 'Note on the whole document';
       const ta = popover.querySelector('textarea');
       ta.value = o.body || '';
       uiRoot.appendChild(popover);
@@ -553,46 +602,153 @@
 
       const anchored = [];
       const orphans = [];
+      const docLevel = [];
       comments.forEach(function (c) {
-        const found = c && c.anchor && anchorApi.findAnchor(text, c.anchor);
+        if (!c) return;
+        if (c.anchor == null) { docLevel.push(c); return; } // whole-document note
+        const found = anchorApi.findAnchor(text, c.anchor);
         if (found) anchored.push(c); else orphans.push(c);
       });
 
       elCount.textContent = comments.length === 1 ? '1 comment' : comments.length + ' comments';
       elList.textContent = '';
 
+      // Always offer a subtle way to comment on the whole document.
+      elList.appendChild(renderDocComposer());
+
       if (comments.length === 0) {
         const empty = doc.createElement('div');
         empty.className = 'nb-empty';
-        empty.textContent = 'Select text in the document and click “💬 Comment” to add feedback.';
+        empty.textContent =
+          'Select text and click “💬 Comment”, or add a note about the whole document above.';
         elList.appendChild(empty);
+        updateLauncher();
         return;
       }
 
-      anchored.forEach(function (c) { elList.appendChild(renderItem(c, false)); });
+      anchored.forEach(function (c) { elList.appendChild(renderItem(c, 'anchored')); });
+
+      if (docLevel.length > 0) {
+        elList.appendChild(groupLabel('On the whole document'));
+        docLevel.forEach(function (c) { elList.appendChild(renderItem(c, 'doc')); });
+      }
 
       if (orphans.length > 0) {
-        const label = doc.createElement('div');
-        label.className = 'nb-group-label';
-        label.textContent = 'Unanchored (' + orphans.length + ')';
-        elList.appendChild(label);
-        orphans.forEach(function (c) { elList.appendChild(renderItem(c, true)); });
+        elList.appendChild(groupLabel('Unanchored (' + orphans.length + ')'));
+        orphans.forEach(function (c) { elList.appendChild(renderItem(c, 'orphan')); });
       }
+
+      updateLauncher();
     }
 
-    function renderItem(c, isOrphan) {
+    function groupLabel(textValue) {
+      const label = doc.createElement('div');
+      label.className = 'nb-group-label';
+      label.textContent = textValue;
+      return label;
+    }
+
+    /* --- whole-document note composer (inline, top of the list) --------- */
+
+    function renderDocComposer() {
+      const wrap = doc.createElement('div');
+      wrap.className = 'nb-doc-composer';
+      if (!docComposerOpen) {
+        const btn = doc.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nb-add-doc';
+        btn.textContent = '＋ Add a note about the whole document';
+        btn.addEventListener('click', function () {
+          docComposerOpen = true;
+          docComposerDraft = '';
+          renderSidebar();
+          focusDocComposer();
+        });
+        wrap.appendChild(btn);
+        return wrap;
+      }
+      const ta = doc.createElement('textarea');
+      ta.className = 'nb-doc-ta';
+      ta.placeholder = 'A note about the whole document…';
+      ta.value = docComposerDraft;
+      ta.addEventListener('input', function () { docComposerDraft = ta.value; });
+      ta.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          commitDocComment(ta.value);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          docComposerOpen = false;
+          docComposerDraft = '';
+          renderSidebar();
+        }
+      });
+      const actions = doc.createElement('div');
+      actions.className = 'nb-pop-actions';
+      const cancel = doc.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'nb-link';
+      cancel.textContent = 'Cancel';
+      cancel.addEventListener('click', function () {
+        docComposerOpen = false;
+        docComposerDraft = '';
+        renderSidebar();
+      });
+      const save = doc.createElement('button');
+      save.type = 'button';
+      save.className = 'nb-btn nb-savedoc';
+      save.textContent = 'Save note';
+      save.addEventListener('click', function () { commitDocComment(ta.value); });
+      actions.appendChild(cancel);
+      actions.appendChild(save);
+      wrap.appendChild(ta);
+      wrap.appendChild(actions);
+      return wrap;
+    }
+
+    function focusDocComposer() {
+      const ta = elList.querySelector('.nb-doc-ta');
+      if (!ta) return;
+      const f = function () { try { ta.focus(); } catch (e) {} };
+      if (win && win.requestAnimationFrame) win.requestAnimationFrame(f); else f();
+    }
+
+    async function commitDocComment(body) {
+      const text = String(body == null ? '' : body).trim();
+      if (text === '') { docComposerOpen = false; docComposerDraft = ''; renderSidebar(); return; }
+      let s = getState();
+      if (!s) return;
+      s = stateApi.addComment(s, { anchor: null, body: text });
+      setState(s);
+      await persist(s);
+      docComposerOpen = false;
+      docComposerDraft = '';
+      renderSidebar();
+      onChange(s);
+    }
+
+    function renderItem(c, kind) {
+      const isOrphan = kind === 'orphan';
+      const isDoc = kind === 'doc';
       const item = doc.createElement('div');
-      item.className = 'nb-item' + (isOrphan ? ' nb-orphan' : '');
+      item.className = 'nb-item' + (isOrphan ? ' nb-orphan' : '') + (isDoc ? ' nb-doc' : '');
       item.setAttribute('data-id', c.id);
 
-      const quote = doc.createElement('span');
-      quote.className = 'nb-quote';
-      quote.textContent = '“' + truncate((c.anchor && c.anchor.quote) || '', 160) + '”';
-      if (!isOrphan) {
-        quote.title = 'Jump to highlight';
-        quote.addEventListener('click', function () { focusComment(c.id); });
+      if (isDoc) {
+        const tag = doc.createElement('span');
+        tag.className = 'nb-doc-tag';
+        tag.textContent = '🗎 Whole document';
+        item.appendChild(tag);
+      } else {
+        const quote = doc.createElement('span');
+        quote.className = 'nb-quote';
+        quote.textContent = '“' + truncate((c.anchor && c.anchor.quote) || '', 160) + '”';
+        if (!isOrphan) {
+          quote.title = 'Jump to highlight';
+          quote.addEventListener('click', function () { focusComment(c.id); });
+        }
+        item.appendChild(quote);
       }
-      item.appendChild(quote);
 
       const body = doc.createElement('p');
       body.className = 'nb-body';
@@ -731,9 +887,11 @@
     function openSidebar() {
       renderSidebar();
       sidebar.classList.add('nb-open');
+      launcher.classList.add('nb-hidden'); // sidebar has its own ✕ close
     }
     function closeSidebar() {
       sidebar.classList.remove('nb-open');
+      launcher.classList.remove('nb-hidden');
     }
     function toggleSidebar() {
       if (sidebar.classList.contains('nb-open')) closeSidebar();

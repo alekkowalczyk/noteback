@@ -102,3 +102,39 @@ test('toMarkdown renders multi-line comment bodies with continuation indent', ()
   const md = markdown.toMarkdown(state, { date: '2026-06-03' });
   assert.match(md, /1\. > "quote"\n   line one\n   line two\n/);
 });
+
+test('toMarkdown renders a document-level (null-anchor) note without a quote', () => {
+  const state = {
+    schemaVersion: 1,
+    docId: 'x',
+    docTitle: 'd.html',
+    comments: [
+      { id: 'c_d', anchor: null, body: 'overall this needs a threat model', createdAt: '2026-06-03T12:00:00.000Z', author: null }
+    ]
+  };
+  const md = markdown.toMarkdown(state, { date: '2026-06-03' });
+  const expected = [
+    '# Feedback on d.html',
+    '1 comment — 2026-06-03',
+    '',
+    '1. (note on the whole document)',
+    '   overall this needs a threat model',
+    ''
+  ].join('\n');
+  assert.strictEqual(md, expected);
+});
+
+test('toMarkdown mixes quoted and whole-document notes', () => {
+  const state = {
+    schemaVersion: 1,
+    docId: 'x',
+    docTitle: 'd.html',
+    comments: [
+      mkComment('a single Redis instance', 'SPOF'),
+      { id: 'c_d', anchor: null, body: 'needs a threat model', createdAt: '2026-06-03T12:00:00.000Z', author: null }
+    ]
+  };
+  const md = markdown.toMarkdown(state, { date: '2026-06-03' });
+  assert.match(md, /1\. > "a single Redis instance"/);
+  assert.match(md, /2\. \(note on the whole document\)\n   needs a threat model/);
+});

@@ -133,7 +133,12 @@ Field rules:
 - `docTitle` — string; human label (usually the file name).
 - `comments` — array, possibly empty, order = creation order.
 - `comment.id` — string, format `"c_" + <stable unique id>`.
-- `comment.anchor.quote` — the exact selected text (required, non-empty).
+- `comment.anchor` — either a text-quote anchor object (below) **or `null`**. A `null`
+  anchor denotes a **document-level comment** — a note about the whole document rather
+  than a quoted passage. This is distinct from an *orphan* (a non-null anchor whose
+  quote no longer matches the text). Document-level comments render in Markdown as
+  `(note on the whole document)` and group separately in the sidebar.
+- `comment.anchor.quote` — the exact selected text (required, non-empty when anchor is present).
 - `comment.anchor.prefix` / `suffix` — up to ~32 chars of surrounding document text
   (may be empty strings at doc boundaries).
 - `comment.anchor.occurrence` — 0-based index selecting which match of `quote` in the

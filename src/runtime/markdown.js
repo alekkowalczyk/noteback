@@ -63,7 +63,13 @@
       lines.push(''); // blank line before each item (and after the header line)
       const quote = c && c.anchor && c.anchor.quote != null ? String(c.anchor.quote) : '';
       const body = c && c.body != null ? String(c.body) : '';
-      lines.push((i + 1) + '. > "' + quote + '"');
+      // A comment with no quote is a DOCUMENT-LEVEL note (anchor === null); render
+      // it with a plain marker instead of an empty blockquote.
+      if (quote === '') {
+        lines.push((i + 1) + '. (note on the whole document)');
+      } else {
+        lines.push((i + 1) + '. > "' + quote + '"');
+      }
       // Indent every line of a (possibly multi-line) body to align under the quote.
       const bodyLines = body.split('\n');
       for (const bl of bodyLines) {
