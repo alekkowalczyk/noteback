@@ -69,6 +69,27 @@ falls out of the **same codebase** that powers the extension.
 - **No build step.** Vanilla JavaScript, no TypeScript, no npm dependencies, no
   bundler — load the folder unpacked exactly as written.
 
+## Use as an agent skill — born-annotatable docs
+
+Noteback also ships a tiny CLI and an **agent skill** so an AI coding agent (Claude
+Code, etc.) can hand you documents that are *already* annotatable — no extension
+needed at all. When the agent writes a plan/spec/report as HTML, it wraps it:
+
+```sh
+npx noteback wrap plan.html            # rewrite in place → plan.html IS the canvas
+npx noteback wrap plan.html -o out.html  # keep the original, write a separate canvas
+```
+
+You open the file, comment, click **Copy feedback as Markdown**, and paste it back to
+the agent to iterate. The wrapper reuses the same tested canvas builder as the
+extension, and re-wrapping an existing canvas is idempotent (the old runtime + comment
+state are stripped before a fresh empty one is embedded).
+
+The skill itself lives in [`skills/noteback-canvas/SKILL.md`](skills/noteback-canvas/SKILL.md):
+it tells the agent to prefer HTML for reviewable docs, wrap them, and treat your pasted
+Markdown as change requests. This is a third on-ramp to the **same embedded mode** the
+"Save as HTML feedback canvas" button produces.
+
 ## Install (unpacked, for development)
 
 1. Clone this repo.
