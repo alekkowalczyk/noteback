@@ -228,6 +228,13 @@ test('inlined runtime + embedded boot has no premature </script> and is valid JS
 
   assert.ok(inline.length > 1000, 'runtime was inlined');
   assert.ok(!/<\/script>/i.test(inline), 'no literal </script> in the inline runtime');
+  // Regression (browser-only HTML tokenizer bug): a literal "<!--" inside the
+  // inlined runtime starts the "script data escaped" state, after which a later
+  // "<script" double-escapes it and the real </script> is ignored to EOF. The
+  // runtime legitimately contains "<!--" (the guiding-comment constant), so the
+  // escaper MUST neutralize it. Node's vm.Script can't catch this (no HTML
+  // tokenizer), so assert at the byte level.
+  assert.ok(!/<!--/.test(inline), 'no literal <!-- in the inline runtime');
   // Must be syntactically valid JS so the extension-less canvas actually boots.
   assert.doesNotThrow(function () {
     new vm.Script(inline);
@@ -235,6 +242,34 @@ test('inlined runtime + embedded boot has no premature </script> and is valid JS
   // The embedded boot must wire the InFileStateAdapter (CONTRACTS §7).
   assert.ok(inline.includes('createInFileStateAdapter'), 'embedded boot uses InFileStateAdapter');
   assert.ok(inline.includes('noteback-doc-root'), 'embedded boot targets the doc root');
+});
+
+test('escapeForInlineScript neutralizes </script and <!-- without changing JS semantics', () => {
+  const body =
+    'var a = "x</script>y"; var hadComment = "<!-- c -->"; ' +
+    'var re = /<script\\b/; var ws = "\\s";';
+  const out = exporter.escapeForInlineScript(body);
+  assert.ok(!/<\/script/i.test(out), 'no raw </script remains');
+  assert.ok(!/<!--/.test(out), 'no raw <!-- remains');
+  // A lone "<script" is intentionally left intact (escaping it would corrupt
+  // "\\s" inside the regex literal).
+  assert.ok(out.includes('/<script\\b/'), 'lone <script in a regex literal untouched');
+  // The backslash insertions must be JS no-ops: escaped source evaluates the same.
+  // Run in a vm and serialize: objects from a vm context have a foreign
+  // [[Prototype]], so compare by value (JSON), not deepStrictEqual.
+  const run = (code) =>
+    vm.runInNewContext(
+      '(function(){' + code + ' return JSON.stringify({a:a, hadComment:hadComment, reSource:re.source, ws:ws});})()'
+    );
+  assert.strictEqual(run(out), run(body), 'escaped source evaluates identically');
+});
+
+test('escapeForJsonScript neutralizes </script and <!-- and stays valid JSON', () => {
+  const original = 'see </script> and <!-- comment --> here';
+  const escaped = exporter.escapeForJsonScript(JSON.stringify(original));
+  assert.ok(!/<\/script/i.test(escaped), 'no raw </script in JSON');
+  assert.ok(!/<!--/.test(escaped), 'no raw <!-- in JSON');
+  assert.strictEqual(JSON.parse(escaped), original, 'JSON round-trips to the original string');
 });
 
 test('EMBEDDED_BOOT is itself valid JavaScript', () => {

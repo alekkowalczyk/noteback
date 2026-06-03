@@ -394,25 +394,42 @@
 
   /**
    * Make a JSON string safe to embed inside <script type="application/json">.
-   * The HTML parser treats that element's content as raw text and only ends it
-   * at a literal "</script"; nothing else (e.g. "<!--") can terminate it. We
-   * therefore only neutralize "</script" — and we do it with "\/" which is a
-   * VALID JSON escape (it decodes back to "/"), so the block still JSON.parses
-   * to the identical string.
+   * The HTML tokenizer treats ANY <script> element's content as script data
+   * (the `type` attribute only affects execution, not tokenization), so it can
+   * be ended/derailed two ways:
+   *   1. a literal "</script" ends the element;
+   *   2. a literal "<!--" enters the legacy "script data escaped" state, after
+   *      which a later "<script" makes it double-escaped and the real </script>
+   *      is ignored.
+   * We neutralize both. "\/" and "<" are BOTH valid JSON escapes (decoding
+   * to "/" and "<"), so the block stays valid JSON and JSON.parse restores the
+   * identical string, while the HTML tokenizer no longer sees the trigger bytes.
    */
   function escapeForJsonScript(json) {
-    return String(json).replace(/<\/(script)/gi, '<\\/$1');
+    return String(json)
+      .replace(/<\/(script)/gi, '<\\/$1')
+      .replace(/<!--/g, '\\u003c!--');
   }
 
   /**
-   * Make JS source safe to embed inside an inline <script> element: the HTML
-   * parser ends the script at the first literal "</script" (case-insensitive),
-   * so we break that sequence with a backslash. "<\/script" is identical to
-   * "</script" for the JS tokenizer (the backslash is a no-op escape in source
-   * comments / strings / regex literals), so behavior is unchanged.
+   * Make JS source safe to embed inside an inline <script> element. The HTML
+   * tokenizer can swallow the closing </script> two ways:
+   *   1. a literal "</script" ends the element directly;
+   *   2. a literal "<!--" enters the legacy "script data escaped" state, after
+   *      which a later "<script" makes it "double escaped" and the real
+   *      </script> is ignored until EOF (the script then captures the closing
+   *      tag as text → invalid JS → the canvas fails to boot).
+   * We break BOTH triggers with a backslash, which is a no-op escape in JS
+   * source comments / strings / regex literals ("<\/script" === "</script",
+   * "<\!--" === "<!--"), so the executed behavior is unchanged. We deliberately
+   * do NOT touch a lone "<script" — inserting "\" there would corrupt "\s"
+   * inside regex literals, and once "<!--" is broken a lone "<script" can no
+   * longer trigger the escaped state.
    */
   function escapeForInlineScript(src) {
-    return String(src).replace(/<\/(script)/gi, '<\\/$1');
+    return String(src)
+      .replace(/<\/(script)/gi, '<\\/$1')
+      .replace(/<!--/g, '<\\!--');
   }
 
   /** Minimal HTML-escape for text inserted into element content / title. */
@@ -514,6 +531,8 @@
     EMBEDDED_BOOT,
     buildCanvasHtml,
     extractBodyMarkup,
+    escapeForInlineScript,
+    escapeForJsonScript,
     downloadCanvas,
     saveCanvasInPlace,
     sanitizeFilename
