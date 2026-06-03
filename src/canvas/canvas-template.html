@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<!--
+  Noteback — canvas-template.html  (export shell)
+
+  This is the SHELL that exporter.buildCanvasHtml fills when saving a feedback
+  canvas. The exporter substitutes the double-brace placeholder tokens that
+  appear below (token names are a contract between this file and exporter.js):
+
+    DOC_TITLE        - document title text (HTML-escaped)
+    GUIDING_COMMENT  - the one-line guiding HTML comment (CONTRACTS.md §6)
+    DOC_BODY         - the original document markup (injected UI stripped)
+    STATE_JSON       - JSON.stringify(state) for the noteback-state block (§5)
+    INLINED_RUNTIME  - concatenated portable runtime + the embedded-mode boot
+                       call that uses InFileStateAdapter
+
+  The produced file is fully interactive WITHOUT the extension: it renders the
+  doc, paints highlights, shows the sidebar, and supports add/edit/delete +
+  re-serialize.
+
+  NOTE: this comment intentionally does NOT spell out the literal brace tokens,
+  so the exporter's first-match replacement targets only the real placeholders.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{DOC_TITLE}} — Noteback feedback canvas</title>
+</head>
+<body>
+  {{GUIDING_COMMENT}}
+
+  <!-- Original document markup -->
+  <div id="noteback-doc-root">
+    {{DOC_BODY}}
+  </div>
+
+  <!-- Machine-readable annotation state (CONTRACTS.md §5) -->
+  <script type="application/json" id="noteback-state">
+{{STATE_JSON}}
+  </script>
+
+  <!-- Inlined portable runtime + embedded-mode boot (CONTRACTS.md §7) -->
+  <script>
+{{INLINED_RUNTIME}}
+  </script>
+</body>
+</html>

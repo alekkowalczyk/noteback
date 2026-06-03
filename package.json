@@ -1,0 +1,11 @@
+{
+  "name": "noteback",
+  "version": "1.0.0",
+  "description": "Annotate AI docs & copy/share feedback for Claude, ChatGPT & co. Zero-backend Chrome extension (Manifest V3).",
+  "private": true,
+  "type": "commonjs",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
+  }
+}

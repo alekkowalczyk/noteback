@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "Noteback",
+  "version": "1.0.0",
+  "description": "Annotate AI docs & copy/share feedback for Claude, ChatGPT & co. Highlight a local HTML spec, attach a comment, then copy it as Markdown or save a self-contained feedback canvas.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "downloads"
+  ],
+  "host_permissions": [
+    "file:///*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "action": {
+    "default_title": "Noteback",
+    "default_popup": "src/popup/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "file:///*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "src/runtime/anchor.js",
+        "src/runtime/state.js",
+        "src/runtime/markdown.js",
+        "src/runtime/highlight.js",
+        "src/runtime/overlay.js",
+        "src/adapters/infile-state-adapter.js",
+        "src/canvas/exporter.js",
+        "src/runtime/boot.js",
+        "src/adapters/chrome-storage-adapter.js",
+        "src/content/content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/runtime/anchor.js",
+        "src/runtime/state.js",
+        "src/runtime/markdown.js",
+        "src/runtime/highlight.js",
+        "src/runtime/overlay.js",
+        "src/adapters/infile-state-adapter.js",
+        "src/canvas/exporter.js",
+        "src/runtime/boot.js",
+        "src/canvas/canvas-template.html"
+      ],
+      "matches": [
+        "file:///*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ]
+    }
+  ]
+}

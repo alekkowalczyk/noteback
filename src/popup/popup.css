@@ -1,0 +1,135 @@
+/*
+ * Noteback — popup.css  (toolbar popup styles)
+ *
+ * Self-contained styling for the toolbar popup: action buttons, the onboarding
+ * card (shown when "Allow access to file URLs" is OFF), and the status line.
+ * Class names are stable contracts shared with popup.js / popup.html.
+ */
+
+:root {
+  --nb-accent: #ffd54f;       /* highlight yellow */
+  --nb-fg: #1a1a1a;
+  --nb-bg: #ffffff;
+  --nb-border: #e0e0e0;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  width: 260px;
+  font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color: var(--nb-fg);
+  background: var(--nb-bg);
+}
+
+.nb-popup__header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--nb-border);
+}
+
+.nb-popup__title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.nb-popup__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+
+.nb-btn {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--nb-fg);
+  background: #f7f7f7;
+  border: 1px solid var(--nb-border);
+  border-radius: 6px;
+}
+
+.nb-btn:hover { background: #f0f0f0; }
+
+.nb-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.nb-btn:disabled:hover { background: #f7f7f7; }
+
+.nb-btn--primary {
+  text-align: center;
+  color: #fff;
+  background: #2563eb;
+  border-color: #2563eb;
+  font-weight: 600;
+}
+
+.nb-btn--primary:hover { background: #1d4ed8; }
+
+.nb-popup__onboarding {
+  padding: 0 12px 12px;
+  font-size: 12px;
+}
+
+.nb-card {
+  border: 1px solid #fcd34d;
+  background: #fffbeb;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.nb-card__title {
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 4px;
+  color: #92400e;
+}
+
+.nb-card__lead {
+  margin: 0 0 8px;
+  color: #3f3f46;
+}
+
+.nb-card__steps {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: #3f3f46;
+}
+
+.nb-card__note {
+  margin: 8px 0 0;
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.nb-card code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0 3px;
+  border-radius: 3px;
+}
+
+.nb-card .nb-btn {
+  margin-top: 2px;
+}
+
+.nb-popup__footer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--nb-border);
+  min-height: 28px;
+}
+
+.nb-popup__status {
+  font-size: 12px;
+  color: #666;
+}

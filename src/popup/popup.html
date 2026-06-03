@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<!--
+  Noteback — popup.html  (toolbar popup; scaffold)
+
+  Responsibility: the toolbar popup UI. Buttons:
+    - Toggle sidebar
+    - Copy as Markdown
+    - Save as HTML canvas
+  Plus the onboarding card (file-URL access; localhost note) per spec §9, which
+  popup.js fills into #nb-onboarding when "Allow access to file URLs" is OFF.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Noteback</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="nb-popup__header">
+    <h1 class="nb-popup__title">Noteback</h1>
+  </header>
+
+  <main class="nb-popup__body">
+    <button id="nb-toggle-sidebar" type="button" class="nb-btn">
+      Toggle sidebar
+    </button>
+    <button id="nb-copy-markdown" type="button" class="nb-btn">
+      Copy as Markdown
+    </button>
+    <button id="nb-save-canvas" type="button" class="nb-btn">
+      Save as HTML canvas
+    </button>
+  </main>
+
+  <section id="nb-onboarding" class="nb-popup__onboarding" hidden>
+    <!-- Filled by popup.js when "Allow access to file URLs" is disabled. -->
+  </section>
+
+  <footer class="nb-popup__footer">
+    <span id="nb-status" class="nb-popup__status"></span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
