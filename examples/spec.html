@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RealtimeSync Service — Technical Spec</title>
+  <style>
+    body { max-width: 720px; margin: 40px auto; padding: 0 20px;
+      font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #1f2937; }
+    h1 { font-size: 28px; margin-bottom: 4px; }
+    h2 { font-size: 20px; margin-top: 32px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+    .meta { color: #6b7280; font-size: 14px; margin-bottom: 24px; }
+    code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 14px; }
+    ul { padding-left: 22px; }
+  </style>
+</head>
+<body>
+  <h1>RealtimeSync Service — Technical Spec</h1>
+  <p class="meta">Draft v0.3 · generated for review</p>
+
+  <h2>Overview</h2>
+  <p>RealtimeSync keeps client documents in sync with the server in near real time.
+  Clients open a WebSocket connection and receive change events as other users edit
+  the same document. The server guarantees that every message is delivered at least
+  once, and clients are responsible for de-duplicating events they have already seen.</p>
+
+  <h2>Architecture</h2>
+  <p>Incoming edits are written to a single Redis instance that acts as the central
+  message broker. Each connected client subscribes to a channel named after the
+  document id. When an edit arrives, the broker fans it out to every subscriber on
+  that channel synchronously before acknowledging the writer.</p>
+
+  <h2>Data Model</h2>
+  <p>Each user has a single workspace, and every document belongs to exactly one
+  workspace. Permissions are stored as a flat list of user ids on the document
+  itself, which is checked on every incoming edit.</p>
+
+  <h2>Scaling</h2>
+  <p>To handle more load we will run multiple server instances behind a load
+  balancer. Because all state lives in Redis, any instance can serve any client,
+  and we can add instances without coordination. We expect this to scale linearly
+  to roughly one million concurrent connections.</p>
+</body>
+</html>

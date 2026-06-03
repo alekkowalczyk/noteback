@@ -1,2 +1,5 @@
 node_modules/
 .DS_Store
+
+# generated demo canvases (regenerate via examples/build-canvas.js)
+examples/*.canvas*.html
