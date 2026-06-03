@@ -53,109 +53,239 @@
    * head for the floating light-DOM button).                                *
    * ----------------------------------------------------------------------- */
 
+  // Light-DOM styles: the floating "Comment" chip that appears on selection, and
+  // the painted highlight. The highlight reads like a honey marker swiped over the
+  // text (a translucent band, not a flat block) — on-theme with the canvas concept.
   const BUTTON_CSS = [
     '.noteback-fab{',
     '  position:absolute;z-index:2147483646;',
-    '  font:600 13px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;',
-    '  background:#2563eb;color:#fff;border:none;border-radius:6px;',
-    '  padding:6px 10px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25);',
-    '  display:inline-flex;align-items:center;gap:5px;',
+    '  display:inline-flex;align-items:center;gap:7px;',
+    '  font:600 12.5px/1 ui-rounded,"SF Pro Rounded",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;',
+    '  letter-spacing:.01em;color:#fffdf8;background:#127a72;',
+    '  border:none;border-radius:999px;padding:7px 13px 7px 11px;cursor:pointer;',
+    '  box-shadow:0 7px 18px -6px rgba(15,98,89,.6),0 1px 2px rgba(20,30,20,.22);',
+    '  opacity:0;transform:scale(.94);',
+    '  transition:transform .16s cubic-bezier(0.34,1.36,0.64,1),opacity .16s ease,background .15s ease;',
+    '  -webkit-font-smoothing:antialiased;',
     '}',
-    '.noteback-fab:hover{background:#1d4ed8;}',
+    '.noteback-fab::before{content:"";width:9px;height:9px;border-radius:2px;',
+    '  background:#ffd166;box-shadow:0 0 0 2px rgba(255,209,102,.3);}',
+    '.noteback-fab.nb-in{opacity:1;transform:scale(1);}',
+    '.noteback-fab:hover{background:#0e6960;}',
+    '.noteback-fab:active{transform:scale(.97);}',
     'mark.noteback-highlight{',
-    '  background:#fde68a;color:inherit;border-radius:2px;',
-    '  box-shadow:0 0 0 1px rgba(245,158,11,.35);cursor:pointer;',
-    '  padding:0;',
+    '  background:linear-gradient(180deg,transparent 12%,#ffe49c 12%,#ffe49c 92%,transparent 92%);',
+    '  color:inherit;border-radius:1px;padding:0 .5px;cursor:pointer;',
+    '  -webkit-box-decoration-break:clone;box-decoration-break:clone;',
+    '  transition:background .2s ease;',
     '}',
+    'mark.noteback-highlight:hover{',
+    '  background:linear-gradient(180deg,transparent 12%,#ffd877 12%,#ffd877 92%,transparent 92%);}',
     'mark.noteback-highlight-flash{',
-    '  background:#fbbf24!important;box-shadow:0 0 0 2px rgba(217,119,6,.7)!important;',
-    '  transition:background .2s ease,box-shadow .2s ease;',
+    '  background:#ffd166 !important;border-radius:3px !important;',
+    '  box-shadow:0 0 0 3px rgba(232,184,75,.55) !important;',
+    '  transition:background .25s ease,box-shadow .25s ease;',
+    '}',
+    '@media (prefers-reduced-motion: reduce){',
+    '  .noteback-fab,mark.noteback-highlight,mark.noteback-highlight-flash{transition:none !important;}',
+    '  .noteback-fab{opacity:1;transform:none;}',
     '}'
   ].join('');
 
+  // Shadow-DOM panel styles. Concept: an editor's desk — warm paper surfaces,
+  // warm-ink text, a fountain-pen teal accent, honey highlighter for quotes, an
+  // italic-serif voice for quoted passages, and a soft rounded wordmark. Motion is
+  // adapted from transitions.dev (panel reveal, menu dropdown, notification badge,
+  // texts reveal, success check) and gated behind one prefers-reduced-motion guard.
   const PANEL_CSS = [
-    ':host{all:initial;}',
+    ':host{all:initial;',
+    '  --nb-ink:#2c2a25;--nb-ink-soft:#746f62;--nb-ink-faint:#a99f8c;',
+    '  --nb-line:#e7dfce;--nb-line-strong:#d8ceb6;',
+    '  --nb-accent:#127a72;--nb-accent-deep:#0e6960;--nb-accent-ink:#0c5f59;--nb-accent-wash:#e3efed;',
+    '  --nb-danger:#b04a33;--nb-danger-wash:#f5e7e0;',
+    '  --nb-paper:#f8f4ec;--nb-card:#fffdf8;',
+    '  --nb-ui:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;',
+    '  --nb-round:ui-rounded,"SF Pro Rounded","Hiragino Maru Gothic ProN",Quicksand,system-ui,sans-serif;',
+    '  --nb-quote:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif;',
+    '  --panel-open-dur:420ms;--panel-close-dur:300ms;--panel-blur:3px;--panel-ease:cubic-bezier(0.22,1,0.36,1);',
+    '  --dropdown-open-dur:240ms;--dropdown-close-dur:150ms;--dropdown-pre-scale:0.96;--dropdown-closing-scale:0.99;--dropdown-ease:cubic-bezier(0.22,1,0.36,1);',
+    '  --badge-slide-dur:260ms;--badge-pop-dur:500ms;--badge-pop-close-dur:180ms;--badge-fade-dur:400ms;--badge-fade-close-dur:180ms;--badge-blur:2px;--badge-offset-x:-7px;--badge-offset-y:10px;--badge-slide-ease:cubic-bezier(0.22,1,0.36,1);--badge-pop-ease:cubic-bezier(0.34,1.36,0.64,1);--badge-close-ease:cubic-bezier(0.4,0,0.2,1);',
+    '  --stagger-dur:460ms;--stagger-ease:cubic-bezier(0.22,1,0.36,1);',
+    '  --check-opacity-dur:520ms;--check-rotate-dur:520ms;--check-rotate-from:60deg;--check-bob-dur:440ms;--check-y-amount:10px;--check-blur-dur:480ms;--check-blur-from:6px;--check-path-dur:520ms;--check-path-delay:90ms;--check-ease-opacity:cubic-bezier(0.22,1,0.36,1);--check-ease-rotate:cubic-bezier(0.22,1,0.36,1);--check-ease-out:cubic-bezier(0.22,1,0.36,1);--check-ease-bob:cubic-bezier(0.34,1.35,0.64,1);--check-ease-path:cubic-bezier(0.22,1,0.36,1);',
+    '}',
     '*{box-sizing:border-box;}',
-    '.nb-root{',
-    '  font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;',
-    '  color:#1f2937;',
-    '}',
-    '.nb-sidebar{',
-    '  position:fixed;top:0;right:0;height:100vh;width:340px;max-width:85vw;',
-    '  background:#fff;border-left:1px solid #e5e7eb;box-shadow:-2px 0 12px rgba(0,0,0,.08);',
-    '  display:flex;flex-direction:column;z-index:2147483647;',
-    '  transform:translateX(100%);transition:transform .18s ease;',
-    '}',
-    '.nb-sidebar.nb-open{transform:translateX(0);}',
-    '.nb-head{display:flex;align-items:center;justify-content:space-between;',
-    '  padding:12px 14px;border-bottom:1px solid #e5e7eb;}',
-    '.nb-title{font-weight:700;font-size:15px;}',
-    '.nb-count{color:#6b7280;font-size:12px;}',
-    '.nb-x{border:none;background:none;font-size:18px;line-height:1;cursor:pointer;',
-    '  color:#6b7280;padding:4px;border-radius:4px;}',
-    '.nb-x:hover{background:#f3f4f6;color:#111827;}',
-    '.nb-list{flex:1 1 auto;overflow-y:auto;padding:10px 12px;}',
-    '.nb-group-label{font-size:11px;font-weight:700;text-transform:uppercase;',
-    '  letter-spacing:.04em;color:#9ca3af;margin:8px 2px 6px;}',
-    '.nb-item{border:1px solid #e5e7eb;border-radius:8px;padding:10px;',
-    '  margin-bottom:10px;background:#fff;}',
-    '.nb-item.nb-orphan{border-style:dashed;border-color:#d1d5db;background:#fafafa;}',
-    '.nb-item.nb-active{border-color:#2563eb;box-shadow:0 0 0 1px #2563eb;}',
-    '.nb-quote{font-style:italic;color:#374151;background:#fef3c7;border-radius:4px;',
-    '  padding:3px 6px;display:block;margin-bottom:6px;cursor:pointer;',
-    '  white-space:pre-wrap;word-break:break-word;}',
-    '.nb-item.nb-orphan .nb-quote{background:#f3f4f6;color:#6b7280;}',
-    '.nb-body{white-space:pre-wrap;word-break:break-word;margin:0 0 8px;}',
-    '.nb-actions{display:flex;gap:8px;}',
-    '.nb-link{border:none;background:none;color:#2563eb;cursor:pointer;font-size:12px;',
-    '  padding:2px 4px;border-radius:4px;}',
-    '.nb-link:hover{background:#eff6ff;}',
-    '.nb-link.nb-danger{color:#dc2626;}',
-    '.nb-link.nb-danger:hover{background:#fef2f2;}',
-    '.nb-empty{color:#9ca3af;text-align:center;padding:24px 12px;font-size:13px;}',
-    '.nb-foot{border-top:1px solid #e5e7eb;padding:12px;display:flex;flex-direction:column;gap:8px;}',
-    '.nb-btn{font:600 13px/1 inherit;border:1px solid #2563eb;background:#2563eb;color:#fff;',
-    '  border-radius:6px;padding:9px 12px;cursor:pointer;text-align:center;}',
-    '.nb-btn:hover{background:#1d4ed8;}',
-    '.nb-btn.nb-secondary{background:#fff;color:#2563eb;}',
-    '.nb-btn.nb-secondary:hover{background:#eff6ff;}',
-    '.nb-toast{position:fixed;bottom:18px;right:18px;background:#111827;color:#fff;',
-    '  padding:9px 14px;border-radius:8px;font-size:13px;z-index:2147483647;opacity:0;',
-    '  transition:opacity .2s ease;pointer-events:none;}',
-    '.nb-toast.nb-show{opacity:1;}',
-    /* popover */
-    '.nb-popover{position:fixed;z-index:2147483647;background:#fff;border:1px solid #e5e7eb;',
-    '  border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:12px;width:300px;max-width:90vw;}',
-    '.nb-popover .nb-pq{font-style:italic;color:#6b7280;font-size:12px;margin-bottom:8px;',
-    '  max-height:54px;overflow:auto;background:#fef3c7;border-radius:4px;padding:4px 6px;',
-    '  white-space:pre-wrap;word-break:break-word;}',
-    '.nb-popover textarea{width:100%;min-height:72px;resize:vertical;border:1px solid #d1d5db;',
-    '  border-radius:6px;padding:8px;font:14px/1.4 inherit;color:#1f2937;}',
-    '.nb-popover textarea:focus{outline:2px solid #2563eb;outline-offset:0;border-color:#2563eb;}',
-    '.nb-pop-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px;}',
-    /* launcher — always-visible pill that opens the sidebar (both modes) */
-    '.nb-launcher{position:fixed;right:16px;bottom:16px;z-index:2147483646;',
-    '  display:inline-flex;align-items:center;gap:7px;border:none;cursor:pointer;',
-    '  background:#2563eb;color:#fff;border-radius:999px;padding:9px 14px;',
-    '  font:600 13px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;',
-    '  box-shadow:0 4px 14px rgba(37,99,235,.35);}',
-    '.nb-launcher:hover{background:#1d4ed8;}',
+    '.nb-root{font:14px/1.5 var(--nb-ui);color:var(--nb-ink);-webkit-font-smoothing:antialiased;}',
+
+    /* sidebar — panel reveal (slide + cross-blur + fade on one ease) */
+    '.nb-sidebar{position:fixed;top:0;right:0;height:100vh;width:360px;max-width:88vw;',
+    '  background:var(--nb-paper);color:var(--nb-ink);border-left:1px solid var(--nb-line);',
+    '  box-shadow:-16px 0 44px -22px rgba(60,48,25,.45);display:flex;flex-direction:column;z-index:2147483647;',
+    '  transform:translateX(44px);opacity:0;filter:blur(var(--panel-blur));pointer-events:none;',
+    '  transition:transform var(--panel-close-dur) var(--panel-ease),opacity var(--panel-close-dur) var(--panel-ease),filter var(--panel-close-dur) var(--panel-ease);',
+    '  will-change:transform,opacity,filter;}',
+    '.nb-sidebar.nb-open{transform:translateX(0);opacity:1;filter:blur(0);pointer-events:auto;',
+    '  transition:transform var(--panel-open-dur) var(--panel-ease),opacity var(--panel-open-dur) var(--panel-ease),filter var(--panel-open-dur) var(--panel-ease);}',
+
+    /* header */
+    '.nb-head{display:flex;align-items:center;justify-content:space-between;gap:10px;',
+    '  padding:16px 16px 13px;border-bottom:1px solid var(--nb-line);}',
+    '.nb-titlewrap{display:flex;align-items:baseline;gap:9px;min-width:0;}',
+    '.nb-title{font:700 16px/1 var(--nb-round);letter-spacing:.01em;color:var(--nb-ink);',
+    '  display:inline-flex;align-items:center;gap:8px;}',
+    '.nb-title::before{content:"";width:11px;height:11px;border-radius:3px;background:#ffd166;',
+    '  box-shadow:0 0 0 3px rgba(255,209,102,.22);}',
+    '.nb-count{color:var(--nb-ink-soft);font:500 12px/1 var(--nb-ui);white-space:nowrap;}',
+    '.nb-x{border:none;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--nb-ink-faint);',
+    '  width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none;',
+    '  transition:background .15s ease,color .15s ease,transform .15s ease;}',
+    '.nb-x:hover{background:#efe7d6;color:var(--nb-ink);}',
+    '.nb-x:active{transform:scale(.9);}',
+
+    /* list */
+    '.nb-list{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:13px 14px 16px;scrollbar-width:thin;}',
+    '.nb-group-label{font:700 10.5px/1 var(--nb-round);text-transform:uppercase;letter-spacing:.09em;',
+    '  color:var(--nb-ink-faint);margin:15px 4px 9px;display:flex;align-items:center;gap:9px;}',
+    '.nb-group-label::after{content:"";flex:1;height:1px;background:var(--nb-line);}',
+
+    /* comment cards */
+    '.nb-item{position:relative;border:1px solid var(--nb-line);border-radius:13px;',
+    '  padding:12px 13px 10px;margin-bottom:11px;background:var(--nb-card);',
+    '  transition:box-shadow .2s ease,transform .2s ease,border-color .2s ease;}',
+    '.nb-item:hover{box-shadow:0 12px 24px -16px rgba(60,48,25,.5);transform:translateY(-1px);border-color:var(--nb-line-strong);}',
+    '.nb-item.nb-orphan{border-style:dashed;border-color:#d9cfb8;background:#f6f1e6;}',
+    '.nb-item.nb-active{border-color:var(--nb-accent);box-shadow:0 0 0 1.5px var(--nb-accent),0 12px 24px -16px rgba(17,122,114,.55);}',
+    '.nb-item.nb-doc{border-color:#bfe0db;background:#f1faf8;}',
+
+    /* quote — honey highlighter swipe + italic-serif voice */
+    '.nb-quote{font:italic 400 13.5px/1.5 var(--nb-quote);color:#5a4a2a;',
+    '  background:linear-gradient(180deg,transparent 56%,#ffe49c 56%);border-radius:2px;',
+    '  padding:1px 2px;display:block;margin:0 0 8px;cursor:pointer;white-space:pre-wrap;word-break:break-word;',
+    '  -webkit-box-decoration-break:clone;box-decoration-break:clone;transition:background .2s ease;}',
+    '.nb-quote:hover{background:linear-gradient(180deg,transparent 48%,#ffd877 48%);}',
+    '.nb-item.nb-orphan .nb-quote{background:#efe7d6;color:var(--nb-ink-soft);}',
+
+    '.nb-doc-tag{display:inline-flex;align-items:center;gap:5px;font:600 11px/1 var(--nb-round);',
+    '  color:var(--nb-accent-ink);background:var(--nb-accent-wash);border-radius:999px;padding:4px 10px;margin-bottom:8px;}',
+    '.nb-body{white-space:pre-wrap;word-break:break-word;margin:0 0 9px;font:400 13.5px/1.5 var(--nb-ui);color:var(--nb-ink);}',
+    '.nb-actions{display:flex;gap:6px;}',
+    '.nb-link{border:none;background:none;color:var(--nb-ink-soft);cursor:pointer;font:600 12px/1 var(--nb-round);',
+    '  padding:5px 9px;border-radius:8px;transition:background .15s ease,color .15s ease;}',
+    '.nb-link:hover{background:var(--nb-accent-wash);color:var(--nb-accent-ink);}',
+    '.nb-link.nb-danger{color:#9c7b6e;}',
+    '.nb-link.nb-danger:hover{background:var(--nb-danger-wash);color:var(--nb-danger);}',
+
+    '.nb-empty{color:var(--nb-ink-soft);text-align:center;padding:30px 18px 24px;font:400 13px/1.55 var(--nb-ui);}',
+    '.nb-empty strong{display:block;font:700 14.5px/1.3 var(--nb-round);color:var(--nb-ink);margin-bottom:6px;}',
+    '.nb-empty b{font-weight:600;color:var(--nb-accent-ink);}',
+
+    /* footer + buttons */
+    '.nb-foot{border-top:1px solid var(--nb-line);padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;',
+    '  background:linear-gradient(180deg,rgba(248,244,236,0),#f2ebdb);}',
+    '.nb-btn{font:700 13px/1 var(--nb-round);border:1px solid var(--nb-accent);background:var(--nb-accent);color:#fffdf8;',
+    '  border-radius:11px;padding:11px 12px;cursor:pointer;text-align:center;display:inline-flex;align-items:center;justify-content:center;gap:7px;',
+    '  box-shadow:0 7px 16px -10px rgba(15,98,89,.7);transition:background .15s ease,transform .12s ease,box-shadow .2s ease;}',
+    '.nb-btn:hover{background:var(--nb-accent-deep);box-shadow:0 11px 22px -10px rgba(15,98,89,.8);}',
+    '.nb-btn:active{transform:translateY(1px) scale(.995);}',
+    '.nb-btn.nb-secondary{background:var(--nb-card);color:var(--nb-accent-ink);border-color:var(--nb-line-strong);box-shadow:none;}',
+    '.nb-btn.nb-secondary:hover{background:var(--nb-accent-wash);border-color:var(--nb-accent);}',
+
+    /* toast + success check (transitions.dev) */
+    '.nb-toast{position:fixed;bottom:20px;right:20px;display:inline-flex;align-items:center;gap:9px;',
+    '  background:#2c2a25;color:#fdf8ec;padding:11px 15px 11px 13px;border-radius:13px;font:500 13px/1.2 var(--nb-ui);',
+    '  z-index:2147483647;opacity:0;transform:translateY(8px) scale(.96);pointer-events:none;',
+    '  box-shadow:0 16px 36px -12px rgba(20,15,5,.6);',
+    '  transition:opacity .22s ease,transform .22s cubic-bezier(0.34,1.36,0.64,1);}',
+    '.nb-toast.nb-show{opacity:1;transform:translateY(0) scale(1);}',
+    '.nb-toast-check{display:none;width:20px;height:20px;flex:none;transform-origin:center;opacity:0;',
+    '  will-change:transform,opacity,filter;}',
+    '.nb-toast.nb-has-check .nb-toast-check{display:inline-block;}',
+    '.nb-toast-check svg{display:block;overflow:visible;width:20px;height:20px;}',
+    '.nb-toast-check svg path{stroke:#ffd166;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;',
+    '  stroke-dasharray:22;stroke-dashoffset:22;}',
+    '.nb-toast-check[data-state="in"]{animation:nb-check-fade var(--check-opacity-dur) var(--check-ease-opacity) forwards,',
+    '  nb-check-rotate var(--check-rotate-dur) var(--check-ease-rotate) forwards,',
+    '  nb-check-blur var(--check-blur-dur) var(--check-ease-out) forwards,',
+    '  nb-check-bob var(--check-bob-dur) var(--check-ease-bob) forwards;}',
+    '.nb-toast-check[data-state="in"] svg path{animation:nb-check-draw var(--check-path-dur) var(--check-ease-path) var(--check-path-delay) forwards;}',
+    '@keyframes nb-check-fade{from{opacity:0;}to{opacity:1;}}',
+    '@keyframes nb-check-rotate{from{transform:rotate(var(--check-rotate-from));}to{transform:rotate(0);}}',
+    '@keyframes nb-check-blur{from{filter:blur(var(--check-blur-from));}to{filter:blur(0);}}',
+    '@keyframes nb-check-bob{from{translate:0 var(--check-y-amount);}to{translate:0 0;}}',
+    '@keyframes nb-check-draw{to{stroke-dashoffset:0;}}',
+
+    /* popover — menu dropdown (origin-aware grow) */
+    '.nb-popover{position:fixed;z-index:2147483647;background:var(--nb-card);border:1px solid var(--nb-line-strong);',
+    '  border-radius:15px;box-shadow:0 20px 46px -16px rgba(60,48,25,.5),0 2px 8px rgba(60,48,25,.12);',
+    '  padding:13px;width:312px;max-width:92vw;transform-origin:top center;',
+    '  transform:scale(var(--dropdown-pre-scale));opacity:0;pointer-events:none;',
+    '  transition:transform var(--dropdown-open-dur) var(--dropdown-ease),opacity var(--dropdown-open-dur) var(--dropdown-ease);',
+    '  will-change:transform,opacity;}',
+    '.nb-popover[data-origin="bottom-center"]{transform-origin:bottom center;}',
+    '.nb-popover.is-open{transform:scale(1);opacity:1;pointer-events:auto;}',
+    '.nb-popover.is-closing{transform:scale(var(--dropdown-closing-scale));opacity:0;pointer-events:none;',
+    '  transition:transform var(--dropdown-close-dur) var(--dropdown-ease),opacity var(--dropdown-close-dur) var(--dropdown-ease);}',
+    '.nb-pq{font:italic 400 12.5px/1.45 var(--nb-quote);color:#6a5a38;margin-bottom:9px;max-height:60px;overflow:auto;',
+    '  background:linear-gradient(180deg,transparent 54%,#ffe49c 54%);border-radius:2px;padding:2px 3px;',
+    '  white-space:pre-wrap;word-break:break-word;-webkit-box-decoration-break:clone;box-decoration-break:clone;}',
+    '.nb-popover textarea{width:100%;min-height:76px;resize:vertical;border:1px solid var(--nb-line-strong);',
+    '  border-radius:10px;padding:9px 10px;font:400 13.5px/1.5 var(--nb-ui);color:var(--nb-ink);background:#fffefb;',
+    '  transition:border-color .15s ease,box-shadow .15s ease;}',
+    '.nb-popover textarea::placeholder{color:var(--nb-ink-faint);}',
+    '.nb-popover textarea:focus{outline:none;border-color:var(--nb-accent);box-shadow:0 0 0 3px var(--nb-accent-wash);}',
+    '.nb-pop-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:11px;}',
+
+    /* launcher pill + notification badge */
+    '.nb-launcher{position:fixed;right:18px;bottom:18px;z-index:2147483646;display:inline-flex;align-items:center;gap:8px;',
+    '  border:none;cursor:pointer;background:var(--nb-accent);color:#fffdf8;border-radius:999px;padding:10px 16px 10px 13px;',
+    '  font:700 13px/1 var(--nb-round);letter-spacing:.01em;',
+    '  box-shadow:0 12px 26px -12px rgba(15,98,89,.7),0 2px 6px rgba(20,30,20,.18);',
+    '  animation:nb-launch-in .5s cubic-bezier(0.22,1,0.36,1) both;',
+    '  transition:transform .22s cubic-bezier(0.34,1.36,0.64,1),box-shadow .22s ease,background .15s ease;}',
+    '.nb-launcher:hover{transform:translateY(-2px);background:var(--nb-accent-deep);',
+    '  box-shadow:0 18px 32px -12px rgba(15,98,89,.75),0 3px 8px rgba(20,30,20,.2);}',
+    '.nb-launcher:active{transform:translateY(0) scale(.98);}',
     '.nb-launcher.nb-hidden{display:none;}',
-    '.nb-launcher-icon{font-size:15px;line-height:1;}',
-    '.nb-launcher-count{background:rgba(255,255,255,.25);border-radius:999px;',
-    '  min-width:18px;height:18px;align-items:center;justify-content:center;',
-    '  padding:0 5px;font-size:11px;font-weight:700;}',
-    /* whole-document note composer (top of the sidebar list) */
-    '.nb-doc-composer{margin-bottom:10px;}',
-    '.nb-add-doc{width:100%;border:1px dashed #cbd5e1;background:#fff;color:#2563eb;',
-    '  border-radius:8px;padding:9px 10px;font:600 12px/1 inherit;cursor:pointer;text-align:center;}',
-    '.nb-add-doc:hover{background:#eff6ff;border-color:#93c5fd;}',
-    '.nb-doc-ta{width:100%;min-height:64px;resize:vertical;border:1px solid #d1d5db;',
-    '  border-radius:6px;padding:8px;font:14px/1.4 inherit;color:#1f2937;}',
-    '.nb-doc-ta:focus{outline:2px solid #2563eb;outline-offset:0;border-color:#2563eb;}',
-    '.nb-item.nb-doc{border-color:#dbeafe;background:#f8fafc;}',
-    '.nb-doc-tag{display:inline-block;font-size:11px;font-weight:700;color:#2563eb;',
-    '  background:#eff6ff;border-radius:4px;padding:3px 6px;margin-bottom:6px;}'
+    '.nb-launcher-icon{width:11px;height:11px;border-radius:3px;background:#ffd166;box-shadow:0 0 0 3px rgba(255,209,102,.25);}',
+    '@keyframes nb-launch-in{from{transform:translateY(16px) scale(.9);opacity:0;}to{transform:translateY(0) scale(1);opacity:1;}}',
+    '@keyframes nb-badge-slide-in{from{transform:translate(var(--badge-offset-x),var(--badge-offset-y));}to{transform:translate(0,0);}}',
+    '.nb-launcher-badge{position:absolute;top:-7px;right:-6px;pointer-events:none;will-change:transform;}',
+    '.nb-launcher-badge[data-open="true"]{animation:nb-badge-slide-in var(--badge-slide-dur) var(--badge-slide-ease);}',
+    '.nb-badge-dot{display:flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;',
+    '  border-radius:999px;background:#ffd166;color:#5a4a12;font:700 11px/1 var(--nb-round);border:2px solid var(--nb-paper);',
+    '  box-shadow:0 2px 6px rgba(60,48,25,.3);transform-origin:center;transform:scale(1);opacity:1;filter:blur(0);',
+    '  transition:transform var(--badge-pop-dur) var(--badge-pop-ease),opacity var(--badge-fade-dur) var(--badge-pop-ease),filter var(--badge-pop-dur) var(--badge-pop-ease);',
+    '  will-change:transform,opacity,filter;}',
+    '.nb-launcher-badge[data-open="false"] .nb-badge-dot{transform:scale(0);opacity:0;filter:blur(var(--badge-blur));',
+    '  transition:transform var(--badge-pop-close-dur) var(--badge-close-ease),opacity var(--badge-fade-close-dur) var(--badge-close-ease),filter var(--badge-pop-close-dur) var(--badge-close-ease);}',
+
+    /* whole-document note composer */
+    '.nb-doc-composer{margin-bottom:12px;}',
+    '.nb-add-doc{width:100%;border:1.5px dashed var(--nb-line-strong);background:var(--nb-card);color:var(--nb-accent-ink);',
+    '  border-radius:12px;padding:11px 12px;font:600 12.5px/1.2 var(--nb-round);cursor:pointer;',
+    '  display:flex;align-items:center;justify-content:center;gap:7px;',
+    '  transition:background .15s ease,border-color .15s ease,color .15s ease,transform .12s ease;}',
+    '.nb-add-doc:hover{background:var(--nb-accent-wash);border-color:var(--nb-accent);color:var(--nb-accent-deep);}',
+    '.nb-add-doc:active{transform:scale(.99);}',
+    '.nb-doc-ta{width:100%;min-height:70px;resize:vertical;border:1px solid var(--nb-line-strong);border-radius:11px;',
+    '  padding:9px 10px;font:400 13.5px/1.5 var(--nb-ui);color:var(--nb-ink);background:#fffefb;',
+    '  transition:border-color .15s ease,box-shadow .15s ease;}',
+    '.nb-doc-ta::placeholder{color:var(--nb-ink-faint);}',
+    '.nb-doc-ta:focus{outline:none;border-color:var(--nb-accent);box-shadow:0 0 0 3px var(--nb-accent-wash);}',
+
+    /* list reveal — staggered settle, armed only while .nb-reveal is present */
+    '.nb-list.nb-reveal .nb-item,.nb-list.nb-reveal .nb-group-label,.nb-list.nb-reveal .nb-empty{',
+    '  opacity:0;transform:translateY(7px);filter:blur(2px);',
+    '  transition:opacity var(--stagger-dur) var(--stagger-ease),transform var(--stagger-dur) var(--stagger-ease),filter var(--stagger-dur) var(--stagger-ease);}',
+    '.nb-list.nb-reveal.nb-shown .nb-item,.nb-list.nb-reveal.nb-shown .nb-group-label,.nb-list.nb-reveal.nb-shown .nb-empty{',
+    '  opacity:1;transform:translateY(0);filter:blur(0);}',
+
+    '@media (prefers-reduced-motion: reduce){',
+    '  .nb-sidebar,.nb-popover,.nb-launcher,.nb-toast,.nb-launcher-badge,.nb-badge-dot,',
+    '  .nb-list.nb-reveal .nb-item,.nb-list.nb-reveal .nb-group-label,.nb-list.nb-reveal .nb-empty{',
+    '    transition:none !important;animation:none !important;}',
+    '  .nb-toast-check,.nb-toast-check svg path{animation:none !important;}',
+    '  .nb-toast-check svg path{stroke-dashoffset:0 !important;}',
+    '}'
   ].join('');
 
   /* ----------------------------------------------------------------------- *
@@ -197,6 +327,16 @@
     const renderMd = cfg.toMarkdown ||
       (markdownApi ? function (s) { return markdownApi.toMarkdown(s); } : null);
 
+    // Popover close animation duration (keep in sync with --dropdown-close-dur).
+    const POPOVER_CLOSE_MS = 160;
+
+    /** Whether the user has asked the OS for reduced motion. */
+    function reduceMotion() {
+      try {
+        return !!(win && win.matchMedia && win.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      } catch (e) { return false; }
+    }
+
     /* --- inject the light-DOM button style once ------------------------- */
     if (!doc.querySelector('style[data-noteback-ui="fab"]')) {
       const st = doc.createElement('style');
@@ -234,7 +374,7 @@
     fab.type = 'button';
     fab.className = 'noteback-fab';
     fab.setAttribute(UI_ATTR, 'fab');
-    fab.textContent = '💬 Comment';
+    fab.textContent = 'Comment'; // a honey marker chip is drawn via CSS ::before
     fab.style.display = 'none';
     (doc.body || doc.documentElement).appendChild(fab);
 
@@ -246,7 +386,7 @@
     uiRoot.appendChild(sidebar);
     sidebar.innerHTML =
       '<div class="nb-head">' +
-      '  <div><span class="nb-title">Noteback</span> <span class="nb-count"></span></div>' +
+      '  <div class="nb-titlewrap"><span class="nb-title">Noteback</span> <span class="nb-count"></span></div>' +
       '  <button type="button" class="nb-x" title="Close" aria-label="Close">×</button>' +
       '</div>' +
       '<div class="nb-list"></div>' +
@@ -268,19 +408,36 @@
     launcher.setAttribute(UI_ATTR, 'launcher');
     launcher.title = 'Open Noteback';
     launcher.innerHTML =
-      '<span class="nb-launcher-icon">🗨</span>' +
+      '<span class="nb-launcher-icon" aria-hidden="true"></span>' +
       '<span class="nb-launcher-label">Noteback</span>' +
-      '<span class="nb-launcher-count"></span>';
+      '<span class="nb-launcher-badge" data-open="false" aria-hidden="true"><span class="nb-badge-dot"></span></span>';
     uiRoot.appendChild(launcher);
     launcher.addEventListener('click', openSidebar);
 
-    /** Reflect the comment count on the launcher badge (hidden when zero). */
+    let lastBadgeCount = 0;
+    /**
+     * Reflect the comment count on the launcher's notification badge. The dot
+     * pops in when it first appears and re-pops whenever the count changes
+     * (replay = drop to data-open="false", reflow, then back to "true").
+     */
     function updateLauncher() {
       const s = getState();
       const n = (s && Array.isArray(s.comments)) ? s.comments.length : 0;
-      const countEl = launcher.querySelector('.nb-launcher-count');
-      countEl.textContent = n > 0 ? String(n) : '';
-      countEl.style.display = n > 0 ? 'inline-flex' : 'none';
+      const badge = launcher.querySelector('.nb-launcher-badge');
+      const dot = launcher.querySelector('.nb-badge-dot');
+      if (dot) dot.textContent = n > 0 ? String(n) : '';
+      if (badge) {
+        if (n > 0) {
+          if (n !== lastBadgeCount) {
+            badge.setAttribute('data-open', 'false');
+            void badge.offsetWidth; // reflow so the pop replays from scale(0)
+          }
+          badge.setAttribute('data-open', 'true');
+        } else {
+          badge.setAttribute('data-open', 'false');
+        }
+      }
+      lastBadgeCount = n;
     }
 
     /* --- popover (in shadow root) --------------------------------------- */
@@ -328,10 +485,17 @@
       if (left < scrollX + 4) left = scrollX + 4;
       fab.style.left = left + 'px';
       fab.style.top = top + 'px';
+      // Play the scale/fade-in (origin-grow) once shown. Forcing a reflow before
+      // adding the class guarantees the transition fires even without rAF.
+      if (!fab.classList.contains('nb-in')) {
+        void fab.offsetWidth;
+        fab.classList.add('nb-in');
+      }
     }
 
     function hideFab() {
       fab.style.display = 'none';
+      fab.classList.remove('nb-in');
       pendingAnchor = null;
     }
 
@@ -523,6 +687,10 @@
       uiRoot.appendChild(popover);
 
       positionPopover(o.rect);
+      // Origin-aware grow (menu-dropdown): reflow, then flip to .is-open so the
+      // popover scales up from the edge nearest the trigger.
+      void popover.offsetWidth;
+      popover.classList.add('is-open');
 
       popover.querySelector('.nb-cancel').addEventListener('click', closePopover);
       popover.querySelector('.nb-savecomment').addEventListener('click', function () {
@@ -551,9 +719,12 @@
       if (left + w + 8 > vw) left = vw - w - 8;
       if (left < 8) left = 8;
       const h = popover.offsetHeight || 160;
-      if (top + h + 8 > vh) top = Math.max(8, (rect ? rect.top : top) - h - 8);
+      let above = false;
+      if (top + h + 8 > vh) { top = Math.max(8, (rect ? rect.top : top) - h - 8); above = true; }
       popover.style.left = left + 'px';
       popover.style.top = top + 'px';
+      // Grow from the edge nearest the trigger: placed below → top origin.
+      popover.setAttribute('data-origin', above ? 'bottom-center' : 'top-center');
     }
 
     async function commitPopover(anchor, body) {
@@ -578,9 +749,18 @@
     }
 
     function closePopover() {
-      if (popover && popover.parentNode) popover.parentNode.removeChild(popover);
+      const node = popover;
       popover = null;
       editingId = null;
+      if (!node) return;
+      // Animate out (menu-dropdown closing), then remove. The reference is
+      // detached first so the overlay already treats the editor as closed.
+      node.classList.remove('is-open');
+      node.classList.add('is-closing');
+      const remove = function () { if (node.parentNode) node.parentNode.removeChild(node); };
+      const ms = reduceMotion() ? 0 : POPOVER_CLOSE_MS;
+      if (ms && win && win.setTimeout) win.setTimeout(remove, ms);
+      else remove();
     }
 
     function clearSelection() {
@@ -619,8 +799,9 @@
       if (comments.length === 0) {
         const empty = doc.createElement('div');
         empty.className = 'nb-empty';
-        empty.textContent =
-          'Select text and click “💬 Comment”, or add a note about the whole document above.';
+        empty.innerHTML =
+          '<strong>No notes yet</strong>' +
+          'Select any text and click <b>Comment</b>, or add a note about the whole document above.';
         elList.appendChild(empty);
         updateLauncher();
         return;
@@ -810,7 +991,7 @@
       if (exporter && typeof exporter.onCopyMarkdown === 'function') {
         try {
           await exporter.onCopyMarkdown(s);
-          toast('Copied feedback as Markdown');
+          toast('Copied feedback as Markdown', { success: true });
         } catch (e) {
           toast('Copy failed');
         }
@@ -820,7 +1001,8 @@
       if (!renderMd) { toast('Markdown unavailable'); return; }
       const md = renderMd(s);
       const ok = await copyToClipboard(md);
-      toast(ok ? 'Copied feedback as Markdown' : 'Copy failed — select & copy manually');
+      if (ok) toast('Copied feedback as Markdown', { success: true });
+      else toast('Copy failed — select & copy manually');
     }
 
     async function saveCanvas() {
@@ -867,13 +1049,31 @@
 
     let toastEl = null;
     let toastTimer = null;
-    function toast(msg) {
-      if (!toastEl) {
-        toastEl = doc.createElement('div');
-        toastEl.className = 'nb-toast';
-        uiRoot.appendChild(toastEl);
+    function ensureToast() {
+      if (toastEl) return;
+      toastEl = doc.createElement('div');
+      toastEl.className = 'nb-toast';
+      toastEl.innerHTML =
+        '<span class="nb-toast-check" data-state="out" aria-hidden="true">' +
+        '<svg viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.2 4.2L19 6.5"/></svg>' +
+        '</span><span class="nb-toast-msg"></span>';
+      uiRoot.appendChild(toastEl);
+    }
+    /** Show a transient toast. `opts.success` draws a celebratory check (success-check). */
+    function toast(msg, opts) {
+      opts = opts || {};
+      ensureToast();
+      toastEl.querySelector('.nb-toast-msg').textContent = msg;
+      const check = toastEl.querySelector('.nb-toast-check');
+      if (opts.success) {
+        toastEl.classList.add('nb-has-check');
+        check.setAttribute('data-state', 'out');
+        void check.offsetWidth; // reflow so the stroke draw replays from offset 0
+        check.setAttribute('data-state', 'in');
+      } else {
+        toastEl.classList.remove('nb-has-check');
+        check.setAttribute('data-state', 'out');
       }
-      toastEl.textContent = msg;
       toastEl.classList.add('nb-show');
       if (toastTimer && win) win.clearTimeout(toastTimer);
       const to = (win && win.setTimeout) || setTimeout;
@@ -888,6 +1088,32 @@
       renderSidebar();
       sidebar.classList.add('nb-open');
       launcher.classList.add('nb-hidden'); // sidebar has its own ✕ close
+      playListReveal();
+    }
+
+    /**
+     * Staggered settle for the comment list when the sidebar opens (texts-reveal).
+     * The `.nb-reveal` arming class is removed once the run completes so ordinary
+     * re-renders (typing in a composer, edit/delete) stay static — the reveal is
+     * the one orchestrated moment, not a per-change effect.
+     */
+    function playListReveal() {
+      if (reduceMotion()) return;
+      const els = elList.querySelectorAll('.nb-item,.nb-group-label,.nb-empty');
+      if (!els.length) return;
+      elList.classList.remove('nb-reveal', 'nb-shown');
+      for (let i = 0; i < els.length; i++) {
+        els[i].style.transitionDelay = (Math.min(i, 9) * 42) + 'ms';
+      }
+      elList.classList.add('nb-reveal');
+      void elList.offsetWidth; // reflow so the hidden base state applies first
+      elList.classList.add('nb-shown');
+      const total = 520 + Math.min(els.length, 9) * 42;
+      const to = (win && win.setTimeout) || setTimeout;
+      to(function () {
+        elList.classList.remove('nb-reveal', 'nb-shown');
+        for (let i = 0; i < els.length; i++) els[i].style.transitionDelay = '';
+      }, total);
     }
     function closeSidebar() {
       sidebar.classList.remove('nb-open');
