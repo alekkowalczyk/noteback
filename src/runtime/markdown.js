@@ -190,34 +190,48 @@
     const n = comments.length;
     const noun = n === 1 ? 'comment' : 'comments';
 
-    const lines = [];
-    lines.push('# Feedback on ' + docTitle);
-    lines.push(n + ' ' + noun + ' — ' + date);
+    // Build the comment items first so the header can announce line references
+    // only when at least one was actually resolved.
+    const body = [];
+    let anyRef = false;
 
     comments.forEach((c, i) => {
-      lines.push(''); // blank line before each item (and after the header line)
+      body.push(''); // blank line before each item (and after the header block)
       const anchor = c && c.anchor;
       const quote = anchor && anchor.quote != null ? String(anchor.quote) : '';
-      const body = c && c.body != null ? String(c.body) : '';
+      const note = c && c.body != null ? String(c.body) : '';
       // A comment with no quote is a DOCUMENT-LEVEL note (anchor === null); render
       // it with a plain marker instead of an empty blockquote.
       if (quote === '') {
-        lines.push((i + 1) + '. (note on the whole document)');
+        body.push((i + 1) + '. (note on the whole document)');
       } else {
         // Line reference (only when the doc markup is supplied) is computed from
         // the FULL quote; the displayed quote may be condensed.
-        const ref = docHtml ? formatLineRef(lineRangeOf(docHtml, quote, anchor.occurrence)) : '';
-        lines.push((i + 1) + '. > "' + condenseQuote(quote) + '"' + ref);
+        let ref = '';
+        if (docHtml) {
+          const range = lineRangeOf(docHtml, quote, anchor.occurrence);
+          if (range) anyRef = true;
+          ref = formatLineRef(range);
+        }
+        body.push((i + 1) + '. > "' + condenseQuote(quote) + '"' + ref);
       }
       // Indent every line of a (possibly multi-line) body to align under the quote.
-      const bodyLines = body.split('\n');
-      for (const bl of bodyLines) {
-        lines.push(INDENT + bl);
+      const noteLines = note.split('\n');
+      for (const nl of noteLines) {
+        body.push(INDENT + nl);
       }
     });
 
+    const head = [];
+    head.push('# Feedback on ' + docTitle);
+    head.push(n + ' ' + noun + ' — ' + date);
+    // Tell the reader (a human or an agent) what the "(line N)" refs mean.
+    if (anyRef) {
+      head.push('Line numbers refer to the document\'s HTML source.');
+    }
+
     // Trailing newline so the document ends cleanly.
-    return lines.join('\n') + '\n';
+    return head.concat(body).join('\n') + '\n';
   }
 
   return {

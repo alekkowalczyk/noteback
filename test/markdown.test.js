@@ -208,6 +208,32 @@ test('toMarkdown locates a quote containing &/< via entity-encoded fallback', ()
   assert.match(md, /\(line 1\)/);
 });
 
+test('toMarkdown explains the line numbers in the header when refs are present', () => {
+  const docHtml = '<p>Each user has a single workspace.</p>'; // line 1
+  const state = {
+    schemaVersion: 1, docId: 'x', docTitle: 'd.html',
+    comments: [mkComment('a single workspace', 'note')]
+  };
+  const md = markdown.toMarkdown(state, { date: '2026-06-03', docHtml });
+  assert.match(md, /^# Feedback on d\.html\n1 comment — 2026-06-03\nLine numbers refer to the document's HTML source\.\n\n1\./);
+});
+
+test('toMarkdown omits the line-number note when no refs were resolved', () => {
+  // docHtml supplied but the quote is not locatable → no refs → no note.
+  const state = {
+    schemaVersion: 1, docId: 'x', docTitle: 'd.html',
+    comments: [mkComment('nowhere to be found', 'note')]
+  };
+  const md = markdown.toMarkdown(state, { date: '2026-06-03', docHtml: '<p>unrelated</p>' });
+  assert.doesNotMatch(md, /Line numbers refer/);
+});
+
+test('toMarkdown has no line-number note when docHtml is absent', () => {
+  const state = { schemaVersion: 1, docId: 'x', docTitle: 'd.html', comments: [mkComment('q', 'b')] };
+  const md = markdown.toMarkdown(state, { date: '2026-06-03' });
+  assert.doesNotMatch(md, /Line numbers refer/);
+});
+
 test('toMarkdown omits a line ref when the quote is not found', () => {
   const state = {
     schemaVersion: 1, docId: 'x', docTitle: 'd.html',
