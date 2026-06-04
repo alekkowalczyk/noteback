@@ -91,21 +91,36 @@ it tells the agent to prefer HTML for reviewable docs, wrap them, and treat your
 Markdown as change requests. This is a third on-ramp to the **same embedded mode** the
 "Save as HTML with comments" button produces.
 
-### Install the skill (via npx)
+### Install the skill
 
-To make the skill available to Claude Code, drop it into a skills directory with the
-bundled installer:
+Two install paths, because the skill and the CLI live in **two independent
+registries** (see note below):
 
 ```sh
+# A) via the `skills` tool — pulls the skill straight from GitHub:
+npx skills add alekkowalczyk/noteback          # into ./.claude/skills
+npx skills add alekkowalczyk/noteback -g       # into ~/.claude/skills (global)
+npx skills add alekkowalczyk/noteback --list   # preview what's in the repo, install nothing
+
+# B) via the bundled installer — copies the skill out of the npm package:
 npx noteback install-skill            # → ~/.claude/skills/noteback-canvas/ (personal)
 npx noteback install-skill --project  # → ./.claude/skills/noteback-canvas/ (this repo)
 npx noteback install-skill --dir <path>   # → a specific skills directory
 ```
 
-Restart Claude Code afterward so it discovers the skill. (The skill then calls
-`npx noteback wrap` itself — both come from the same published package, so there's
-nothing else to install.) Prefer a managed setup? The same `skills/noteback-canvas/`
-folder can be vendored into a Claude Code plugin/marketplace instead.
+Restart Claude Code afterward so it discovers the skill. The skill then calls
+`npx noteback wrap` itself, so the `wrap` CLI must be reachable on npm regardless
+of how the skill was installed. Prefer a managed setup? The same
+`skills/noteback-canvas/` folder can be vendored into a Claude Code
+plugin/marketplace instead.
+
+> **Two registries, by design.** `npx skills add owner/repo`
+> ([vercel-labs/skills](https://github.com/vercel-labs/skills)) uses **GitHub**
+> as its registry — it clones this public repo and reads
+> `skills/noteback-canvas/SKILL.md` from the default branch. `npx noteback …`
+> uses **npm** — it runs the published `noteback` package's CLI. GitHub serves
+> the *skill*; npm serves the *`wrap` command*. They're decoupled, so either
+> on-ramp works on its own.
 
 ## Install (unpacked, for development)
 
