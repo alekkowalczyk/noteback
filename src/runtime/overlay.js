@@ -558,7 +558,9 @@
       e.stopPropagation();
       if (!pendingAnchor) return;
       const anchor = pendingAnchor;
-      const rect = fabRect();
+      // Position the composer relative to the SELECTION (not the chip, which sits
+      // above it) so the composer can sit clear of the highlighted passage.
+      const rect = pendingFabRect || fabRect();
       hideFab();
       openPopover({ anchor: anchor, body: '', id: null, rect: rect });
     });
@@ -839,20 +841,47 @@
       if (win && win.requestAnimationFrame) win.requestAnimationFrame(focus); else focus();
     }
 
+    /**
+     * Place the composer so it doesn't cover the selected passage when possible:
+     * prefer just BELOW the selection, flip ABOVE if there isn't room, and only
+     * if the selection is too tall to clear either way fall back to the side with
+     * more room (clamped on-screen). The user can still drag it via the handle.
+     */
     function positionPopover(rect) {
       const vw = (win && win.innerWidth) || 1024;
       const vh = (win && win.innerHeight) || 768;
-      const w = 300;
+      const w = popover.offsetWidth || 312;
+      const h = popover.offsetHeight || 170;
+      const gap = 10;
+      const margin = 8;
+
+      // Horizontal: align near the selection's left edge, clamped on-screen.
       let left = rect ? rect.left : (vw - w) / 2;
-      let top = rect ? rect.bottom + 8 : 80;
-      if (left + w + 8 > vw) left = vw - w - 8;
-      if (left < 8) left = 8;
-      const h = popover.offsetHeight || 160;
+      if (left + w + margin > vw) left = vw - w - margin;
+      if (left < margin) left = margin;
+
+      // Vertical: keep clear of the selection's [top, bottom] band.
+      const selTop = rect ? rect.top : vh / 2;
+      const selBottom = rect ? rect.bottom : vh / 2;
+      const roomBelow = vh - selBottom - gap;
+      const roomAbove = selTop - gap;
+      let top;
       let above = false;
-      if (top + h + 8 > vh) { top = Math.max(8, (rect ? rect.top : top) - h - 8); above = true; }
+      if (roomBelow >= h + margin) {
+        top = selBottom + gap;                 // below the selection (preferred)
+      } else if (roomAbove >= h + margin) {
+        top = selTop - h - gap;                // above the selection
+        above = true;
+      } else if (roomAbove > roomBelow) {
+        top = margin;                          // selection too tall: hug the top
+        above = true;
+      } else {
+        top = Math.max(margin, vh - h - margin); // hug the bottom
+      }
+
       popover.style.left = left + 'px';
       popover.style.top = top + 'px';
-      // Grow from the edge nearest the trigger: placed below → top origin.
+      // Grow from the edge nearest the selection: placed below → top origin.
       popover.setAttribute('data-origin', above ? 'bottom-center' : 'top-center');
     }
 
@@ -1316,36 +1345,19 @@
     const onScrollOrResize = function () {
       if (fab.style.display !== 'none') hideFab();
     };
-    // Whether the comment editor was open when the current click began — lets the
-    // sidebar's outside-click close ignore a click that was merely dismissing the
-    // composer (so it takes a second, deliberate click to close the sidebar).
-    let popoverOpenAtPointerDown = false;
-
-    const onDocMouseDown = function (e) {
-      popoverOpenAtPointerDown = !!popover;
-      // Click outside the popover (and not on the fab) closes the editor.
-      if (!popover) return;
-      const t = e.target;
-      if (t === fab) return;
-      if (isInOwnUi(t)) {
-        // Clicks inside our shadow UI report the host as target; allow them.
-        if (t === host) return;
-      }
-      // Determine if the click landed inside the popover via composedPath.
-      const path = (typeof e.composedPath === 'function') ? e.composedPath() : [];
-      if (path.indexOf(popover) !== -1) return;
-      closePopover();
-    };
+    // The comment composer is intentionally NOT dismissed by clicking outside it
+    // (only Cancel / Save / Escape close it), so a stray click can't discard an
+    // in-progress note. Outside-click-to-close applies to the sidebar only.
 
     /**
      * Clicking outside the sidebar dismisses it. Uses `click` (not mousedown) and
      * skips when a text selection is in progress, so selecting passages to comment
      * never closes the panel. Also ignores our own UI, highlight clicks (those
-     * focus a comment instead), and clicks that were dismissing the composer.
+     * focus a comment instead), and any click while the composer is open.
      */
     const onDocClickOutside = function (e) {
       if (!sidebar.classList.contains('nb-open')) return;
-      if (popover || popoverOpenAtPointerDown) return;
+      if (popover) return; // don't close the panel out from under an open composer
       const path = (typeof e.composedPath === 'function') ? e.composedPath() : [];
       if (path.indexOf(host) !== -1 || path.indexOf(fab) !== -1) return; // our UI
       const t = e.target;
@@ -1372,7 +1384,6 @@
       win.addEventListener('scroll', onScrollOrResize, true);
       win.addEventListener('resize', onScrollOrResize);
     }
-    doc.addEventListener('mousedown', onDocMouseDown, true);
     doc.addEventListener('mouseup', onDocMouseUp);
 
     // Clicking a painted highlight in the doc opens + focuses its sidebar entry.
@@ -1401,7 +1412,6 @@
         win.removeEventListener('scroll', onScrollOrResize, true);
         win.removeEventListener('resize', onScrollOrResize);
       }
-      doc.removeEventListener('mousedown', onDocMouseDown, true);
       doc.removeEventListener('mouseup', onDocMouseUp);
       doc.removeEventListener('click', onDocClick);
       doc.removeEventListener('click', onDocClickOutside);
