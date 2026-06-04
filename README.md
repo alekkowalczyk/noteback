@@ -51,7 +51,7 @@ Noteback wins the **local-AI-doc** niche with two co-equal pillars:
   and **PDF/Print** (print-ready, no comments).
 - **Onboarding** for enabling "Allow access to file URLs."
 
-See [`docs/superpowers/specs/2026-06-03-noteback-design.md`](docs/superpowers/specs/2026-06-03-noteback-design.md)
+See [`docs/design.md`](docs/design.md)
 for the full design and [`CONTRACTS.md`](CONTRACTS.md) for the integration
 contracts (StorageAdapter, State schema, runtime namespace, canvas format).
 

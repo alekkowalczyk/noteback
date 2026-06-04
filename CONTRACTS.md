@@ -7,7 +7,7 @@ portable runtime works identically in **extension mode** (content script +
 in-file JSON state block).
 
 Read this together with the design spec:
-`docs/superpowers/specs/2026-06-03-noteback-design.md`.
+`docs/design.md`.
 
 ---
 

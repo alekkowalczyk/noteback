@@ -2,7 +2,7 @@
 
 Project-local guidance for working in this repo. Read alongside `README.md`
 (what/why), `CONTRACTS.md` (the runtime module API + behavioral invariants), and
-`docs/superpowers/specs/2026-06-03-noteback-design.md` (the original design).
+`docs/design.md` (the original design).
 This file records the **non-obvious gotchas** — things you can't infer by reading
 the code, that have already bitten us once.
 
