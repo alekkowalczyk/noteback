@@ -453,7 +453,7 @@
       '        <span class="nb-mi-sub">the original, no Noteback</span></button>' +
       '      <div class="nb-menu-sep" role="none"></div>' +
       '      <button type="button" class="nb-menu-item nb-save-pdf" role="menuitem">' +
-      '        <span class="nb-mi-label">PDF</span>' +
+      '        <span class="nb-mi-label">PDF/Print</span>' +
       '        <span class="nb-mi-sub">print-ready, no comments</span></button>' +
       '    </div>' +
       '  </div>' +

@@ -325,7 +325,7 @@ Each receives the current `State`.
 ```
 
 Footer **Save…** menu → hooks: *HTML · with comments* → `onSaveCanvas`,
-*HTML · clean copy* → `onSaveClean`, *PDF* → `onSavePdf` (default `window.print()`).
+*HTML · clean copy* → `onSaveClean`, *PDF/Print* → `onSavePdf` (default `window.print()`).
 PDF cleanliness relies on the runtime's `@media print` rules (overlay `BUTTON_CSS`),
 which hide every `[data-noteback-ui]` node and strip highlight styling — so a PDF is
 the clean document without needing a hook. The embedded canvas supplies `onSaveCanvas`

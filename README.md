@@ -48,7 +48,7 @@ Noteback wins the **local-AI-doc** niche with two co-equal pillars:
   line references back into the HTML file.
 - **Save…** menu with three exports: **HTML · with comments** (one self-contained,
   fully interactive file), **HTML · clean copy** (the original document, no Noteback),
-  and **PDF** (print-ready, no comments).
+  and **PDF/Print** (print-ready, no comments).
 - **Onboarding** for enabling "Allow access to file URLs."
 
 See [`docs/superpowers/specs/2026-06-03-noteback-design.md`](docs/superpowers/specs/2026-06-03-noteback-design.md)
