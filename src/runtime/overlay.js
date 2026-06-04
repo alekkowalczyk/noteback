@@ -54,8 +54,8 @@
    * ----------------------------------------------------------------------- */
 
   // Light-DOM styles: the floating "Comment" chip that appears on selection, and
-  // the painted highlight. The highlight reads like a honey marker swiped over the
-  // text (a translucent band, not a flat block) — on-theme with the canvas concept.
+  // the painted highlight — a filled honey swatch with rounded corners and a 1px
+  // darker-yellow ring. The passage being actively commented gets a teal ring.
   const BUTTON_CSS = [
     '.noteback-fab{',
     '  position:absolute;z-index:2147483646;',
@@ -74,16 +74,18 @@
     '.noteback-fab:hover{background:#0e6960;}',
     '.noteback-fab:active{transform:scale(.97);}',
     'mark.noteback-highlight{',
-    '  background:linear-gradient(180deg,transparent 12%,#ffe49c 12%,#ffe49c 92%,transparent 92%);',
-    '  color:inherit;border-radius:1px;padding:0 .5px;cursor:pointer;',
+    '  background:#ffe7a3;color:inherit;border-radius:4px;padding:0 1.5px;cursor:pointer;',
+    '  box-shadow:0 0 0 1px rgba(210,158,40,.55);',
     '  -webkit-box-decoration-break:clone;box-decoration-break:clone;',
-    '  transition:background .2s ease;',
+    '  transition:background .2s ease,box-shadow .2s ease;',
     '}',
-    'mark.noteback-highlight:hover{',
-    '  background:linear-gradient(180deg,transparent 12%,#ffd877 12%,#ffd877 92%,transparent 92%);}',
+    'mark.noteback-highlight:hover{background:#ffdd83;box-shadow:0 0 0 1px rgba(198,148,34,.8);}',
+    /* the passage being commented in the open editor — teal-ringed to stand out */
+    'mark.noteback-highlight[data-noteback-id="__nb_preview"]{',
+    '  background:#ffdd83;box-shadow:0 0 0 2px rgba(18,122,114,.6);}',
     'mark.noteback-highlight-flash{',
-    '  background:#ffd166 !important;border-radius:3px !important;',
-    '  box-shadow:0 0 0 3px rgba(232,184,75,.55) !important;',
+    '  background:#ffd166 !important;border-radius:4px !important;',
+    '  box-shadow:0 0 0 2px rgba(18,122,114,.6) !important;',
     '  transition:background .25s ease,box-shadow .25s ease;',
     '}',
     '@media (prefers-reduced-motion: reduce){',
@@ -92,18 +94,18 @@
     '}'
   ].join('');
 
-  // Shadow-DOM panel styles. Concept: an editor's desk — warm paper surfaces,
-  // warm-ink text, a fountain-pen teal accent, honey highlighter for quotes, an
+  // Shadow-DOM panel styles. Concept: a calm editor's desk — neutral surfaces,
+  // near-ink text, a fountain-pen teal accent, honey highlighter for quotes, an
   // italic-serif voice for quoted passages, and a soft rounded wordmark. Motion is
   // adapted from transitions.dev (panel reveal, menu dropdown, notification badge,
   // texts reveal, success check) and gated behind one prefers-reduced-motion guard.
   const PANEL_CSS = [
     ':host{all:initial;',
-    '  --nb-ink:#2c2a25;--nb-ink-soft:#746f62;--nb-ink-faint:#a99f8c;',
-    '  --nb-line:#e7dfce;--nb-line-strong:#d8ceb6;',
-    '  --nb-accent:#127a72;--nb-accent-deep:#0e6960;--nb-accent-ink:#0c5f59;--nb-accent-wash:#e3efed;',
-    '  --nb-danger:#b04a33;--nb-danger-wash:#f5e7e0;',
-    '  --nb-paper:#f8f4ec;--nb-card:#fffdf8;',
+    '  --nb-ink:#2b2b29;--nb-ink-soft:#6c6c68;--nb-ink-faint:#a2a09b;',
+    '  --nb-line:#e6e5e2;--nb-line-strong:#d6d5d1;',
+    '  --nb-accent:#127a72;--nb-accent-deep:#0e6960;--nb-accent-ink:#0c5f59;--nb-accent-wash:#e6efed;',
+    '  --nb-danger:#b04a33;--nb-danger-wash:#f3e8e3;',
+    '  --nb-paper:#f5f5f3;--nb-card:#ffffff;',
     '  --nb-ui:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;',
     '  --nb-round:ui-rounded,"SF Pro Rounded","Hiragino Maru Gothic ProN",Quicksand,system-ui,sans-serif;',
     '  --nb-quote:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif;',
@@ -119,7 +121,7 @@
     /* sidebar — panel reveal (slide + cross-blur + fade on one ease) */
     '.nb-sidebar{position:fixed;top:0;right:0;height:100vh;width:360px;max-width:88vw;',
     '  background:var(--nb-paper);color:var(--nb-ink);border-left:1px solid var(--nb-line);',
-    '  box-shadow:-16px 0 44px -22px rgba(60,48,25,.45);display:flex;flex-direction:column;z-index:2147483647;',
+    '  box-shadow:-16px 0 44px -22px rgba(40,40,38,.45);display:flex;flex-direction:column;z-index:2147483647;',
     '  transform:translateX(44px);opacity:0;filter:blur(var(--panel-blur));pointer-events:none;',
     '  transition:transform var(--panel-close-dur) var(--panel-ease),opacity var(--panel-close-dur) var(--panel-ease),filter var(--panel-close-dur) var(--panel-ease);',
     '  will-change:transform,opacity,filter;}',
@@ -138,7 +140,7 @@
     '.nb-x{border:none;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--nb-ink-faint);',
     '  width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none;',
     '  transition:background .15s ease,color .15s ease,transform .15s ease;}',
-    '.nb-x:hover{background:#efe7d6;color:var(--nb-ink);}',
+    '.nb-x:hover{background:#ececea;color:var(--nb-ink);}',
     '.nb-x:active{transform:scale(.9);}',
 
     /* list */
@@ -151,8 +153,8 @@
     '.nb-item{position:relative;border:1px solid var(--nb-line);border-radius:13px;',
     '  padding:12px 13px 10px;margin-bottom:11px;background:var(--nb-card);',
     '  transition:box-shadow .2s ease,transform .2s ease,border-color .2s ease;}',
-    '.nb-item:hover{box-shadow:0 12px 24px -16px rgba(60,48,25,.5);transform:translateY(-1px);border-color:var(--nb-line-strong);}',
-    '.nb-item.nb-orphan{border-style:dashed;border-color:#d9cfb8;background:#f6f1e6;}',
+    '.nb-item:hover{box-shadow:0 12px 24px -16px rgba(40,40,38,.5);transform:translateY(-1px);border-color:var(--nb-line-strong);}',
+    '.nb-item.nb-orphan{border-style:dashed;border-color:#d6d5d1;background:#f3f3f1;}',
     '.nb-item.nb-active{border-color:var(--nb-accent);box-shadow:0 0 0 1.5px var(--nb-accent),0 12px 24px -16px rgba(17,122,114,.55);}',
     '.nb-item.nb-doc{border-color:#bfe0db;background:#f1faf8;}',
 
@@ -162,7 +164,7 @@
     '  padding:1px 2px;display:block;margin:0 0 8px;cursor:pointer;white-space:pre-wrap;word-break:break-word;',
     '  -webkit-box-decoration-break:clone;box-decoration-break:clone;transition:background .2s ease;}',
     '.nb-quote:hover{background:linear-gradient(180deg,transparent 48%,#ffd877 48%);}',
-    '.nb-item.nb-orphan .nb-quote{background:#efe7d6;color:var(--nb-ink-soft);}',
+    '.nb-item.nb-orphan .nb-quote{background:#ececea;color:var(--nb-ink-soft);}',
 
     '.nb-doc-tag{display:inline-flex;align-items:center;gap:5px;font:600 11px/1 var(--nb-round);',
     '  color:var(--nb-accent-ink);background:var(--nb-accent-wash);border-radius:999px;padding:4px 10px;margin-bottom:8px;}',
@@ -180,7 +182,7 @@
 
     /* footer + buttons */
     '.nb-foot{border-top:1px solid var(--nb-line);padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;',
-    '  background:linear-gradient(180deg,rgba(248,244,236,0),#f2ebdb);}',
+    '  background:linear-gradient(180deg,rgba(245,245,243,0),#eeeeec);}',
     '.nb-btn{font:700 13px/1 var(--nb-round);border:1px solid var(--nb-accent);background:var(--nb-accent);color:#fffdf8;',
     '  border-radius:11px;padding:11px 12px;cursor:pointer;text-align:center;display:inline-flex;align-items:center;justify-content:center;gap:7px;',
     '  box-shadow:0 7px 16px -10px rgba(15,98,89,.7);transition:background .15s ease,transform .12s ease,box-shadow .2s ease;}',
@@ -191,9 +193,9 @@
 
     /* toast + success check (transitions.dev) */
     '.nb-toast{position:fixed;bottom:20px;right:20px;display:inline-flex;align-items:center;gap:9px;',
-    '  background:#2c2a25;color:#fdf8ec;padding:11px 15px 11px 13px;border-radius:13px;font:500 13px/1.2 var(--nb-ui);',
+    '  background:#2b2b29;color:#f4f4f2;padding:11px 15px 11px 13px;border-radius:13px;font:500 13px/1.2 var(--nb-ui);',
     '  z-index:2147483647;opacity:0;transform:translateY(8px) scale(.96);pointer-events:none;',
-    '  box-shadow:0 16px 36px -12px rgba(20,15,5,.6);',
+    '  box-shadow:0 16px 36px -12px rgba(18,18,16,.6);',
     '  transition:opacity .22s ease,transform .22s cubic-bezier(0.34,1.36,0.64,1);}',
     '.nb-toast.nb-show{opacity:1;transform:translateY(0) scale(1);}',
     '.nb-toast-check{display:none;width:20px;height:20px;flex:none;transform-origin:center;opacity:0;',
@@ -215,7 +217,7 @@
 
     /* popover — menu dropdown (origin-aware grow) */
     '.nb-popover{position:fixed;z-index:2147483647;background:var(--nb-card);border:1px solid var(--nb-line-strong);',
-    '  border-radius:15px;box-shadow:0 20px 46px -16px rgba(60,48,25,.5),0 2px 8px rgba(60,48,25,.12);',
+    '  border-radius:15px;box-shadow:0 20px 46px -16px rgba(40,40,38,.5),0 2px 8px rgba(40,40,38,.12);',
     '  padding:13px;width:312px;max-width:92vw;transform-origin:top center;',
     '  transform:scale(var(--dropdown-pre-scale));opacity:0;pointer-events:none;',
     '  transition:transform var(--dropdown-open-dur) var(--dropdown-ease),opacity var(--dropdown-open-dur) var(--dropdown-ease);',
@@ -224,11 +226,8 @@
     '.nb-popover.is-open{transform:scale(1);opacity:1;pointer-events:auto;}',
     '.nb-popover.is-closing{transform:scale(var(--dropdown-closing-scale));opacity:0;pointer-events:none;',
     '  transition:transform var(--dropdown-close-dur) var(--dropdown-ease),opacity var(--dropdown-close-dur) var(--dropdown-ease);}',
-    '.nb-pq{font:italic 400 12.5px/1.45 var(--nb-quote);color:#6a5a38;margin-bottom:9px;max-height:60px;overflow:auto;',
-    '  background:linear-gradient(180deg,transparent 54%,#ffe49c 54%);border-radius:2px;padding:2px 3px;',
-    '  white-space:pre-wrap;word-break:break-word;-webkit-box-decoration-break:clone;box-decoration-break:clone;}',
     '.nb-popover textarea{width:100%;min-height:76px;resize:vertical;border:1px solid var(--nb-line-strong);',
-    '  border-radius:10px;padding:9px 10px;font:400 13.5px/1.5 var(--nb-ui);color:var(--nb-ink);background:#fffefb;',
+    '  border-radius:10px;padding:9px 10px;font:400 13.5px/1.5 var(--nb-ui);color:var(--nb-ink);background:#ffffff;',
     '  transition:border-color .15s ease,box-shadow .15s ease;}',
     '.nb-popover textarea::placeholder{color:var(--nb-ink-faint);}',
     '.nb-popover textarea:focus{outline:none;border-color:var(--nb-accent);box-shadow:0 0 0 3px var(--nb-accent-wash);}',
@@ -252,7 +251,7 @@
     '.nb-launcher-badge[data-open="true"]{animation:nb-badge-slide-in var(--badge-slide-dur) var(--badge-slide-ease);}',
     '.nb-badge-dot{display:flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;',
     '  border-radius:999px;background:#ffd166;color:#5a4a12;font:700 11px/1 var(--nb-round);border:2px solid var(--nb-paper);',
-    '  box-shadow:0 2px 6px rgba(60,48,25,.3);transform-origin:center;transform:scale(1);opacity:1;filter:blur(0);',
+    '  box-shadow:0 2px 6px rgba(40,40,38,.3);transform-origin:center;transform:scale(1);opacity:1;filter:blur(0);',
     '  transition:transform var(--badge-pop-dur) var(--badge-pop-ease),opacity var(--badge-fade-dur) var(--badge-pop-ease),filter var(--badge-pop-dur) var(--badge-pop-ease);',
     '  will-change:transform,opacity,filter;}',
     '.nb-launcher-badge[data-open="false"] .nb-badge-dot{transform:scale(0);opacity:0;filter:blur(var(--badge-blur));',
@@ -267,7 +266,7 @@
     '.nb-add-doc:hover{background:var(--nb-accent-wash);border-color:var(--nb-accent);color:var(--nb-accent-deep);}',
     '.nb-add-doc:active{transform:scale(.99);}',
     '.nb-doc-ta{width:100%;min-height:70px;resize:vertical;border:1px solid var(--nb-line-strong);border-radius:11px;',
-    '  padding:9px 10px;font:400 13.5px/1.5 var(--nb-ui);color:var(--nb-ink);background:#fffefb;',
+    '  padding:9px 10px;font:400 13.5px/1.5 var(--nb-ui);color:var(--nb-ink);background:#ffffff;',
     '  transition:border-color .15s ease,box-shadow .15s ease;}',
     '.nb-doc-ta::placeholder{color:var(--nb-ink-faint);}',
     '.nb-doc-ta:focus{outline:none;border-color:var(--nb-accent);box-shadow:0 0 0 3px var(--nb-accent-wash);}',
@@ -485,11 +484,20 @@
       if (left < scrollX + 4) left = scrollX + 4;
       fab.style.left = left + 'px';
       fab.style.top = top + 'px';
-      // Play the scale/fade-in (origin-grow) once shown. Forcing a reflow before
-      // adding the class guarantees the transition fires even without rAF.
-      if (!fab.classList.contains('nb-in')) {
+      // Play the scale/fade-in once shown. A double rAF after the display change
+      // is the reliable way to start a transition out of display:none.
+      if (!fab.classList.contains('nb-in')) playFabIn();
+    }
+
+    /** (Re)play the chip's grow-in transition from its hidden rest state. */
+    function playFabIn() {
+      fab.classList.remove('nb-in');
+      const add = function () { fab.classList.add('nb-in'); };
+      if (win && win.requestAnimationFrame) {
+        win.requestAnimationFrame(function () { win.requestAnimationFrame(add); });
+      } else {
         void fab.offsetWidth;
-        fab.classList.add('nb-in');
+        add();
       }
     }
 
@@ -666,22 +674,70 @@
      * Popover (create / edit a comment)                                   *
      * ------------------------------------------------------------------- */
 
+    // Id of the transient "you're commenting THIS" highlight painted while the
+    // editor is open (CSS gives it a teal ring). Never persisted.
+    const PREVIEW_ID = '__nb_preview';
+    let previewShown = false;
+
+    /** Repaint highlights from the real (persisted) State. */
+    function repaintHighlights() {
+      if (highlightApi && typeof highlightApi.paintHighlights === 'function') {
+        try { highlightApi.paintHighlights(rootNode, getState(), {}); } catch (e) {}
+      }
+    }
+
+    /**
+     * Indicate what a comment targets, in the document rather than in the dialog:
+     *   - editing an anchored comment → flash its existing highlight,
+     *   - creating from a selection → drop the (graying) native selection and
+     *     paint a teal-ringed preview highlight over the chosen passage,
+     *   - whole-document note → nothing to point at.
+     */
+    function showAnchorPreview(o) {
+      if (!highlightApi || typeof highlightApi.paintHighlights !== 'function') return;
+      const anchor = o && o.anchor;
+      if (o && o.id) {
+        if (anchor && anchor.quote && typeof highlightApi.focusHighlight === 'function') {
+          try { highlightApi.focusHighlight(rootNode, o.id); } catch (e) {}
+        }
+        return;
+      }
+      if (!anchor || !anchor.quote) return;
+      try { const sel = win && win.getSelection(); if (sel && sel.removeAllRanges) sel.removeAllRanges(); } catch (e) {}
+      const s = getState();
+      const preview = {
+        id: PREVIEW_ID, anchor: anchor, body: '',
+        createdAt: '1970-01-01T00:00:00.000Z', author: null
+      };
+      const previewState = {
+        schemaVersion: s.schemaVersion, docId: s.docId, docTitle: s.docTitle,
+        comments: (s.comments || []).concat([preview])
+      };
+      try { highlightApi.paintHighlights(rootNode, previewState, {}); previewShown = true; } catch (e) {}
+    }
+
+    /** Remove the preview highlight, restoring the real highlights. */
+    function clearAnchorPreview() {
+      if (!previewShown) return;
+      previewShown = false;
+      repaintHighlights();
+    }
+
     function openPopover(o) {
       closePopover();
       editingId = o.id || null;
+      // Indicate WHICH passage is being commented by highlighting it in the
+      // document itself (rather than re-quoting it inside the dialog).
+      showAnchorPreview(o);
       popover = doc.createElement('div');
       popover.className = 'nb-popover';
       popover.setAttribute(UI_ATTR, 'popover');
-      const quote = (o.anchor && o.anchor.quote) || '';
       popover.innerHTML =
-        '<div class="nb-pq"></div>' +
         '<textarea placeholder="Add a comment…"></textarea>' +
         '<div class="nb-pop-actions">' +
         '  <button type="button" class="nb-link nb-cancel">Cancel</button>' +
         '  <button type="button" class="nb-btn nb-savecomment">Save</button>' +
         '</div>';
-      const pq = popover.querySelector('.nb-pq');
-      pq.textContent = quote ? ('“' + truncate(quote, 140) + '”') : 'Note on the whole document';
       const ta = popover.querySelector('textarea');
       ta.value = o.body || '';
       uiRoot.appendChild(popover);
@@ -752,6 +808,8 @@
       const node = popover;
       popover = null;
       editingId = null;
+      // Restore real highlights (drop the "being-commented" preview).
+      clearAnchorPreview();
       if (!node) return;
       // Animate out (menu-dropdown closing), then remove. The reference is
       // detached first so the overlay already treats the editor as closed.
@@ -1157,12 +1215,23 @@
       closePopover();
     };
 
+    // When a mouse selection finishes, replay the chip's pop so the entrance is
+    // visible at the moment the user looks at it (during the drag it would have
+    // already settled). Skip when the release is on the chip itself.
+    const onDocMouseUp = function (e) {
+      if (fab.style.display === 'none') return;
+      const t = e.target;
+      if (t === fab || (t && t.closest && t.closest('.noteback-fab'))) return;
+      playFabIn();
+    };
+
     doc.addEventListener('selectionchange', onSelChange);
     if (win) {
       win.addEventListener('scroll', onScrollOrResize, true);
       win.addEventListener('resize', onScrollOrResize);
     }
     doc.addEventListener('mousedown', onDocMouseDown, true);
+    doc.addEventListener('mouseup', onDocMouseUp);
 
     // Clicking a painted highlight in the doc opens + focuses its sidebar entry.
     const onDocClick = function (e) {
@@ -1190,6 +1259,7 @@
         win.removeEventListener('resize', onScrollOrResize);
       }
       doc.removeEventListener('mousedown', onDocMouseDown, true);
+      doc.removeEventListener('mouseup', onDocMouseUp);
       doc.removeEventListener('click', onDocClick);
       closePopover();
       if (fab.parentNode) fab.parentNode.removeChild(fab);
