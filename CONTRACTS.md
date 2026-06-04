@@ -284,6 +284,10 @@ function mountOverlay(cfg) { ... }
   selection exists). These two outside-click behaviors are intentionally opposite.
 - Own UI is marked `data-noteback-ui`; outside-click detection uses
   `composedPath()` so clicks inside the shadow-DOM panel count as "inside".
+- **Footer "Save…" menu** (a dropdown over the Save button) closes on item-click,
+  outside-click (`composedPath()` excludes its wrapper), or Escape; the Save button
+  `stopPropagation()`s its own toggle so the same click can't immediately re-close it.
+  Closing the sidebar also closes the menu. Items map to the exporter hooks above.
 
 ### 3.6 `canvas/exporter.js` (pure-ish → `NotebackRuntime.exporter`)
 
@@ -305,6 +309,29 @@ function downloadCanvas(html, filename) { ... }
 /** Feature-detected in-place save via File System Access API; falls back to download. */
 async function saveCanvasInPlace(html, suggestedName) { ... }
 ```
+
+**Exporter hooks object** (the `cfg.exporter` passed to `mountOverlay`/`boot`). All
+hooks are **optional** — the overlay feature-detects each and falls back when absent.
+Each receives the current `State`.
+
+```js
+/**
+ * @typedef {Object} ExporterHooks
+ * @property {(state: State) => void|Promise<void>}   [onCopyMarkdown] Copy feedback as Markdown.
+ * @property {(state: State) => void|Promise<void>}   [onSaveCanvas]   Save HTML *with* comments (re-shareable canvas).
+ * @property {(state: State) => void|Promise<void>}   [onSaveClean]    Save HTML *without* Noteback (the original document).
+ * @property {(state: State) => void}                 [onSavePdf]      Produce a PDF. Omit to use the overlay's default (`window.print()`).
+ */
+```
+
+Footer **Save…** menu → hooks: *HTML · with comments* → `onSaveCanvas`,
+*HTML · clean copy* → `onSaveClean`, *PDF* → `onSavePdf` (default `window.print()`).
+PDF cleanliness relies on the runtime's `@media print` rules (overlay `BUTTON_CSS`),
+which hide every `[data-noteback-ui]` node and strip highlight styling — so a PDF is
+the clean document without needing a hook. The embedded canvas supplies `onSaveCanvas`
++ `onSaveClean`; both serialize the live document (clean copy additionally removes the
+state block, the inlined runtime `<script>`, the `#noteback-doc-root` wrapper, the
+guiding comment, and the title suffix) and persist via `saveCanvasInPlace`/`downloadCanvas`.
 
 ### 3.7 `runtime/boot.js` (DOM-only → `NotebackRuntime.boot`)
 Single entry point used by **both** modes.
