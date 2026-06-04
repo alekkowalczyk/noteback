@@ -14,12 +14,18 @@
     "http://localhost/*",
     "http://127.0.0.1/*"
   ],
+  "icons": {
+    "128": "icons/icon128.png"
+  },
   "background": {
     "service_worker": "src/background/service-worker.js"
   },
   "action": {
     "default_title": "Noteback",
-    "default_popup": "src/popup/popup.html"
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "128": "icons/icon128.png"
+    }
   },
   "content_scripts": [
     {
