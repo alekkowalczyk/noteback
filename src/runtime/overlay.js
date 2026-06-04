@@ -161,13 +161,13 @@
     '.nb-item.nb-active{border-color:var(--nb-accent);box-shadow:0 0 0 1.5px var(--nb-accent),0 12px 24px -16px rgba(17,122,114,.55);}',
     '.nb-item.nb-doc{border-color:#bfe0db;background:#f1faf8;}',
 
-    /* quote — full honey fill + darker-yellow border, echoing the in-page highlight */
-    '.nb-quote{font:italic 400 13.5px/1.5 var(--nb-quote);color:#5a4a2a;',
-    '  background:#ffe7a3;border:1px solid rgba(210,158,40,.55);border-radius:7px;',
+    /* quote — soft honey wash + rounded honey border, a quiet echo of the highlight */
+    '.nb-quote{font:italic 400 13.5px/1.5 var(--nb-quote);color:#6a5a38;',
+    '  background:#fcf6e7;border:1px solid rgba(208,162,52,.34);border-radius:7px;',
     '  padding:6px 9px;display:block;margin:0 0 9px;cursor:pointer;white-space:pre-wrap;word-break:break-word;',
     '  transition:background .2s ease,border-color .2s ease;}',
-    '.nb-quote:hover{background:#ffdd83;border-color:rgba(198,148,34,.8);}',
-    '.nb-item.nb-orphan .nb-quote{background:#ececea;border-color:#d6d5d1;color:var(--nb-ink-soft);}',
+    '.nb-quote:hover{background:#faf0d4;border-color:rgba(200,152,42,.5);}',
+    '.nb-item.nb-orphan .nb-quote{background:#f0f0ee;border-color:#dededa;color:var(--nb-ink-soft);}',
 
     '.nb-doc-tag{display:inline-flex;align-items:center;gap:5px;font:600 11px/1 var(--nb-round);',
     '  color:var(--nb-accent-ink);background:var(--nb-accent-wash);border-radius:999px;padding:4px 10px;margin-bottom:8px;}',
@@ -388,7 +388,10 @@
     fab.style.display = 'none';
     (doc.body || doc.documentElement).appendChild(fab);
 
-    let pendingAnchor = null; // anchor described from the current selection
+    let pendingAnchor = null;   // anchor described from the current selection
+    let pendingFabRect = null;  // selection rect the chip should sit above
+    let fabTimer = null;        // debounce: show the chip a beat after settling
+    const FAB_DELAY_MS = 340;
 
     /* --- sidebar -------------------------------------------------------- */
     const sidebar = doc.createElement('div');
@@ -479,9 +482,32 @@
       const anchor = describeFromRange(range);
       if (!anchor) { hideFab(); return; }
       pendingAnchor = anchor;
+      pendingFabRect = range.getBoundingClientRect();
 
-      const rect = range.getBoundingClientRect();
-      positionFab(rect);
+      // If the chip is already up, just follow the growing selection. Otherwise
+      // debounce its first appearance: wait until the selection settles for a
+      // beat, then pop it in — so it doesn't flicker mid-drag and the entrance
+      // animation is actually seen rather than snapping in under the cursor.
+      if (fab.style.display !== 'none') {
+        positionFab(pendingFabRect);
+      } else {
+        scheduleFab();
+      }
+    }
+
+    /** (Re)arm the debounce; the chip pops in once the selection holds still. */
+    function scheduleFab() {
+      if (!win || !win.setTimeout) { if (pendingFabRect) positionFab(pendingFabRect); return; }
+      if (fabTimer) win.clearTimeout(fabTimer);
+      fabTimer = win.setTimeout(function () {
+        fabTimer = null;
+        if (pendingAnchor && pendingFabRect) positionFab(pendingFabRect);
+      }, FAB_DELAY_MS);
+    }
+
+    function cancelFabTimer() {
+      if (fabTimer && win && win.clearTimeout) win.clearTimeout(fabTimer);
+      fabTimer = null;
     }
 
     function positionFab(rect) {
@@ -501,11 +527,10 @@
     }
 
     /**
-     * (Re)play the chip's pop-in. It's a keyframe animation (.nb-in), not a
+     * Play the chip's pop-in. It's a keyframe animation (.nb-in), not a
      * transition, because a transition out of display:none frequently doesn't
-     * fire. Toggling the class with a forced reflow in between reliably restarts
-     * the animation — used both on first show and as a replay on mouseup so the
-     * entrance is visible at the moment the user releases the selection.
+     * fire. Toggling the class with a forced reflow in between reliably starts
+     * the animation. Fired once the debounce settles, so the entrance is seen.
      */
     function playFabIn() {
       fab.classList.remove('nb-in');
@@ -514,9 +539,11 @@
     }
 
     function hideFab() {
+      cancelFabTimer();
       fab.style.display = 'none';
       fab.classList.remove('nb-in');
       pendingAnchor = null;
+      pendingFabRect = null;
     }
 
     fab.addEventListener('mousedown', function (e) {
@@ -1272,14 +1299,15 @@
       closePopover();
     };
 
-    // When a mouse selection finishes, replay the chip's pop so the entrance is
-    // visible at the moment the user looks at it (during the drag it would have
-    // already settled). Skip when the release is on the chip itself.
+    // Re-anchor the debounce to the moment the user releases the selection, so
+    // the chip appears a beat *after* they finish dragging — never mid-drag —
+    // and its pop-in is clearly seen. Skip if released on the chip itself, or
+    // while the editor is open.
     const onDocMouseUp = function (e) {
-      if (fab.style.display === 'none') return;
+      if (popover) return;
       const t = e.target;
       if (t === fab || (t && t.closest && t.closest('.noteback-fab'))) return;
-      playFabIn();
+      if (pendingAnchor && pendingFabRect && fab.style.display === 'none') scheduleFab();
     };
 
     doc.addEventListener('selectionchange', onSelChange);
@@ -1318,6 +1346,7 @@
       doc.removeEventListener('mousedown', onDocMouseDown, true);
       doc.removeEventListener('mouseup', onDocMouseUp);
       doc.removeEventListener('click', onDocClick);
+      cancelFabTimer();
       closePopover();
       if (fab.parentNode) fab.parentNode.removeChild(fab);
       if (host.parentNode) host.parentNode.removeChild(host);
