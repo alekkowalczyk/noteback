@@ -177,7 +177,13 @@
 
   /**
    * @param {Object} state                 State per CONTRACTS.md §2.
-   * @param {{date?: string}} [opts]        date as YYYY-MM-DD; defaults to today.
+   * @param {{date?: string, docHtml?: string}} [opts]
+   *   date    as YYYY-MM-DD; defaults to today.
+   *   docHtml the document's HTML source. When supplied, each anchored quote is
+   *           located in it and annotated with a `(line N)`/`(lines A–B)` ref
+   *           (computed from the FULL quote, even when the quote is condensed for
+   *           display), and the header gains a note explaining the line numbers
+   *           — but only if at least one ref actually resolved. Omit → no refs.
    * @returns {string} Markdown feedback document.
    */
   function toMarkdown(state, opts) {

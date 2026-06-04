@@ -205,22 +205,44 @@ function deserialize(json) { ... }                        // -> State (throws/re
 /**
  * Render State to the clean/neutral Markdown of spec §8.1.
  * @param {State} state
- * @param {{date?: string}} [opts]  date defaults to today (YYYY-MM-DD).
+ * @param {{date?: string, docHtml?: string}} [opts]
+ *   date    defaults to today (YYYY-MM-DD).
+ *   docHtml the document's HTML source. When supplied, each anchored quote is
+ *           located in it and annotated with a `(line N)` / `(lines A–B)` ref,
+ *           and the header gains a "Line numbers refer to…" note (only if at
+ *           least one quote actually resolved). Omit it → no line refs.
  * @returns {string}
  */
 function toMarkdown(state, opts) { ... }
+
+// Also exported (for tests / callers): condenseQuote(quote), lineRangeOf(docHtml, quote, occurrence).
 ```
-Output shape (spec §8.1):
+Output shape (spec §8.1, with `docHtml` supplied):
 ```
 # Feedback on <docTitle>
 <N> comments — <YYYY-MM-DD>
+Line numbers refer to the document's HTML source.   ← only when ≥1 ref resolved
 
-1. > "<quote>"
+1. > "<quote>" (line 12)
    <body>
 
-2. > "<quote>"
+2. > "<quote>" (lines 30–34)
    <body>
 ```
+- **Line refs** are computed by locating the *full* quote in `docHtml` markup
+  (whole-quote match → HTML-entity-encoded fallback → cross-block first-line /
+  last-line probe for quotes that span block tags). Unresolved → the ref is
+  simply omitted for that item; the quote is still rendered.
+- **Long quotes are condensed** for display (`condenseQuote`): a passage over
+  ~200 chars becomes *first ~2 sentences* `(…)` *last ~2 sentences* (char-window
+  fallback). The line ref is always computed from the **uncondensed** quote, so
+  the quote — not the line number — is the source of truth if they ever disagree.
+- **Line-number semantics differ by mode** (see §3.5 callers): the embedded
+  canvas passes doc-content-relative markup (line 1 = first line of body
+  content); the extension passes `documentElement.outerHTML` (file-absolute,
+  tracks the opened file). Same function, different `docHtml` origin.
+- A document-level note (`anchor === null`) renders as
+  `N. (note on the whole document)` with no quote and no ref.
 
 ### 3.4 `runtime/highlight.js` (DOM-only → `NotebackRuntime.highlight`)
 
@@ -245,6 +267,23 @@ Mode-agnostic UI: floating "💬 Comment" button, comment popover, sidebar.
  */
 function mountOverlay(cfg) { ... }
 ```
+
+**Behavioral invariants** (easy to regress — keep them true):
+- **Comment chip ("💬 Comment")** appears *debounced* (~340 ms, re-armed on each
+  `selectionchange`, re-anchored on `mouseup`), not instantly. Its entrance is a
+  **keyframe animation restarted via reflow** (`classList.remove` →
+  `void el.offsetWidth` → `classList.add`), NOT a CSS `transition` — a transition
+  out of `display:none` does not reliably fire. See the gotcha in `CLAUDE.md`.
+- **Comment composer** is positioned to stay clear of the selection's vertical
+  band when there's room (prefer below, flip above, else hug the nearer edge),
+  is **draggable by its handle**, and is dismissed **only** by Cancel / Save /
+  Escape — *not* by clicking outside it. Do not re-add outside-click-to-close
+  for the composer.
+- **Sidebar** *is* dismissed by clicking outside it (guarded: ignored while a
+  composer is open, while a highlight `<mark>` is clicked, or while a non-collapsed
+  selection exists). These two outside-click behaviors are intentionally opposite.
+- Own UI is marked `data-noteback-ui`; outside-click detection uses
+  `composedPath()` so clicks inside the shadow-DOM panel count as "inside".
 
 ### 3.6 `canvas/exporter.js` (pure-ish → `NotebackRuntime.exporter`)
 
