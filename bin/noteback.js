@@ -31,7 +31,7 @@ const ROOT = path.resolve(__dirname, '..');
 const TEMPLATE_PATH = path.join(ROOT, 'src/canvas/canvas-template.html');
 
 // The bundled agent skill (shipped in the npm package) and its install name.
-const SKILL_NAME = 'noteback-canvas';
+const SKILL_NAME = 'noteback';
 const SKILL_SRC = path.join(ROOT, 'skills', SKILL_NAME);
 
 // Runtime files in dependency order — identical to examples/build-canvas.js and
@@ -130,7 +130,7 @@ function resolveSkillsDir(args) {
 
 /**
  * Copy the bundled skill into the resolved skills directory as
- * `<skillsDir>/noteback-canvas/`. Idempotent (overwrites to update in place).
+ * `<skillsDir>/noteback/`. Idempotent (overwrites to update in place).
  * @returns {number} process exit code.
  */
 function installSkill(args) {

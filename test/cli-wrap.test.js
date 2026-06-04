@@ -149,8 +149,8 @@ test('install-skill copies the bundled skill into a target skills dir', () => {
   assert.strictEqual(code, 0, 'install succeeds');
 
   const skillMd = path.join(dir, cli.SKILL_NAME, 'SKILL.md');
-  assert.ok(fs.existsSync(skillMd), 'SKILL.md installed under <dir>/noteback-canvas/');
-  assert.match(fs.readFileSync(skillMd, 'utf8'), /name:\s*noteback-canvas/, 'it is the real skill');
+  assert.ok(fs.existsSync(skillMd), 'SKILL.md installed under <dir>/noteback/');
+  assert.match(fs.readFileSync(skillMd, 'utf8'), /name:\s*noteback\b/, 'it is the real skill');
 
   // Idempotent: a second install over the same dir still succeeds.
   assert.strictEqual(cli.installSkill({ dir }), 0, 're-install is safe');

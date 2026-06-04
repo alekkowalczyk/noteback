@@ -62,7 +62,7 @@ the code, that have already bitten us once.
 
 - `npx skills add alekkowalczyk/noteback` → **GitHub** is the registry
   ([vercel-labs/skills](https://github.com/vercel-labs/skills)). It clones the
-  public repo and reads `skills/noteback-canvas/SKILL.md` from the default
+  public repo and reads `skills/noteback/SKILL.md` from the default
   branch. Needs: public repo, `name`+`description` frontmatter, on default branch.
 - `npx noteback wrap` / `npx noteback install-skill` → **npm** is the registry
   (the published `noteback` package's `bin`).
