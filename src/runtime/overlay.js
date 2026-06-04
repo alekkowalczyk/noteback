@@ -64,15 +64,18 @@
     '  letter-spacing:.01em;color:#fffdf8;background:#127a72;',
     '  border:none;border-radius:999px;padding:7px 13px 7px 11px;cursor:pointer;',
     '  box-shadow:0 7px 18px -6px rgba(15,98,89,.6),0 1px 2px rgba(20,30,20,.22);',
-    '  opacity:0;transform:scale(.94);',
-    '  transition:transform .16s cubic-bezier(0.34,1.36,0.64,1),opacity .16s ease,background .15s ease;',
+    '  opacity:0;transition:transform .12s ease,background .15s ease;',
     '  -webkit-font-smoothing:antialiased;',
     '}',
     '.noteback-fab::before{content:"";width:9px;height:9px;border-radius:2px;',
     '  background:#ffd166;box-shadow:0 0 0 2px rgba(255,209,102,.3);}',
-    '.noteback-fab.nb-in{opacity:1;transform:scale(1);}',
+    // Entrance is a keyframe animation (re)started by toggling .nb-in — reliable
+    // out of display:none, where a plain transition frequently won't fire.
+    '.noteback-fab.nb-in{opacity:1;animation:nb-fab-pop .24s cubic-bezier(0.34,1.5,0.64,1);}',
+    '@keyframes nb-fab-pop{0%{opacity:0;transform:scale(.8) translateY(3px);}',
+    '  55%{opacity:1;}100%{opacity:1;transform:scale(1) translateY(0);}}',
     '.noteback-fab:hover{background:#0e6960;}',
-    '.noteback-fab:active{transform:scale(.97);}',
+    '.noteback-fab:active{transform:scale(.96);}',
     'mark.noteback-highlight{',
     '  background:#ffe7a3;color:inherit;border-radius:4px;padding:0 1.5px;cursor:pointer;',
     '  box-shadow:0 0 0 1px rgba(210,158,40,.55);',
@@ -89,8 +92,8 @@
     '  transition:background .25s ease,box-shadow .25s ease;',
     '}',
     '@media (prefers-reduced-motion: reduce){',
-    '  .noteback-fab,mark.noteback-highlight,mark.noteback-highlight-flash{transition:none !important;}',
-    '  .noteback-fab{opacity:1;transform:none;}',
+    '  .noteback-fab,mark.noteback-highlight,mark.noteback-highlight-flash{transition:none !important;animation:none !important;}',
+    '  .noteback-fab,.noteback-fab.nb-in{opacity:1;transform:none;animation:none !important;}',
     '}'
   ].join('');
 
@@ -158,13 +161,13 @@
     '.nb-item.nb-active{border-color:var(--nb-accent);box-shadow:0 0 0 1.5px var(--nb-accent),0 12px 24px -16px rgba(17,122,114,.55);}',
     '.nb-item.nb-doc{border-color:#bfe0db;background:#f1faf8;}',
 
-    /* quote — honey highlighter swipe + italic-serif voice */
+    /* quote — full honey fill + darker-yellow border, echoing the in-page highlight */
     '.nb-quote{font:italic 400 13.5px/1.5 var(--nb-quote);color:#5a4a2a;',
-    '  background:linear-gradient(180deg,transparent 56%,#ffe49c 56%);border-radius:2px;',
-    '  padding:1px 2px;display:block;margin:0 0 8px;cursor:pointer;white-space:pre-wrap;word-break:break-word;',
-    '  -webkit-box-decoration-break:clone;box-decoration-break:clone;transition:background .2s ease;}',
-    '.nb-quote:hover{background:linear-gradient(180deg,transparent 48%,#ffd877 48%);}',
-    '.nb-item.nb-orphan .nb-quote{background:#ececea;color:var(--nb-ink-soft);}',
+    '  background:#ffe7a3;border:1px solid rgba(210,158,40,.55);border-radius:7px;',
+    '  padding:6px 9px;display:block;margin:0 0 9px;cursor:pointer;white-space:pre-wrap;word-break:break-word;',
+    '  transition:background .2s ease,border-color .2s ease;}',
+    '.nb-quote:hover{background:#ffdd83;border-color:rgba(198,148,34,.8);}',
+    '.nb-item.nb-orphan .nb-quote{background:#ececea;border-color:#d6d5d1;color:var(--nb-ink-soft);}',
 
     '.nb-doc-tag{display:inline-flex;align-items:center;gap:5px;font:600 11px/1 var(--nb-round);',
     '  color:var(--nb-accent-ink);background:var(--nb-accent-wash);border-radius:999px;padding:4px 10px;margin-bottom:8px;}',
@@ -232,6 +235,14 @@
     '.nb-popover textarea::placeholder{color:var(--nb-ink-faint);}',
     '.nb-popover textarea:focus{outline:none;border-color:var(--nb-accent);box-shadow:0 0 0 3px var(--nb-accent-wash);}',
     '.nb-pop-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:11px;}',
+    /* drag handle — grab to slide the composer off the highlighted text */
+    '.nb-pop-handle{display:flex;align-items:center;justify-content:center;height:13px;margin:-5px 0 8px;',
+    '  cursor:grab;touch-action:none;}',
+    '.nb-pop-handle::before{content:"";width:32px;height:4px;border-radius:999px;background:var(--nb-line-strong);',
+    '  transition:background .15s ease,width .15s ease;}',
+    '.nb-pop-handle:hover::before{background:var(--nb-ink-faint);width:40px;}',
+    '.nb-popover.nb-dragging{cursor:grabbing;transition:none;}',
+    '.nb-popover.nb-dragging .nb-pop-handle{cursor:grabbing;}',
 
     /* launcher pill + notification badge */
     '.nb-launcher{position:fixed;right:18px;bottom:18px;z-index:2147483646;display:inline-flex;align-items:center;gap:8px;',
@@ -484,21 +495,22 @@
       if (left < scrollX + 4) left = scrollX + 4;
       fab.style.left = left + 'px';
       fab.style.top = top + 'px';
-      // Play the scale/fade-in once shown. A double rAF after the display change
-      // is the reliable way to start a transition out of display:none.
+      // Play the pop-in once when first shown for this selection; while the user
+      // keeps dragging the selection we only reposition (nb-in already on).
       if (!fab.classList.contains('nb-in')) playFabIn();
     }
 
-    /** (Re)play the chip's grow-in transition from its hidden rest state. */
+    /**
+     * (Re)play the chip's pop-in. It's a keyframe animation (.nb-in), not a
+     * transition, because a transition out of display:none frequently doesn't
+     * fire. Toggling the class with a forced reflow in between reliably restarts
+     * the animation — used both on first show and as a replay on mouseup so the
+     * entrance is visible at the moment the user releases the selection.
+     */
     function playFabIn() {
       fab.classList.remove('nb-in');
-      const add = function () { fab.classList.add('nb-in'); };
-      if (win && win.requestAnimationFrame) {
-        win.requestAnimationFrame(function () { win.requestAnimationFrame(add); });
-      } else {
-        void fab.offsetWidth;
-        add();
-      }
+      void fab.offsetWidth; // reflow → guarantees the animation restarts
+      fab.classList.add('nb-in');
     }
 
     function hideFab() {
@@ -733,6 +745,7 @@
       popover.className = 'nb-popover';
       popover.setAttribute(UI_ATTR, 'popover');
       popover.innerHTML =
+        '<div class="nb-pop-handle" title="Drag to move"></div>' +
         '<textarea placeholder="Add a comment…"></textarea>' +
         '<div class="nb-pop-actions">' +
         '  <button type="button" class="nb-link nb-cancel">Cancel</button>' +
@@ -748,6 +761,7 @@
       void popover.offsetWidth;
       popover.classList.add('is-open');
 
+      enablePopoverDrag(popover.querySelector('.nb-pop-handle'));
       popover.querySelector('.nb-cancel').addEventListener('click', closePopover);
       popover.querySelector('.nb-savecomment').addEventListener('click', function () {
         commitPopover(o.anchor, ta.value);
@@ -781,6 +795,49 @@
       popover.style.top = top + 'px';
       // Grow from the edge nearest the trigger: placed below → top origin.
       popover.setAttribute('data-origin', above ? 'bottom-center' : 'top-center');
+    }
+
+    /**
+     * Let the user grab the handle and slide the composer aside so it doesn't
+     * cover the passage being commented. The popover is position:fixed, so we
+     * drag in viewport coordinates (getBoundingClientRect), clamped on-screen.
+     */
+    function enablePopoverDrag(handle) {
+      if (!handle) return;
+      let startX = 0, startY = 0, baseLeft = 0, baseTop = 0, dragging = false;
+
+      const onMove = function (e) {
+        if (!dragging || !popover) return;
+        const vw = (win && win.innerWidth) || 1024;
+        const vh = (win && win.innerHeight) || 768;
+        const w = popover.offsetWidth || 312;
+        const h = popover.offsetHeight || 160;
+        let nx = baseLeft + (e.clientX - startX);
+        let ny = baseTop + (e.clientY - startY);
+        nx = Math.max(8, Math.min(nx, vw - w - 8));
+        ny = Math.max(8, Math.min(ny, vh - h - 8));
+        popover.style.left = nx + 'px';
+        popover.style.top = ny + 'px';
+      };
+
+      const onUp = function () {
+        dragging = false;
+        if (popover) popover.classList.remove('nb-dragging');
+        doc.removeEventListener('mousemove', onMove, true);
+        doc.removeEventListener('mouseup', onUp, true);
+      };
+
+      handle.addEventListener('mousedown', function (e) {
+        if (!popover) return;
+        e.preventDefault();
+        const r = popover.getBoundingClientRect();
+        startX = e.clientX; startY = e.clientY;
+        baseLeft = r.left; baseTop = r.top;
+        dragging = true;
+        popover.classList.add('nb-dragging');
+        doc.addEventListener('mousemove', onMove, true);
+        doc.addEventListener('mouseup', onUp, true);
+      });
     }
 
     async function commitPopover(anchor, body) {
