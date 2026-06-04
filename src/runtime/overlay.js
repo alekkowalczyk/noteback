@@ -1316,7 +1316,13 @@
     const onScrollOrResize = function () {
       if (fab.style.display !== 'none') hideFab();
     };
+    // Whether the comment editor was open when the current click began — lets the
+    // sidebar's outside-click close ignore a click that was merely dismissing the
+    // composer (so it takes a second, deliberate click to close the sidebar).
+    let popoverOpenAtPointerDown = false;
+
     const onDocMouseDown = function (e) {
+      popoverOpenAtPointerDown = !!popover;
       // Click outside the popover (and not on the fab) closes the editor.
       if (!popover) return;
       const t = e.target;
@@ -1329,6 +1335,25 @@
       const path = (typeof e.composedPath === 'function') ? e.composedPath() : [];
       if (path.indexOf(popover) !== -1) return;
       closePopover();
+    };
+
+    /**
+     * Clicking outside the sidebar dismisses it. Uses `click` (not mousedown) and
+     * skips when a text selection is in progress, so selecting passages to comment
+     * never closes the panel. Also ignores our own UI, highlight clicks (those
+     * focus a comment instead), and clicks that were dismissing the composer.
+     */
+    const onDocClickOutside = function (e) {
+      if (!sidebar.classList.contains('nb-open')) return;
+      if (popover || popoverOpenAtPointerDown) return;
+      const path = (typeof e.composedPath === 'function') ? e.composedPath() : [];
+      if (path.indexOf(host) !== -1 || path.indexOf(fab) !== -1) return; // our UI
+      const t = e.target;
+      const hlClass = highlightApi ? highlightApi.HIGHLIGHT_CLASS : 'noteback-highlight';
+      if (t && t.closest && t.closest('mark.' + hlClass)) return; // highlight → focus
+      const sel = win ? win.getSelection() : null;
+      if (sel && !sel.isCollapsed && String(sel).trim() !== '') return; // mid-selection
+      closeSidebar();
     };
 
     // Re-anchor the debounce to the moment the user releases the selection, so
@@ -1365,6 +1390,7 @@
       }
     };
     doc.addEventListener('click', onDocClick);
+    doc.addEventListener('click', onDocClickOutside);
 
     // Initial render so the sidebar reflects loaded state when first opened.
     renderSidebar();
@@ -1378,6 +1404,7 @@
       doc.removeEventListener('mousedown', onDocMouseDown, true);
       doc.removeEventListener('mouseup', onDocMouseUp);
       doc.removeEventListener('click', onDocClick);
+      doc.removeEventListener('click', onDocClickOutside);
       cancelFabTimer();
       closePopover();
       if (fab.parentNode) fab.parentNode.removeChild(fab);
