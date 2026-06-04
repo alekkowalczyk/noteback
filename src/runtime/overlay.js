@@ -334,8 +334,11 @@
     const getState = cfg.getState || (function () { return null; });
     const setState = cfg.setState || function () {};
     const onChange = cfg.onChange || function () {};
-    const renderMd = cfg.toMarkdown ||
-      (markdownApi ? function (s) { return markdownApi.toMarkdown(s); } : null);
+    // Prefer the runtime markdown module directly so we can hand it the document
+    // markup for line references; fall back to the boot-supplied renderer.
+    const renderMd = markdownApi
+      ? function (s) { return markdownApi.toMarkdown(s, { docHtml: docHtmlForLines() }); }
+      : (cfg.toMarkdown || null);
 
     // Popover close animation duration (keep in sync with --dropdown-close-dur).
     const POPOVER_CLOSE_MS = 160;
@@ -404,8 +407,8 @@
       '</div>' +
       '<div class="nb-list"></div>' +
       '<div class="nb-foot">' +
-      '  <button type="button" class="nb-btn nb-secondary nb-copy">Copy as Markdown</button>' +
-      '  <button type="button" class="nb-btn nb-save">Save as HTML canvas</button>' +
+      '  <button type="button" class="nb-btn nb-secondary nb-copy">Copy feedback as markdown</button>' +
+      '  <button type="button" class="nb-btn nb-save">Save as HTML with comments</button>' +
       '</div>';
 
     const elCount = sidebar.querySelector('.nb-count');
@@ -618,6 +621,35 @@
         text += v;
       }
       return { text: text, nodes: nodes, starts: starts };
+    }
+
+    /**
+     * Serialize the document's CONTENT markup for line-number lookup: a clone of
+     * the doc root with our injected UI removed and highlight <mark> wrappers
+     * unwrapped, so it matches the markup the author actually edits. Line numbers
+     * are relative to the start of this content (line 1 = first line of the body).
+     */
+    function docHtmlForLines() {
+      try {
+        const clone = rootNode.cloneNode(true);
+        if (!clone || typeof clone.querySelectorAll !== 'function') return '';
+        const ui = clone.querySelectorAll('[' + UI_ATTR + ']');
+        for (let i = 0; i < ui.length; i++) {
+          if (ui[i].parentNode) ui[i].parentNode.removeChild(ui[i]);
+        }
+        const cls = highlightApi ? highlightApi.HIGHLIGHT_CLASS : 'noteback-highlight';
+        const marks = clone.querySelectorAll('mark.' + cls);
+        for (let i = 0; i < marks.length; i++) {
+          const m = marks[i];
+          const p = m.parentNode;
+          if (!p) continue;
+          while (m.firstChild) p.insertBefore(m.firstChild, m);
+          p.removeChild(m);
+        }
+        return clone.innerHTML || '';
+      } catch (e) {
+        return '';
+      }
     }
 
     /**

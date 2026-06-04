@@ -44,8 +44,9 @@ Noteback wins the **local-AI-doc** niche with two co-equal pillars:
   DOM/whitespace changes. Lost quotes become **"unanchored"** comments rather
   than disappearing.
 - Toggleable **sidebar** listing every comment; edit / delete.
-- **Copy as Markdown** — clean, neutral, human- and AI-readable.
-- **Save as HTML feedback canvas** — one self-contained, fully interactive file.
+- **Copy feedback as markdown** — clean, neutral, human- and AI-readable, with
+  line references back into the HTML file.
+- **Save as HTML with comments** — one self-contained, fully interactive file.
 - **Onboarding** for enabling "Allow access to file URLs."
 
 See [`docs/superpowers/specs/2026-06-03-noteback-design.md`](docs/superpowers/specs/2026-06-03-noteback-design.md)
@@ -80,7 +81,7 @@ npx noteback wrap plan.html            # rewrite in place → plan.html IS the c
 npx noteback wrap plan.html -o out.html  # keep the original, write a separate canvas
 ```
 
-You open the file, comment, click **Copy feedback as Markdown**, and paste it back to
+You open the file, comment, click **Copy feedback as markdown**, and paste it back to
 the agent to iterate. The wrapper reuses the same tested canvas builder as the
 extension, and re-wrapping an existing canvas is idempotent (the old runtime + comment
 state are stripped before a fresh empty one is embedded).
@@ -88,7 +89,7 @@ state are stripped before a fresh empty one is embedded).
 The skill itself lives in [`skills/noteback-canvas/SKILL.md`](skills/noteback-canvas/SKILL.md):
 it tells the agent to prefer HTML for reviewable docs, wrap them, and treat your pasted
 Markdown as change requests. This is a third on-ramp to the **same embedded mode** the
-"Save as HTML feedback canvas" button produces.
+"Save as HTML with comments" button produces.
 
 ## Install (unpacked, for development)
 

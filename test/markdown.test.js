@@ -138,3 +138,125 @@ test('toMarkdown mixes quoted and whole-document notes', () => {
   assert.match(md, /1\. > "a single Redis instance"/);
   assert.match(md, /2\. \(note on the whole document\)\n   needs a threat model/);
 });
+
+/* --- line references (opt-in via opts.docHtml) ----------------------------- */
+
+test('toMarkdown appends a single-line ref when the quote is on one line', () => {
+  const docHtml = [
+    '<h1>Spec</h1>',                       // line 1
+    '<p>RealtimeSync keeps documents in sync.</p>', // line 2
+    '<p>Each user has a single workspace.</p>'      // line 3
+  ].join('\n');
+  const state = {
+    schemaVersion: 1, docId: 'x', docTitle: 'd.html',
+    comments: [mkComment('a single workspace', 'should support many')]
+  };
+  const md = markdown.toMarkdown(state, { date: '2026-06-03', docHtml });
+  assert.match(md, /1\. > "a single workspace" \(line 3\)/);
+});
+
+test('toMarkdown emits a line RANGE for a multi-line passage', () => {
+  const docHtml = [
+    '<p>intro</p>',          // 1
+    '<p>alpha',              // 2  (quote starts here)
+    'beta',                  // 3
+    'gamma</p>'              // 4  (quote ends here)
+  ].join('\n');
+  const state = {
+    schemaVersion: 1, docId: 'x', docTitle: 'd.html',
+    comments: [mkComment('alpha\nbeta\ngamma', 'spans lines')]
+  };
+  const md = markdown.toMarkdown(state, { date: '2026-06-03', docHtml });
+  assert.match(md, /\(lines 2–4\)/);
+});
+
+test('toMarkdown spans a line range for a selection crossing block boundaries', () => {
+  const docHtml = [
+    '<h2>Architecture</h2>',                 // 1
+    '<p>Incoming edits go to Redis</p>',     // 2  (quote starts: "Incoming edits go to Redis")
+    '<h2>Data Model</h2>',                   // 3
+    '<p>checked on every edit</p>'           // 4  (quote ends: "checked on every edit")
+  ].join('\n');
+  // Flat-text selection across the two <p> blocks: tags are gone, but the source
+  // newlines between blocks remain as whitespace text nodes.
+  const quote = 'Incoming edits go to Redis\nData Model\nchecked on every edit';
+  const state = {
+    schemaVersion: 1, docId: 'x', docTitle: 'd.html',
+    comments: [mkComment(quote, 'failure story?')]
+  };
+  const md = markdown.toMarkdown(state, { date: '2026-06-03', docHtml });
+  assert.match(md, /\(lines 2–4\)/);
+});
+
+test('toMarkdown honours occurrence to pick the right repeat for the line ref', () => {
+  const docHtml = ['<p>token</p>', '<p>token</p>', '<p>token</p>'].join('\n'); // lines 1,2,3
+  const state = {
+    schemaVersion: 1, docId: 'x', docTitle: 'd.html',
+    comments: [{ id: 'c', anchor: { quote: 'token', prefix: '', suffix: '', occurrence: 2 }, body: 'third one', createdAt: '2026-06-03T12:00:00.000Z', author: null }]
+  };
+  const md = markdown.toMarkdown(state, { date: '2026-06-03', docHtml });
+  assert.match(md, /\(line 3\)/);
+});
+
+test('toMarkdown locates a quote containing &/< via entity-encoded fallback', () => {
+  const docHtml = '<p>cost is 5 &amp; rising &lt; 10</p>'; // line 1
+  const state = {
+    schemaVersion: 1, docId: 'x', docTitle: 'd.html',
+    comments: [mkComment('5 & rising < 10', 'clarify')]
+  };
+  const md = markdown.toMarkdown(state, { date: '2026-06-03', docHtml });
+  assert.match(md, /\(line 1\)/);
+});
+
+test('toMarkdown omits a line ref when the quote is not found', () => {
+  const state = {
+    schemaVersion: 1, docId: 'x', docTitle: 'd.html',
+    comments: [mkComment('nowhere to be found', 'note')]
+  };
+  const md = markdown.toMarkdown(state, { date: '2026-06-03', docHtml: '<p>unrelated text</p>' });
+  assert.match(md, /1\. > "nowhere to be found"\n/); // no "(line ...)" suffix
+  assert.doesNotMatch(md, /\(line/);
+});
+
+/* --- long-quote condensing ------------------------------------------------- */
+
+test('condenseQuote leaves a short quote untouched (whitespace collapsed)', () => {
+  assert.strictEqual(markdown.condenseQuote('a   short\nquote'), 'a short quote');
+});
+
+test('condenseQuote keeps first/last sentences of a long passage with " (…) "', () => {
+  const long =
+    'The system starts here with the first point. ' +
+    'Then a second sentence elaborates further on the design. ' +
+    'A third middle sentence adds detail nobody needs to re-read. ' +
+    'A fourth middle sentence keeps going and going and going. ' +
+    'A fifth sentence still in the middle of the passage. ' +
+    'Finally the passage ends with this concluding thought.';
+  const out = markdown.condenseQuote(long);
+  assert.ok(out.length < long.length, 'condensed is shorter');
+  assert.match(out, / \(…\) /);
+  assert.match(out, /^The system starts here/);
+  assert.match(out, /concluding thought\.$/);
+  assert.doesNotMatch(out, /third middle sentence/);
+});
+
+test('toMarkdown condenses a long quote inline but its line ref spans the full passage', () => {
+  // The selection's flat text preserves the source newlines (text nodes do),
+  // so the quote and the markup share the same line breaks.
+  const sentences = [
+    'Sentence one introduces the overall idea of the passage clearly.',
+    'Sentence two continues to elaborate on the supporting detail at length.',
+    'Sentence three is filler that nobody really needs to read again later.',
+    'Sentence four is filler too and keeps padding out the middle section.',
+    'Sentence five wraps up this deliberately long passage in its entirety.'
+  ];
+  const quote = sentences.join('\n');                 // each sentence on its own line
+  const docHtml = '<p>\n' + quote + '\n</p>';         // line 1 = <p>, lines 2–6 = sentences
+  const state = {
+    schemaVersion: 1, docId: 'x', docTitle: 'd.html',
+    comments: [mkComment(quote, 'too long')]
+  };
+  const md = markdown.toMarkdown(state, { date: '2026-06-03', docHtml });
+  assert.match(md, / \(…\) /);            // condensed display
+  assert.match(md, /\(lines 2–6\)/);      // ranged ref over the full passage
+});

@@ -197,7 +197,8 @@
   /** Render State to Markdown via the runtime module (with a tiny fallback). */
   function renderMarkdown(state) {
     if (RT.markdown && typeof RT.markdown.toMarkdown === 'function') {
-      return RT.markdown.toMarkdown(state);
+      // Pass the document content markup so each quote gets a line reference.
+      return RT.markdown.toMarkdown(state, { docHtml: docContentHtml() });
     }
     // Minimal fallback so copy still produces something useful.
     const comments = (state && Array.isArray(state.comments)) ? state.comments : [];
@@ -219,6 +220,34 @@
   function collectDocHtml() {
     const el = document.documentElement;
     return el ? el.outerHTML : (document.body ? document.body.outerHTML : '');
+  }
+
+  /**
+   * The document's markup with Noteback's own UI removed and highlight <mark>
+   * wrappers unwrapped — used for markdown line references. Based on the full
+   * <html> so line numbers track the actual .html file the user opened.
+   */
+  function docContentHtml() {
+    try {
+      const el = document.documentElement;
+      if (!el || typeof el.cloneNode !== 'function') return '';
+      const clone = el.cloneNode(true);
+      const ui = clone.querySelectorAll('[data-noteback-ui]');
+      for (let i = 0; i < ui.length; i++) {
+        if (ui[i].parentNode) ui[i].parentNode.removeChild(ui[i]);
+      }
+      const marks = clone.querySelectorAll('mark.noteback-highlight');
+      for (let i = 0; i < marks.length; i++) {
+        const m = marks[i];
+        const p = m.parentNode;
+        if (!p) continue;
+        while (m.firstChild) p.insertBefore(m.firstChild, m);
+        p.removeChild(m);
+      }
+      return clone.outerHTML || '';
+    } catch (e) {
+      return '';
+    }
   }
 
   /** Send a message to the service worker, resolving with its response. */

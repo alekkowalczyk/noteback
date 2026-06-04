@@ -9,7 +9,7 @@ When you hand the user an HTML deliverable to review, give it to them **already
 annotatable**. Instead of plain HTML, emit a Noteback *feedback canvas*: the same
 document with a tiny runtime baked in, so the user can highlight any passage,
 attach a note (or add a note about the whole document), and click **Copy feedback
-as Markdown** to paste back to you. No browser extension, no server, no install —
+as markdown** to paste back to you. No browser extension, no server, no install —
 they just open the file.
 
 ## When this applies
@@ -81,7 +81,7 @@ Show a short, consistent message so the workflow is obvious:
 > 📝 I wrote this as a **Noteback canvas** — open **`plan.html`** in your browser.
 > Highlight any text to comment on it, or use the **🗨 Noteback** button (bottom-right)
 > to add a note about the whole document. When you're done, click **Copy feedback as
-> Markdown** and paste it back here and I'll revise.
+> markdown** and paste it back here and I'll revise.
 
 Adjust the filename, but keep the three beats: *open it · comment · copy the markdown
 back to me*.
@@ -90,8 +90,12 @@ back to me*.
 
 When the user pastes the Markdown feedback back, treat each item as a change request
 against the document: the quoted passage tells you *where*, the note tells you *what*.
-Whole-document notes (`(note on the whole document)`) apply to the doc as a whole.
-Revise the HTML, then wrap again and hand it back for another pass.
+Each quoted item also carries a `(line N)` / `(lines A–B)` reference into the document
+markup to help you jump to the passage — but the quote is the source of truth; if a
+line ref and the quote ever disagree, trust the quote. A long passage is shown
+condensed as `first sentence(s) (…) last sentence(s)`, with the line range covering the
+*whole* selection. Whole-document notes (`(note on the whole document)`) apply to the
+doc as a whole. Revise the HTML, then wrap again and hand it back for another pass.
 
 The user does **not** need to save the HTML or send you a file for this loop — the
 Markdown they copy carries everything you need. (Saving the HTML is only for when
