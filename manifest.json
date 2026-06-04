@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Noteback",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Annotate AI docs & copy/share feedback for Claude, ChatGPT & co. Highlight a local HTML spec, attach a comment, then copy it as Markdown or save a self-contained feedback canvas.",
   "permissions": [
     "storage",
