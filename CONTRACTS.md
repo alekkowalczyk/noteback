@@ -331,7 +331,8 @@ which hide every `[data-noteback-ui]` node and strip highlight styling — so a 
 the clean document without needing a hook. The embedded canvas supplies `onSaveCanvas`
 + `onSaveClean`; both serialize the live document (clean copy additionally removes the
 state block, the inlined runtime `<script>`, the `#noteback-doc-root` wrapper, the
-guiding comment, and the title suffix) and persist via `saveCanvasInPlace`/`downloadCanvas`.
+guiding comment, and the title suffix) and persist via `saveCanvasInPlace`/`downloadCanvas`
+under the plain document filename.
 
 ### 3.7 `runtime/boot.js` (DOM-only → `NotebackRuntime.boot`)
 Single entry point used by **both** modes.

@@ -288,9 +288,6 @@ test('embedded boot wires the clean-HTML export (Save… → HTML · clean copy)
   assert.ok(boot.includes('noteback-state'), 'clean rebuild targets the state block');
   assert.ok(/NotebackRuntime/.test(boot), 'clean rebuild detects the inlined runtime script');
   assert.ok(boot.includes('noteback-doc-root'), 'clean rebuild unwraps the doc root');
-  // A distinct filename so a clean copy can't clobber the canvas next to it.
-  assert.ok(boot.includes('cleanSuggestedName') && boot.includes('(clean)'),
-    'clean copy gets a "(clean)" filename suffix');
   assert.doesNotThrow(function () { new vm.Script(boot); }, 'embedded boot still parses');
 });
 
