@@ -1,13 +1,43 @@
 {
   "name": "noteback",
   "version": "1.0.0",
-  "description": "Annotate AI docs & copy/share feedback for Claude, ChatGPT & co. Zero-backend Chrome extension (Manifest V3).",
-  "private": true,
+  "description": "Annotate AI docs & copy/share feedback for Claude, ChatGPT & co. Zero-backend Chrome extension (Manifest V3) + `npx noteback wrap` feedback canvas + agent skill.",
   "type": "commonjs",
   "license": "MIT",
   "bin": {
     "noteback": "bin/noteback.js"
   },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=16.7.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alekkowalczyk/noteback.git"
+  },
+  "homepage": "https://github.com/alekkowalczyk/noteback#readme",
+  "bugs": {
+    "url": "https://github.com/alekkowalczyk/noteback/issues"
+  },
+  "keywords": [
+    "annotation",
+    "feedback",
+    "html",
+    "markdown",
+    "claude",
+    "claude-code",
+    "agent-skill",
+    "ai",
+    "review",
+    "chrome-extension",
+    "manifest-v3"
+  ],
   "scripts": {
     "test": "node --test \"test/**/*.test.js\""
   }

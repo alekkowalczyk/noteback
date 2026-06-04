@@ -91,6 +91,22 @@ it tells the agent to prefer HTML for reviewable docs, wrap them, and treat your
 Markdown as change requests. This is a third on-ramp to the **same embedded mode** the
 "Save as HTML with comments" button produces.
 
+### Install the skill (via npx)
+
+To make the skill available to Claude Code, drop it into a skills directory with the
+bundled installer:
+
+```sh
+npx noteback install-skill            # → ~/.claude/skills/noteback-canvas/ (personal)
+npx noteback install-skill --project  # → ./.claude/skills/noteback-canvas/ (this repo)
+npx noteback install-skill --dir <path>   # → a specific skills directory
+```
+
+Restart Claude Code afterward so it discovers the skill. (The skill then calls
+`npx noteback wrap` itself — both come from the same published package, so there's
+nothing else to install.) Prefer a managed setup? The same `skills/noteback-canvas/`
+folder can be vendored into a Claude Code plugin/marketplace instead.
+
 ## Install (unpacked, for development)
 
 1. Clone this repo.

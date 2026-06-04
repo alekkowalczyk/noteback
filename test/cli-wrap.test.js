@@ -140,3 +140,32 @@ test('wrapFile honors an explicit output path', () => {
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+/* --- install-skill -------------------------------------------------------- */
+
+test('install-skill copies the bundled skill into a target skills dir', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noteback-skill-'));
+  const code = cli.installSkill({ dir });
+  assert.strictEqual(code, 0, 'install succeeds');
+
+  const skillMd = path.join(dir, cli.SKILL_NAME, 'SKILL.md');
+  assert.ok(fs.existsSync(skillMd), 'SKILL.md installed under <dir>/noteback-canvas/');
+  assert.match(fs.readFileSync(skillMd, 'utf8'), /name:\s*noteback-canvas/, 'it is the real skill');
+
+  // Idempotent: a second install over the same dir still succeeds.
+  assert.strictEqual(cli.installSkill({ dir }), 0, 're-install is safe');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('resolveSkillsDir picks personal, project, or explicit scope', () => {
+  assert.strictEqual(cli.resolveSkillsDir({ dir: '/tmp/x' }), path.resolve('/tmp/x'));
+  assert.strictEqual(
+    cli.resolveSkillsDir({ project: true }),
+    path.join(process.cwd(), '.claude', 'skills')
+  );
+  assert.strictEqual(
+    cli.resolveSkillsDir({}),
+    path.join(os.homedir(), '.claude', 'skills')
+  );
+});

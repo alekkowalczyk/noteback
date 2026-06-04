@@ -25,9 +25,14 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const ROOT = path.resolve(__dirname, '..');
 const TEMPLATE_PATH = path.join(ROOT, 'src/canvas/canvas-template.html');
+
+// The bundled agent skill (shipped in the npm package) and its install name.
+const SKILL_NAME = 'noteback-canvas';
+const SKILL_SRC = path.join(ROOT, 'skills', SKILL_NAME);
 
 // Runtime files in dependency order — identical to examples/build-canvas.js and
 // the manifest's web_accessible_resources (extension-only modules excluded).
@@ -109,6 +114,48 @@ function wrapFile(inputPath, outputPath) {
 }
 
 /* --------------------------------------------------------------------------- *
+ * install-skill — drop the bundled agent skill into a Claude skills directory *
+ * --------------------------------------------------------------------------- */
+
+/**
+ * Resolve the skills directory to install into:
+ *   --dir <path> → that directory; --project → <cwd>/.claude/skills;
+ *   otherwise the personal scope ~/.claude/skills.
+ */
+function resolveSkillsDir(args) {
+  if (args.dir) return path.resolve(args.dir);
+  if (args.project) return path.join(process.cwd(), '.claude', 'skills');
+  return path.join(os.homedir(), '.claude', 'skills');
+}
+
+/**
+ * Copy the bundled skill into the resolved skills directory as
+ * `<skillsDir>/noteback-canvas/`. Idempotent (overwrites to update in place).
+ * @returns {number} process exit code.
+ */
+function installSkill(args) {
+  if (!fs.existsSync(SKILL_SRC)) {
+    process.stderr.write('noteback install-skill: bundled skill not found at ' + SKILL_SRC + '\n');
+    return 1;
+  }
+  const skillsDir = resolveSkillsDir(args || {});
+  const dest = path.join(skillsDir, SKILL_NAME);
+  try {
+    fs.mkdirSync(skillsDir, { recursive: true });
+    fs.cpSync(SKILL_SRC, dest, { recursive: true });
+  } catch (e) {
+    process.stderr.write('noteback install-skill: ' + (e && e.message ? e.message : String(e)) + '\n');
+    return 1;
+  }
+  process.stdout.write(
+    'Installed the Noteback skill → ' + dest + '\n' +
+    'Restart Claude Code (or your agent) so it discovers the skill.\n' +
+    'It wraps HTML docs you hand off for review with `npx noteback wrap`.\n'
+  );
+  return 0;
+}
+
+/* --------------------------------------------------------------------------- *
  * CLI                                                                         *
  * --------------------------------------------------------------------------- */
 
@@ -117,22 +164,33 @@ const USAGE = [
   '',
   'Usage:',
   '  noteback wrap <file.html> [-o <out.html>]',
+  '  noteback install-skill [--project] [--dir <path>]',
+  '',
+  'Commands:',
+  '  wrap           wrap an HTML doc as a feedback canvas (in place, or -o <path>)',
+  '  install-skill  install the Noteback agent skill into your Claude skills dir',
   '',
   'Options:',
-  '  -o, --out <path>   write the canvas to <path> instead of rewriting in place',
+  '  -o, --out <path>   (wrap) write the canvas to <path> instead of rewriting in place',
+  '  --project          (install-skill) use ./.claude/skills instead of ~/.claude/skills',
+  '  --dir <path>       (install-skill) install into a specific skills directory',
   '  -h, --help         show this help',
   '',
-  'The output opens directly in a browser (no extension): highlight text to',
-  'comment, add a whole-document note, then "Copy feedback as markdown".'
+  'The wrapped output opens directly in a browser (no extension): highlight text',
+  'to comment, add a whole-document note, then "Copy feedback as markdown".'
 ].join('\n');
 
 function parseArgs(argv) {
-  const args = { cmd: argv[0], input: null, out: null, help: false };
-  for (let i = 1; i < argv.length; i++) {
+  const args = { cmd: null, input: null, out: null, dir: null, project: false, help: false };
+  for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '-h' || a === '--help') args.help = true;
     else if (a === '-o' || a === '--out') args.out = argv[++i];
-    else if (!args.input) args.input = a;
+    else if (a === '--dir') args.dir = argv[++i];
+    else if (a === '--project') args.project = true;
+    else if (a[0] === '-') { /* unknown flag — ignore */ }
+    else if (!args.cmd) args.cmd = a;       // first bare token is the command
+    else if (!args.input) args.input = a;   // second bare token is the input file
   }
   return args;
 }
@@ -143,6 +201,9 @@ function main(argv) {
   if (args.help || !args.cmd) {
     process.stdout.write(USAGE + '\n');
     return 0;
+  }
+  if (args.cmd === 'install-skill') {
+    return installSkill(args);
   }
   if (args.cmd !== 'wrap') {
     process.stderr.write('noteback: unknown command "' + args.cmd + '"\n\n' + USAGE + '\n');
@@ -174,4 +235,4 @@ if (require.main === module) {
   process.exit(main(process.argv.slice(2)));
 }
 
-module.exports = { wrapHtml, wrapFile, deriveTitle, main, RUNTIME_FILES };
+module.exports = { wrapHtml, wrapFile, deriveTitle, main, installSkill, resolveSkillsDir, RUNTIME_FILES, SKILL_NAME };
