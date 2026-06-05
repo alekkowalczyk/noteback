@@ -74,3 +74,15 @@ test('pickSectionNodes handles a block with no heading and no prev sibling', () 
   const picked = snap.pickSectionNodes(block);
   assert.deepStrictEqual(picked.map((n) => n.textContent), ['block', 'next']);
 });
+
+test('enclosingBlock finds the nearest block ancestor, else falls back to the node', () => {
+  const root = { tagName: 'DIV', nodeType: 1, parentElement: null };
+  const p = { tagName: 'P', nodeType: 1, parentElement: root };
+  const span = { tagName: 'SPAN', nodeType: 1, parentElement: p };
+  const textInSpan = { nodeType: 3, parentElement: span };
+  assert.strictEqual(snap.enclosingBlock(textInSpan, root), p, 'text node -> enclosing P');
+  assert.strictEqual(snap.enclosingBlock(span, root), p, 'inline span -> enclosing P');
+  assert.strictEqual(snap.enclosingBlock(p, root), p, 'block element returns itself');
+  const loneSpan = { tagName: 'SPAN', nodeType: 1, parentElement: root };
+  assert.strictEqual(snap.enclosingBlock(loneSpan, root), loneSpan, 'no block ancestor -> the node itself');
+});
