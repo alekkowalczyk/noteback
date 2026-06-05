@@ -19,7 +19,10 @@
 <body>
   <header class="nb-popup__header">
     <h1 class="nb-popup__title">Noteback</h1>
-    <button id="nb-gear" type="button" class="nb-gear" aria-label="Settings" aria-expanded="false">⚙︎</button>
+    <div class="nb-popup__head-ctrls">
+      <button id="nb-info-btn" type="button" class="nb-gear" aria-label="About Noteback" aria-expanded="false">ⓘ</button>
+      <button id="nb-gear" type="button" class="nb-gear" aria-label="Settings" aria-expanded="false">⚙︎</button>
+    </div>
   </header>
 
   <main class="nb-popup__body">
@@ -62,6 +65,15 @@
     <label class="nb-setting-row"><span>127.0.0.1</span>
       <span class="nb-switch"><input id="nb-type-127" type="checkbox" /><span class="nb-switch__slider"></span></span>
     </label>
+  </section>
+
+  <section id="nb-info" class="nb-popup__info" hidden>
+    <p class="nb-info-note">Noteback also ships as an agent skill + CLI, so an AI (Claude Code, etc.) can give you HTML that is already annotatable.</p>
+    <div class="nb-cmd"><code>npx skills add alekkowalczyk/noteback</code>
+      <button type="button" class="nb-cmd-copy" data-cmd="npx skills add alekkowalczyk/noteback" title="Copy command">Copy</button></div>
+    <div class="nb-cmd"><code>npx noteback install-skill</code>
+      <button type="button" class="nb-cmd-copy" data-cmd="npx noteback install-skill" title="Copy command">Copy</button></div>
+    <a class="nb-info-link" href="https://github.com/alekkowalczyk/noteback" target="_blank" rel="noopener noreferrer">View the project on GitHub ↗</a>
   </section>
 
   <section id="nb-onboarding" class="nb-popup__onboarding" hidden>

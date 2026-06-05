@@ -18,7 +18,9 @@ document.addEventListener('DOMContentLoaded', function () {
   const onboardingEl = byId('nb-onboarding');
   const statusEl = byId('nb-status');
   const gearBtn = byId('nb-gear');
+  const infoBtn = byId('nb-info-btn');
   const settingsPanel = byId('nb-settings');
+  const infoSection = byId('nb-info');
   const siteRow = byId('nb-site-row');
   const siteOriginEl = byId('nb-site-origin');
   const siteToggle = byId('nb-site-toggle');
@@ -47,8 +49,22 @@ document.addEventListener('DOMContentLoaded', function () {
 
     gearBtn.addEventListener('click', function () {
       const opening = settingsPanel.hasAttribute('hidden');
-      if (opening) { settingsPanel.removeAttribute('hidden'); gearBtn.setAttribute('aria-expanded', 'true'); }
-      else { settingsPanel.setAttribute('hidden', ''); gearBtn.setAttribute('aria-expanded', 'false'); }
+      if (opening) {
+        settingsPanel.removeAttribute('hidden'); gearBtn.setAttribute('aria-expanded', 'true');
+        hideInfo();
+      } else { settingsPanel.setAttribute('hidden', ''); gearBtn.setAttribute('aria-expanded', 'false'); }
+    });
+
+    infoBtn.addEventListener('click', function () {
+      const opening = infoSection.hasAttribute('hidden');
+      if (opening) {
+        infoSection.removeAttribute('hidden'); infoBtn.setAttribute('aria-expanded', 'true');
+        settingsPanel.setAttribute('hidden', ''); gearBtn.setAttribute('aria-expanded', 'false');
+      } else { hideInfo(); }
+    });
+    infoSection.addEventListener('click', function (e) {
+      const item = e.target.closest('.nb-cmd-copy');
+      if (item) copyCmd(item.getAttribute('data-cmd') || '');
     });
 
     Object.keys(typeInputs).forEach(function (type) {
@@ -340,6 +356,22 @@ document.addEventListener('DOMContentLoaded', function () {
         });
       } catch (e) { reject(e); }
     });
+  }
+
+  /* --- info dialog ------------------------------------------------------- */
+
+  function hideInfo() { infoSection.setAttribute('hidden', ''); infoBtn.setAttribute('aria-expanded', 'false'); }
+
+  function copyCmd(cmd) {
+    if (!cmd) return;
+    const done = function (ok) { setStatus(ok ? 'Copied command.' : 'Copy failed — select & copy manually.'); };
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(cmd).then(function () { done(true); }, function () { done(false); });
+        return;
+      }
+    } catch (e) { /* fall through */ }
+    done(false);
   }
 
   /* --- misc -------------------------------------------------------------- */
