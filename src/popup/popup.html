@@ -28,9 +28,17 @@
     <button id="nb-copy-markdown" type="button" class="nb-btn">
       Copy feedback as markdown
     </button>
-    <button id="nb-save-canvas" type="button" class="nb-btn">
-      Save as HTML with comments
-    </button>
+    <div class="nb-save-wrap">
+      <button id="nb-save-btn" type="button" class="nb-btn nb-save-btn"
+              aria-haspopup="menu" aria-expanded="false">
+        Save<span class="nb-caret" aria-hidden="true">▾</span>
+      </button>
+      <div id="nb-save-menu" class="nb-save-menu" role="menu" aria-label="Save options" hidden>
+        <button type="button" class="nb-menu-item" data-save="comments" role="menuitem">HTML · with comments</button>
+        <button type="button" class="nb-menu-item" data-save="clean" role="menuitem">HTML · clean copy</button>
+        <button type="button" class="nb-menu-item" data-save="pdf" role="menuitem">PDF/Print</button>
+      </div>
+    </div>
   </main>
 
   <section id="nb-onboarding" class="nb-popup__onboarding" hidden>
@@ -41,6 +49,7 @@
     <span id="nb-status" class="nb-popup__status"></span>
   </footer>
 
+  <script src="../content/origin-policy.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

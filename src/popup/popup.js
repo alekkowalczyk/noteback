@@ -2,18 +2,8 @@
  * Noteback — popup.js  (toolbar popup logic)
  *
  * Wires the popup buttons to the active tab's content script / the service
- * worker, and renders the onboarding card when "Allow access to file URLs" is
- * OFF on a file:// document (spec §9).
- *
- *   - Toggle sidebar    -> NOTEBACK_TOGGLE_SIDEBAR  (content script).
- *   - Copy as Markdown  -> NOTEBACK_COPY_MARKDOWN   (content script copies).
- *   - Save as HTML canvas -> NOTEBACK_SAVE_CANVAS   (content script -> worker).
- *
- * The content script may not be present on a file:// page when file-URL access
- * is disabled (it never injected); we detect that with a PING and show the
- * onboarding card instead of dead buttons.
+ * worker, renders the file-URL onboarding card, and drives the Save dropdown.
  */
-
 'use strict';
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -21,7 +11,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
   const btnToggle = byId('nb-toggle-sidebar');
   const btnCopy = byId('nb-copy-markdown');
-  const btnSave = byId('nb-save-canvas');
+  const saveBtn = byId('nb-save-btn');
+  const saveMenu = byId('nb-save-menu');
   const onboardingEl = byId('nb-onboarding');
   const statusEl = byId('nb-status');
 
@@ -31,19 +22,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function init() {
     getActiveTab()
-      .then(function (tab) {
-        activeTab = tab;
-        return refreshState(tab);
-      })
+      .then(function (tab) { activeTab = tab; return refreshState(tab); })
       .catch(function () {
         setStatus('Open a local HTML document to start annotating.');
         disableActions(true);
       });
 
     btnToggle.addEventListener('click', function () {
-      runAction('NOTEBACK_TOGGLE_SIDEBAR', 'Toggling sidebar…', function () {
-        window.close();
-      });
+      runAction('NOTEBACK_TOGGLE_SIDEBAR', 'Toggling sidebar…', function () { window.close(); });
     });
 
     btnCopy.addEventListener('click', function () {
@@ -52,56 +38,68 @@ document.addEventListener('DOMContentLoaded', function () {
       }, /*keepOpen*/ true);
     });
 
-    btnSave.addEventListener('click', function () {
-      runAction('NOTEBACK_SAVE_CANVAS', 'Saving HTML canvas…', function (resp) {
-        setStatus(resp && resp.ok ? 'Saving HTML canvas…' : 'Save failed.');
-        if (resp && resp.ok) setTimeout(function () { window.close(); }, 600);
-      }, /*keepOpen*/ true);
+    saveBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (saveMenu.hasAttribute('hidden')) openSaveMenu(); else closeSaveMenu();
     });
+    saveMenu.addEventListener('click', function (e) {
+      const item = e.target.closest('[data-save]');
+      if (!item) return;
+      closeSaveMenu();
+      doSave(item.getAttribute('data-save'));
+    });
+    document.addEventListener('click', function () { closeSaveMenu(); });
   }
 
-  /**
-   * Determine whether the content script is live in the tab and whether the
-   * onboarding card is needed (file:// + access disabled).
-   */
+  /* --- save dropdown ----------------------------------------------------- */
+
+  function openSaveMenu() { saveMenu.removeAttribute('hidden'); saveBtn.setAttribute('aria-expanded', 'true'); }
+  function closeSaveMenu() { saveMenu.setAttribute('hidden', ''); saveBtn.setAttribute('aria-expanded', 'false'); }
+
+  function doSave(kind) {
+    const map = {
+      comments: { type: 'NOTEBACK_SAVE_CANVAS', pending: 'Saving HTML with comments…' },
+      clean: { type: 'NOTEBACK_SAVE_CLEAN', pending: 'Saving clean HTML…' },
+      pdf: { type: 'NOTEBACK_SAVE_PDF', pending: 'Opening print…' }
+    };
+    const m = map[kind];
+    if (!m) return;
+    runAction(m.type, m.pending, function (resp) {
+      setStatus(resp && resp.ok ? m.pending : 'Save failed.');
+      if (resp && resp.ok && kind !== 'pdf') setTimeout(function () { window.close(); }, 600);
+    }, /*keepOpen*/ true);
+  }
+
+  /* --- state ------------------------------------------------------------- */
+
   function refreshState(tab) {
     const url = (tab && tab.url) || '';
     const isFile = /^file:\/\//i.test(url);
     const isLocalHttp = /^https?:\/\/(localhost|127\.0\.0\.1)([:/]|$)/i.test(url);
-    const isSupported = isFile || isLocalHttp;
-
-    if (!isSupported) {
+    if (!(isFile || isLocalHttp)) {
       setStatus('Noteback works on local file:// and localhost documents.');
       disableActions(true);
       return Promise.resolve();
     }
-
-    // Is the content script booted in this tab?
     return ping(tab.id).then(function (pong) {
       if (pong && pong.booted) {
         disableActions(false);
-        const n = countLabel(pong);
-        setStatus(n);
+        setStatus(countLabel(pong));
         hideOnboarding();
         return;
       }
-      // Not booted. On a file:// page this usually means file-URL access is off.
       return handleNotBooted(isFile);
-    }).catch(function () {
-      return handleNotBooted(isFile);
-    });
+    }).catch(function () { return handleNotBooted(isFile); });
   }
 
   function handleNotBooted(isFile) {
     if (isFile) {
-      // Confirm via the service worker whether file access is the cause.
       return checkFileAccess().then(function (allowed) {
         if (!allowed) {
           showOnboarding();
           disableActions(true);
           setStatus('Action needed to annotate local files.');
         } else {
-          // Access is on but the script hasn't booted (e.g. page still loading).
           disableActions(true);
           setStatus('Reload the page, then reopen Noteback.');
         }
@@ -120,29 +118,17 @@ document.addEventListener('DOMContentLoaded', function () {
   /* --- actions ----------------------------------------------------------- */
 
   function runAction(type, pending, onDone, keepOpen) {
-    if (!activeTab || activeTab.id == null) {
-      setStatus('No active document.');
-      return;
-    }
+    if (!activeTab || activeTab.id == null) { setStatus('No active document.'); return; }
     setStatus(pending);
     sendToTab(activeTab.id, { type: type }).then(
-      function (resp) {
-        if (typeof onDone === 'function') onDone(resp);
-        if (!keepOpen && (!resp || resp.ok !== false)) {
-          // Default: leave the popup open unless the handler closed it.
-        }
-      },
-      function (err) {
-        setStatus('Could not reach the page. Reload and try again.');
-        void err;
-      }
+      function (resp) { if (typeof onDone === 'function') onDone(resp); void keepOpen; },
+      function (err) { setStatus('Could not reach the page. Reload and try again.'); void err; }
     );
   }
 
   function disableActions(disabled) {
-    [btnToggle, btnCopy, btnSave].forEach(function (b) {
-      if (b) b.disabled = !!disabled;
-    });
+    [btnToggle, btnCopy, saveBtn].forEach(function (b) { if (b) b.disabled = !!disabled; });
+    if (disabled) closeSaveMenu();
   }
 
   /* --- onboarding card --------------------------------------------------- */
@@ -165,7 +151,6 @@ document.addEventListener('DOMContentLoaded', function () {
       '  <p class="nb-card__note">Serving docs from <code>localhost</code> or' +
       '   <code>127.0.0.1</code> needs no toggle.</p>' +
       '</div>';
-
     const openBtn = document.getElementById('nb-open-details');
     if (openBtn) {
       openBtn.addEventListener('click', function () {
@@ -177,16 +162,11 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  function hideOnboarding() {
-    onboardingEl.hidden = true;
-    onboardingEl.innerHTML = '';
-  }
+  function hideOnboarding() { onboardingEl.hidden = true; onboardingEl.innerHTML = ''; }
 
   /* --- messaging --------------------------------------------------------- */
 
-  function ping(tabId) {
-    return sendToTab(tabId, { type: 'NOTEBACK_PING' });
-  }
+  function ping(tabId) { return sendToTab(tabId, { type: 'NOTEBACK_PING' }); }
 
   function checkFileAccess() {
     return sendToWorker({ type: 'NOTEBACK_CHECK_FILE_ACCESS' })
@@ -214,9 +194,7 @@ document.addEventListener('DOMContentLoaded', function () {
           if (err) { reject(new Error(err.message || String(err))); return; }
           resolve(resp);
         });
-      } catch (e) {
-        reject(e);
-      }
+      } catch (e) { reject(e); }
     });
   }
 
@@ -228,20 +206,12 @@ document.addEventListener('DOMContentLoaded', function () {
           if (err) { reject(new Error(err.message || String(err))); return; }
           resolve(resp);
         });
-      } catch (e) {
-        reject(e);
-      }
+      } catch (e) { reject(e); }
     });
   }
 
   /* --- misc -------------------------------------------------------------- */
 
-  function setStatus(text) {
-    if (statusEl) statusEl.textContent = text || '';
-  }
-
-  function truncate(s, n) {
-    s = String(s == null ? '' : s);
-    return s.length > n ? s.slice(0, n - 1) + '…' : s;
-  }
+  function setStatus(text) { if (statusEl) statusEl.textContent = text || ''; }
+  function truncate(s, n) { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 });

@@ -133,3 +133,32 @@ body {
   font-size: 12px;
   color: #666;
 }
+
+/* --- Save dropdown ------------------------------------------------------- */
+.nb-save-wrap { position: relative; }
+
+.nb-save-btn { display: flex; align-items: center; justify-content: space-between; }
+.nb-caret { margin-left: 6px; font-size: 10px; opacity: 0.8; }
+
+.nb-save-menu {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--nb-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.nb-save-menu[hidden] { display: none; }
+
+.nb-menu-item {
+  padding: 8px 10px;
+  font: inherit;
+  text-align: left;
+  background: #fff;
+  border: none;
+  border-bottom: 1px solid var(--nb-border);
+  cursor: pointer;
+  color: var(--nb-fg);
+}
+.nb-menu-item:last-child { border-bottom: none; }
+.nb-menu-item:hover { background: #fffbeb; }
