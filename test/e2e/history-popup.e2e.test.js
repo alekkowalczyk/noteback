@@ -34,10 +34,16 @@ before(async () => {
   canvasHtml = fs.readFileSync(out, 'utf8');
   fs.unlinkSync(out);
 
+  // Enrich the Overview section to 3 paragraphs so the whole-section snapshot has
+  // multiple blocks to capture (spec.html ships one paragraph per section).
+  const OVERVIEW_EXTRA =
+    '<p>Context paragraph two of the Overview section, present so the snapshot has multiple blocks to capture.</p>' +
+    '<p>Context paragraph three of the Overview section, immediately before the next heading.</p>';
   server = http.createServer((req, res) => {
     // serveMode 'd2' rewrites visible text -> new content hash, same path -> same
     // lineage, so the 'd1' comment shows up as "Earlier feedback".
-    const body = serveMode === 'd2' ? canvasHtml.split('Technical Spec').join('Technical Spec — Revision 2') : canvasHtml;
+    let body = canvasHtml.replace('<h2>Architecture</h2>', OVERVIEW_EXTRA + '<h2>Architecture</h2>');
+    if (serveMode === 'd2') body = body.split('Technical Spec').join('Technical Spec — Revision 2');
     res.setHeader('content-type', 'text/html; charset=utf-8');
     res.end(body);
   });
@@ -137,11 +143,23 @@ test('history snapshot is captured on create and the "Earlier feedback" entry op
       const f = findFrame(document.documentElement);
       if (!f) return { error: 'no-iframe' };
       const d = f.contentDocument;
-      return { hasMark: !!d.querySelector('mark'), textLen: (d.body.textContent || '').length };
+      const blocks = Array.from(d.body.querySelectorAll('h1,h2,h3,h4,h5,h6,p,ul,ol,table,pre,blockquote'));
+      return {
+        hasMark: !!d.querySelector('mark'),
+        textLen: (d.body.textContent || '').length,
+        blockCount: blocks.length,
+        headings: blocks.filter((b) => /^H[1-6]$/.test(b.tagName)).map((b) => b.textContent.trim()),
+        text: d.body.textContent || ''
+      };
     });
     assert.ok(!inner.error, 'popup iframe present');
     assert.ok(inner.textLen > 0, 'popup shows the captured section text');
     assert.strictEqual(inner.hasMark, true, 'popup highlights the commented quote');
+    // Whole-section context: the full Overview section (heading + 3 paragraphs)...
+    assert.ok(inner.blockCount >= 4, 'popup shows the whole multi-block section (got ' + inner.blockCount + ' blocks)');
+    assert.deepStrictEqual(inner.headings, ['Overview'], 'only the section heading — capture stops at the next heading');
+    // ...but NOT the following section.
+    assert.ok(!/Architecture/.test(inner.text), 'the next section is excluded');
   } finally {
     await context.close();
   }

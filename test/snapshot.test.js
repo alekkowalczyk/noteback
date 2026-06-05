@@ -50,6 +50,49 @@ test('pickSectionNodes dedupes when heading is also the previous sibling', () =>
   assert.deepStrictEqual(picked.map((n) => n.textContent), ['H', 'block', 'next']);
 });
 
+test('pickSectionNodes captures the whole section up to the next same-level heading', () => {
+  const parent = el('SECTION');
+  const list = siblings(parent, [el('H2', 'Sec'), el('P', 'a'), el('UL', 'b'), el('P', 'c'), el('H2', 'Next'), el('P', 'd')]);
+  const picked = snap.pickSectionNodes(list[2]); // commented block is somewhere mid-section
+  assert.deepStrictEqual(picked.map((n) => n.textContent), ['Sec', 'a', 'b', 'c'], 'stops before the next H2, excludes its content');
+});
+
+test('pickSectionNodes stops at a higher-level heading', () => {
+  const parent = el('DIV');
+  const list = siblings(parent, [el('H2', 'Sec'), el('P', 'a'), el('H1', 'Top'), el('P', 'b')]);
+  const picked = snap.pickSectionNodes(list[1]);
+  assert.deepStrictEqual(picked.map((n) => n.textContent), ['Sec', 'a'], 'an H1 ends an H2 section');
+});
+
+test('pickSectionNodes keeps deeper sub-headings inside the section', () => {
+  const parent = el('SECTION');
+  const list = siblings(parent, [el('H2', 'Sec'), el('P', 'a'), el('H3', 'Sub'), el('P', 'b'), el('H2', 'Next')]);
+  const picked = snap.pickSectionNodes(list[1]);
+  assert.deepStrictEqual(picked.map((n) => n.textContent), ['Sec', 'a', 'Sub', 'b'], 'an H3 stays in; the next H2 ends it');
+});
+
+test('pickSectionNodes treats a highlighted heading as the section start', () => {
+  const parent = el('SECTION');
+  const list = siblings(parent, [el('H2', 'Sec'), el('P', 'a'), el('H2', 'Next'), el('P', 'b')]);
+  const picked = snap.pickSectionNodes(list[2]); // the H2 "Next" itself is highlighted
+  assert.deepStrictEqual(picked.map((n) => n.textContent), ['Next', 'b']);
+});
+
+test('pickSectionNodes falls back to a sibling window when there is no heading', () => {
+  const parent = el('DIV');
+  const list = siblings(parent, [el('P', 'p1'), el('P', 'p2'), el('P', 'block'), el('P', 'p4'), el('P', 'p5')]);
+  const picked = snap.pickSectionNodes(list[2]);
+  assert.deepStrictEqual(picked.map((n) => n.textContent), ['p1', 'p2', 'block', 'p4', 'p5'], 'up to 3 blocks each side');
+});
+
+test('headingLevel reads H1-H6 and aria-level, else 99', () => {
+  assert.strictEqual(snap.headingLevel(el('H1')), 1);
+  assert.strictEqual(snap.headingLevel(el('h3')), 3);
+  assert.strictEqual(snap.headingLevel(el('P')), 99);
+  const aria = { tagName: 'DIV', getAttribute: (n) => (n === 'role' ? 'heading' : (n === 'aria-level' ? '4' : null)) };
+  assert.strictEqual(snap.headingLevel(aria), 4);
+});
+
 test('identityCodec round-trips', async () => {
   const c = snap.identityCodec;
   assert.strictEqual(await c.decompress(await c.compress('hi <b>x</b>')), 'hi <b>x</b>');
@@ -135,6 +178,15 @@ test('extractSections skips whole-document notes (anchor == null)', () => {
   const ex = snap.extractSections({ root: root, doc: doc, comments: [{ id: 'c1', body: 'doc note', anchor: null }] });
   assert.strictEqual(ex.sections.length, 0);
   assert.deepStrictEqual(ex.sectionByCommentId, {});
+});
+
+test('extractSections trims an oversized section but still captures the commented block', () => {
+  const { doc, root } = sceneDom(true);
+  // A tiny cap forces the trim path; the section is still produced (windowed).
+  const ex = snap.extractSections({ root: root, doc: doc, comments: [{ id: 'c1', body: 'note', anchor: { quote: 'commented' } }], maxSectionChars: 5 });
+  assert.strictEqual(ex.sections.length, 1);
+  assert.strictEqual(ex.sectionByCommentId.c1, ex.sections[0].id);
+  assert.ok(ex.sections[0].html.length > 0);
 });
 
 test('enclosingBlock finds the nearest block ancestor, else falls back to the node', () => {
