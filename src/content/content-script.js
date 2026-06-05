@@ -202,6 +202,26 @@
         });
         return true;
 
+      case 'NOTEBACK_SAVE_CLEAN':
+        ready.then(function (c) {
+          if (!c) { sendResponse({ ok: false, error: 'not booted' }); return; }
+          Promise.resolve(c.saveClean()).then(
+            function () { sendResponse({ ok: true }); },
+            function (err) { sendResponse({ ok: false, error: String(err && err.message || err) }); }
+          );
+        });
+        return true;
+
+      case 'NOTEBACK_SAVE_PDF':
+        ready.then(function (c) {
+          if (!c) { sendResponse({ ok: false, error: 'not booted' }); return; }
+          Promise.resolve(c.savePdf()).then(
+            function () { sendResponse({ ok: true }); },
+            function (err) { sendResponse({ ok: false, error: String(err && err.message || err) }); }
+          );
+        });
+        return true;
+
       default:
         return false;
     }

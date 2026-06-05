@@ -146,7 +146,9 @@
       openSidebar: function () { return controller.openSidebar(); },
       closeSidebar: function () { return controller.closeSidebar(); },
       copyMarkdown: function () { return controller.copyMarkdown(); },
-      saveCanvas: function () { return controller.saveCanvas(); }
+      saveCanvas: function () { return controller.saveCanvas(); },
+      saveClean: function () { return controller.saveClean(); },
+      savePdf: function () { return controller.savePdf(); }
     };
     // Expose for the single-mount guard so a deferred second boot can adopt it.
     if (g) g.__notebackController = bootApi;
