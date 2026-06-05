@@ -75,6 +75,68 @@ test('pickSectionNodes handles a block with no heading and no prev sibling', () 
   assert.deepStrictEqual(picked.map((n) => n.textContent), ['block', 'next']);
 });
 
+/**
+ * Minimal DOM faithful to exactly the API extractSections + its helpers touch:
+ * root.querySelector (the painted-<mark> lookup), sibling/parent links, cloneNode,
+ * and a wrapper div whose innerHTML concatenates appended clones. `painted`
+ * toggles whether the comment's highlight mark is present in the document.
+ */
+function fakeEl(tag, text) {
+  const node = {
+    tagName: tag, nodeType: 1, parentElement: null,
+    previousElementSibling: null, nextElementSibling: null,
+    _html: '<' + tag.toLowerCase() + '>' + (text || '') + '</' + tag.toLowerCase() + '>',
+    getAttribute: function () { return null; },
+    querySelectorAll: function () { return []; },
+    cloneNode: function () { return { querySelectorAll: function () { return []; }, _html: node._html }; }
+  };
+  return node;
+}
+function sceneDom(painted) {
+  const mkWrap = function () {
+    const kids = [];
+    return { appendChild: function (c) { kids.push(c); }, get innerHTML() { return kids.map(function (k) { return k._html || ''; }).join(''); } };
+  };
+  const doc = {
+    createElement: function (t) { return t === 'div' ? mkWrap() : fakeEl(t); },
+    querySelectorAll: function () { return []; } // no inline <style>
+  };
+  const root = { tagName: 'DIV', nodeType: 1, parentElement: null };
+  const nodes = [fakeEl('H2', 'Section'), fakeEl('P', 'prev'), fakeEl('P', 'commented block'), fakeEl('P', 'next')];
+  nodes.forEach(function (n, i) { n.parentElement = root; n.previousElementSibling = nodes[i - 1] || null; n.nextElementSibling = nodes[i + 1] || null; });
+  const block = nodes[2];
+  const mark = { tagName: 'MARK', nodeType: 1, parentElement: block, getAttribute: function () { return null; }, querySelectorAll: function () { return []; }, cloneNode: function () { return { querySelectorAll: function () { return []; }, _html: '' }; } };
+  root.querySelector = function (sel) { return (painted && /data-noteback-id="c1"/.test(sel)) ? mark : null; };
+  return { doc: doc, root: root };
+}
+
+test('extractSections captures a section + sectionByCommentId when the highlight IS painted', () => {
+  const { doc, root } = sceneDom(true);
+  const comments = [{ id: 'c1', body: 'note', anchor: { quote: 'commented' } }];
+  const ex = snap.extractSections({ root: root, doc: doc, comments: comments });
+  assert.strictEqual(ex.sections.length, 1, 'one section captured');
+  assert.strictEqual(ex.sectionByCommentId.c1, ex.sections[0].id, 'comment maps to its section (=> clickable history)');
+  assert.ok(ex.sections[0].html.length > 0, 'section html is non-empty');
+});
+
+test('extractSections captures NOTHING when the highlight is not painted (the root-cause condition)', () => {
+  // This is exactly what happened pre-fix: persist()/extractSections ran before
+  // the new comment's <mark> was painted, so the snapshot silently captured no
+  // section — leaving the history entry permanently un-clickable.
+  const { doc, root } = sceneDom(false);
+  const comments = [{ id: 'c1', body: 'note', anchor: { quote: 'commented' } }];
+  const ex = snap.extractSections({ root: root, doc: doc, comments: comments });
+  assert.strictEqual(ex.sections.length, 0, 'no painted mark => no section');
+  assert.deepStrictEqual(ex.sectionByCommentId, {}, 'no painted mark => no comment mapping');
+});
+
+test('extractSections skips whole-document notes (anchor == null)', () => {
+  const { doc, root } = sceneDom(true);
+  const ex = snap.extractSections({ root: root, doc: doc, comments: [{ id: 'c1', body: 'doc note', anchor: null }] });
+  assert.strictEqual(ex.sections.length, 0);
+  assert.deepStrictEqual(ex.sectionByCommentId, {});
+});
+
 test('enclosingBlock finds the nearest block ancestor, else falls back to the node', () => {
   const root = { tagName: 'DIV', nodeType: 1, parentElement: null };
   const p = { tagName: 'P', nodeType: 1, parentElement: root };

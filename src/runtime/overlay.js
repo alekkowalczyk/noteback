@@ -1097,6 +1097,14 @@
         s = stateApi.addComment(s, { anchor: anchor, body: text });
       }
       setState(s);
+      // The canvas captures per-draft history snapshots by reading the painted
+      // <mark> highlights (snapshot.extractSections). The committed highlights —
+      // including this brand-new comment's — must be in the DOM BEFORE persist()
+      // runs its snapshot, or the snapshot misses the new comment and its later
+      // history entry is never clickable. So drop the compose-time preview and
+      // paint the real highlights first, then persist.
+      clearAnchorPreview();
+      repaintHighlights();
       await persist(s);
       closePopover();
       clearSelection();

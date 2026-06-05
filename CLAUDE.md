@@ -65,6 +65,21 @@ the code, that have already bitten us once.
   reproduction. The highlighted quote is interpolated into an injected `<script>`,
   so it is escaped with `.replace(/<\//g, '<\\/')` to prevent a `</script>` in the
   quote from breaking out (a real quote from an HTML/security doc can contain it).
+- **History snapshots are read from the PAINTED highlights — paint before persist.**
+  `snapshot.extractSections` locates a comment's section by querying
+  `mark.noteback-highlight[data-noteback-id="<id>"]` in the live doc. So
+  `overlay.commitPopover` must paint the committed highlights (drop the compose
+  preview, then `repaintHighlights()`) **before** `await persist(s)` runs the
+  snapshot. If persist runs first, a brand-new comment's `<mark>` isn't in the DOM
+  yet, the snapshot is captured empty (`sections:[]`, no `sectionByCommentId`), and
+  the comment's later "Earlier feedback" entry is silently un-clickable
+  (`hasSnapshot:false`, `sectionId:null` → the overlay `disable`s the button: no
+  pointer cursor, clicks ignored). This shipped once and was found only in the live
+  canvas — **no `node --test` test catches it** because the bug lives in the
+  overlay's DOM paint/persist ordering, which has no Node-side DOM. The Node tests
+  cover the seams around it (`extractSections` with/without a painted mark;
+  `history()` reporting `hasSnapshot`/`sectionId`); the ordering itself is held by
+  this comment + live verification (real drag-select → reload → click the entry).
 
 ## Live verification (Playwright)
 

@@ -148,6 +148,49 @@ test('section returns the decompressed snapshot html + styles', async () => {
   assert.deepStrictEqual(sec, { html: '<p>frag</p>', styles: 'body{color:red}' });
 });
 
+test('history surfaces hasSnapshot + per-comment sectionId (the overlay clickability gate)', async () => {
+  const store = fakeStore();
+  const dh = makeCore(store);
+  const key = 'file:///a.html';
+  // Draft 1: a comment WITH a captured section snapshot, plus one withOUT a mapping.
+  // The overlay enables the "open snapshot" popup only when hasSnapshot && sectionId.
+  const r1 = await dh.resolve({ contentText: 'Draft one has plenty of body text here for hashing.', attachKey: key, fallbackComments: [] });
+  await dh.persist({
+    contentHash: r1.contentHash,
+    comments: [
+      { id: 'withSnap', body: 'has snapshot', anchor: { quote: 'plenty', prefix: '', suffix: '', occurrence: 0 }, createdAt: 'x', author: null },
+      { id: 'noSnap', body: 'no snapshot', anchor: { quote: 'body', prefix: '', suffix: '', occurrence: 0 }, createdAt: 'x', author: null }
+    ],
+    sections: [{ id: 's1', html: '<p>frag</p>' }],
+    styles: '',
+    sectionByCommentId: { withSnap: 's1' }
+  });
+  const r2 = await dh.resolve({ contentText: 'Draft two has plenty of body text here for hashing.', attachKey: key, fallbackComments: [] });
+  const hist = await dh.history({ lineageId: r2.lineageId, exceptHash: r2.contentHash });
+  assert.strictEqual(hist.length, 1);
+  assert.strictEqual(hist[0].hasSnapshot, true, 'a captured section => hasSnapshot true');
+  const byId = {};
+  hist[0].comments.forEach((c) => { byId[c.id] = c; });
+  assert.strictEqual(byId.withSnap.sectionId, 's1', 'mapped comment carries its sectionId (clickable)');
+  assert.strictEqual(byId.noSnap.sectionId, null, 'unmapped comment has sectionId null (not clickable)');
+});
+
+test('history reports hasSnapshot false when no section was captured (the pre-fix bug shape)', async () => {
+  const store = fakeStore();
+  const dh = makeCore(store);
+  const key = 'file:///a.html';
+  // Exactly the broken pre-fix persist: an anchored comment stored with NO
+  // sections/sectionByCommentId (snapshot ran before the highlight was painted).
+  // Such a history entry must report hasSnapshot:false and sectionId:null so the
+  // overlay disables it rather than opening an empty popup.
+  const r1 = await dh.resolve({ contentText: 'Draft one has plenty of body text here for hashing.', attachKey: key, fallbackComments: [] });
+  await dh.persist({ contentHash: r1.contentHash, comments: [{ id: 'c1', body: 'orphan', anchor: { quote: 'plenty', prefix: '', suffix: '', occurrence: 0 }, createdAt: 'x', author: null }], sections: [], styles: '' });
+  const r2 = await dh.resolve({ contentText: 'Draft two has plenty of body text here for hashing.', attachKey: key, fallbackComments: [] });
+  const hist = await dh.history({ lineageId: r2.lineageId, exceptHash: r2.contentHash });
+  assert.strictEqual(hist[0].hasSnapshot, false, 'no captured section => not clickable');
+  assert.strictEqual(hist[0].comments[0].sectionId, null);
+});
+
 test('clearCurrent empties the draft (kept out of history) but leaves siblings', async () => {
   const store = fakeStore();
   const dh = makeCore(store);
