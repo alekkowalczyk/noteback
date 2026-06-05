@@ -273,7 +273,7 @@
           entries.forEach(function (e) {
             const lid = e.gen.lineageId;
             const t = Date.parse(e.gen.lastEditedAt) || 0;
-            if (!newestKeyByLineage[lid] || t > newestKeyByLineage[lid].t) {
+            if (!newestKeyByLineage[lid] || t >= newestKeyByLineage[lid].t) {
               newestKeyByLineage[lid] = { t: t, key: e.key };
             }
           });
@@ -292,6 +292,7 @@
           // Pass 1: strip snapshots from oldest entries while over cap.
           for (let i = 0; i < entries.length && total() > limits.maxBytes; i++) {
             const e = entries[i];
+            if (protectedHash && e.key === GEN + protectedHash) continue;
             if (e.gen && (e.gen.sections.length || e.gen.styles)) {
               e.gen = Object.assign({}, e.gen);
               e.gen.sections = [];

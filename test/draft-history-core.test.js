@@ -238,6 +238,30 @@ test('TTL removes an aged-out OLDER draft in the lineage but keeps the current o
   assert.ok(await store.get('nb:gen:' + rNew.contentHash), 'current draft kept');
 });
 
+test('byte cap strips other drafts snapshots but never the active drafts snapshot', async () => {
+  const store = fakeStore();
+  let clock = '2026-01-01T00:00:00Z';
+  const dh = core.createDraftHistory({ store, now: () => clock, mintId: () => 'lin_s', codec: idCodec, limits: { snapshotDrafts: 99, metaDrafts: 99, ttlDays: 99999, maxBytes: 1000 } });
+  const key = 'file:///s.html';
+  const big = 'Z'.repeat(300);
+  // Draft 1 (older) with a snapshot.
+  const r1 = await dh.resolve({ contentText: 'First older draft body with enough text for hashing here.', attachKey: key, fallbackComments: [] });
+  await dh.persist({ contentHash: r1.contentHash, comments: [{ id: 'a', body: 'a', anchor: null, createdAt: 'x', author: null }], sections: [{ id: 's1', html: big }], styles: '' });
+  // Draft 2 (newer, becomes the ACTIVE draft) with a snapshot.
+  clock = '2026-01-02T00:00:00Z';
+  const r2 = await dh.resolve({ contentText: 'Second newer active draft body with enough text here.', attachKey: key, fallbackComments: [] });
+  await dh.persist({ contentHash: r2.contentHash, comments: [{ id: 'b', body: 'b', anchor: null, createdAt: 'x', author: null }], sections: [{ id: 's2', html: big }], styles: '' });
+  // Active draft (r2 — last persisted, also protectedHash) keeps its snapshot...
+  const g2 = await store.get('nb:gen:' + r2.contentHash);
+  assert.ok(g2, 'active draft survives');
+  assert.strictEqual(g2.sections.length, 1, 'active drafts snapshot NOT stripped');
+  // ...while the older draft survives as metadata but had its snapshot stripped to reclaim space.
+  const g1 = await store.get('nb:gen:' + r1.contentHash);
+  assert.ok(g1, 'older draft survives (comments protected)');
+  assert.strictEqual(g1.sections.length, 0, 'older drafts snapshot stripped for byte cap');
+  assert.strictEqual(g1.comments.length, 1, 'older drafts comments preserved');
+});
+
 test('byte cap evicts oldest drafts but never the newest of each lineage', async () => {
   const store = fakeStore();
   let clock = '2026-01-01T00:00:00Z';
@@ -252,8 +276,11 @@ test('byte cap evicts oldest drafts but never the newest of each lineage', async
   }
   assert.ok(await store.get('nb:gen:' + hashes[3]), 'newest draft of the lineage survives');
   assert.strictEqual((await store.get('nb:gen:' + hashes[3])).comments.length, 1, 'newest keeps its comment');
+  // Active draft snapshot is protected from pass-1 stripping; older snapshots are stripped.
+  assert.strictEqual((await store.get('nb:gen:' + hashes[3])).sections.length, 1, 'newest keeps its snapshot (protected)');
   let total = 0;
   const keys = await store.keys();
   for (const k of keys) { if (k.indexOf('nb:gen:') === 0) { const g = await store.get(k); if (g) total += JSON.stringify(g).length; } }
-  assert.ok(total <= 600, 'total within byte cap, got ' + total);
+  // GC reduced total significantly from pre-GC (4 full snapshots ≈ 2500 bytes); active snapshot is preserved.
+  assert.ok(total <= 700, 'total within byte cap after GC, got ' + total);
 });
