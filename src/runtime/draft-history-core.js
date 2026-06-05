@@ -209,7 +209,81 @@
       });
     }
 
-    function pruneLineage() { return Promise.resolve(); } // implemented in Task 3
+    /**
+     * Enforce retention for a lineage: snapshot window, metadata window, TTL,
+     * and a coarse byte cap. `lin.generations` is oldest→newest.
+     */
+    function pruneLineage(lineageId) {
+      return store.get(linKey(lineageId)).then(function (lin) {
+        if (!lin) return;
+        const gens = lin.generations.slice(); // oldest -> newest
+        const ttlCutoff = Date.parse(now()) - limits.ttlDays * 86400000;
+
+        return gens.reduce(function (chain, h, idx) {
+          return chain.then(function () {
+            return store.get(genKey(h)).then(function (gen) {
+              if (!gen) return { h: h, drop: true };
+              const ageFromNewest = gens.length - 1 - idx; // 0 = newest
+              const tooOld = isFinite(ttlCutoff) && Date.parse(gen.lastEditedAt) < ttlCutoff;
+              const beyondMeta = ageFromNewest >= limits.metaDrafts;
+              const beyondSnapshot = ageFromNewest >= limits.snapshotDrafts;
+              if (beyondMeta || tooOld) {
+                return store.remove(genKey(h)).then(function () { return { h: h, drop: true }; });
+              }
+              if (beyondSnapshot && (gen.sections.length || gen.styles)) {
+                gen = Object.assign({}, gen);
+                gen.sections = [];
+                gen.styles = '';
+                return store.set(genKey(h), gen).then(function () { return { h: h, drop: false }; });
+              }
+              return { h: h, drop: false };
+            });
+          });
+        }, Promise.resolve({})).then(function () {
+          // Re-read survivors to rebuild the lineage list in order.
+          const kept = [];
+          return gens.reduce(function (chain, h) {
+            return chain.then(function () {
+              return store.get(genKey(h)).then(function (gen) { if (gen) kept.push(h); });
+            });
+          }, Promise.resolve()).then(function () {
+            lin.generations = kept;
+            return store.set(linKey(lineageId), lin);
+          });
+        }).then(function () { return enforceByteCap(); });
+      });
+    }
+
+    /** Coarse global byte cap: evict oldest drafts' snapshots, then drafts. */
+    function enforceByteCap() {
+      return store.keys().then(function (keys) {
+        const genKeys = keys.filter(function (k) { return k.indexOf(GEN) === 0; });
+        return Promise.all(genKeys.map(function (k) {
+          return store.get(k).then(function (g) { return { key: k, gen: g }; });
+        })).then(function (entries) {
+          function total() {
+            return entries.reduce(function (sum, e) {
+              return sum + (e.gen ? JSON.stringify(e.gen).length : 0);
+            }, 0);
+          }
+          entries.sort(function (a, b) {
+            return Date.parse((a.gen && a.gen.lastEditedAt) || 0) - Date.parse((b.gen && b.gen.lastEditedAt) || 0);
+          });
+          const ops = [];
+          for (let i = 0; i < entries.length && total() > limits.maxBytes; i++) {
+            const e = entries[i];
+            if (!e.gen) continue;
+            if (e.gen.sections.length || e.gen.styles) { e.gen = Object.assign({}, e.gen); e.gen.sections = []; e.gen.styles = ''; ops.push(store.set(e.key, e.gen)); }
+          }
+          for (let j = 0; j < entries.length && total() > limits.maxBytes; j++) {
+            const e = entries[j];
+            if (!e.gen) continue;
+            ops.push(store.remove(e.key)); e.gen = null;
+          }
+          return Promise.all(ops);
+        });
+      });
+    }
 
     return { resolve: resolve, persist: persist, history: history, section: section, clearCurrent: clearCurrent };
   }

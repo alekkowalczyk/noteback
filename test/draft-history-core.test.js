@@ -162,3 +162,49 @@ test('clearCurrent empties the draft (kept out of history) but leaves siblings',
   const hist = await dh.history({ lineageId: r2.lineageId, exceptHash: r2.contentHash });
   assert.deepStrictEqual(hist.map((d) => d.comments[0].body), ['one']);
 });
+
+function coreWithLimits(store, limits) {
+  let n = 0;
+  return core.createDraftHistory({
+    store,
+    now: () => '2026-06-05T00:00:00Z',
+    mintId: () => 'lin_fixed',
+    codec: idCodec,
+    limits
+  });
+}
+
+test('GC drops snapshots beyond snapshotDrafts but keeps metadata', async () => {
+  const store = fakeStore();
+  const dh = coreWithLimits(store, { snapshotDrafts: 1, metaDrafts: 10, ttlDays: 99999, maxBytes: 1e9 });
+  const key = 'file:///a.html';
+  const texts = ['Alpha draft body has plenty of text for the hash.', 'Beta draft body has plenty of text for the hash.', 'Gamma draft body has plenty of text for the hash.'];
+  const hashes = [];
+  for (const t of texts) {
+    const r = await dh.resolve({ contentText: t, attachKey: key, fallbackComments: [] });
+    hashes.push(r.contentHash);
+    await dh.persist({ contentHash: r.contentHash, comments: [{ id: 'c', body: t, anchor: null, createdAt: 'x', author: null }], sections: [{ id: 's1', html: 'frag' }], styles: 'css' });
+  }
+  const oldest = await store.get('nb:gen:' + hashes[0]);
+  assert.deepStrictEqual(oldest.sections, [], 'oldest snapshot pruned');
+  assert.strictEqual(oldest.comments.length, 1, 'oldest metadata kept');
+  const newest = await store.get('nb:gen:' + hashes[2]);
+  assert.strictEqual(newest.sections.length, 1, 'newest snapshot kept');
+});
+
+test('GC removes drafts beyond metaDrafts entirely', async () => {
+  const store = fakeStore();
+  const dh = coreWithLimits(store, { snapshotDrafts: 1, metaDrafts: 2, ttlDays: 99999, maxBytes: 1e9 });
+  const key = 'file:///a.html';
+  const texts = ['Alpha draft body has plenty of text for the hash.', 'Beta draft body has plenty of text for the hash.', 'Gamma draft body has plenty of text for the hash.'];
+  const hashes = [];
+  for (const t of texts) {
+    const r = await dh.resolve({ contentText: t, attachKey: key, fallbackComments: [] });
+    hashes.push(r.contentHash);
+    await dh.persist({ contentHash: r.contentHash, comments: [{ id: 'c', body: t, anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
+  }
+  assert.strictEqual(await store.get('nb:gen:' + hashes[0]), null, 'oldest draft removed');
+  const lin = await store.get('nb:lin:lin_fixed');
+  assert.strictEqual(lin.generations.indexOf(hashes[0]), -1, 'removed from lineage list');
+  assert.strictEqual(lin.generations.length, 2);
+});
