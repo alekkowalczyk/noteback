@@ -19,6 +19,7 @@
 <body>
   <header class="nb-popup__header">
     <h1 class="nb-popup__title">Noteback</h1>
+    <button id="nb-gear" type="button" class="nb-gear" aria-label="Settings" aria-expanded="false">⚙︎</button>
   </header>
 
   <main class="nb-popup__body">
@@ -39,7 +40,29 @@
         <button type="button" class="nb-menu-item" data-save="pdf" role="menuitem">PDF/Print</button>
       </div>
     </div>
+
+    <div id="nb-site-row" class="nb-site-row" hidden>
+      <span class="nb-site-label">Active on <code id="nb-site-origin"></code></span>
+      <label class="nb-switch">
+        <input id="nb-site-toggle" type="checkbox" />
+        <span class="nb-switch__slider"></span>
+      </label>
+      <span id="nb-site-hint" class="nb-site-hint" hidden></span>
+    </div>
   </main>
+
+  <section id="nb-settings" class="nb-popup__settings" hidden>
+    <div class="nb-settings__title">Run Noteback on…</div>
+    <label class="nb-setting-row"><span>file://</span>
+      <span class="nb-switch"><input id="nb-type-file" type="checkbox" /><span class="nb-switch__slider"></span></span>
+    </label>
+    <label class="nb-setting-row"><span>localhost</span>
+      <span class="nb-switch"><input id="nb-type-localhost" type="checkbox" /><span class="nb-switch__slider"></span></span>
+    </label>
+    <label class="nb-setting-row"><span>127.0.0.1</span>
+      <span class="nb-switch"><input id="nb-type-127" type="checkbox" /><span class="nb-switch__slider"></span></span>
+    </label>
+  </section>
 
   <section id="nb-onboarding" class="nb-popup__onboarding" hidden>
     <!-- Filled by popup.js when "Allow access to file URLs" is disabled. -->

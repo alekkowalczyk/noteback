@@ -8,6 +8,8 @@
 
 document.addEventListener('DOMContentLoaded', function () {
   const byId = function (id) { return document.getElementById(id); };
+  const policy = (window.NotebackRuntime || {}).originPolicy || null;
+  const SETTINGS_KEY = (policy && policy.SETTINGS_KEY) || 'nb:settings';
 
   const btnToggle = byId('nb-toggle-sidebar');
   const btnCopy = byId('nb-copy-markdown');
@@ -15,18 +17,54 @@ document.addEventListener('DOMContentLoaded', function () {
   const saveMenu = byId('nb-save-menu');
   const onboardingEl = byId('nb-onboarding');
   const statusEl = byId('nb-status');
+  const gearBtn = byId('nb-gear');
+  const settingsPanel = byId('nb-settings');
+  const siteRow = byId('nb-site-row');
+  const siteOriginEl = byId('nb-site-origin');
+  const siteToggle = byId('nb-site-toggle');
+  const siteHint = byId('nb-site-hint');
+  const typeInputs = {
+    file: byId('nb-type-file'),
+    localhost: byId('nb-type-localhost'),
+    '127.0.0.1': byId('nb-type-127')
+  };
 
   let activeTab = null;
+  let tabInfo = { type: 'other', origin: '' };
+  let settings = null;
 
   init();
 
   function init() {
+    getSettings().then(function (s) { settings = s; renderTypeSwitches(); });
+
     getActiveTab()
-      .then(function (tab) { activeTab = tab; return refreshState(tab); })
+      .then(function (tab) { activeTab = tab; tabInfo = deriveTabInfo(tab); return refreshState(tab); })
       .catch(function () {
         setStatus('Open a local HTML document to start annotating.');
         disableActions(true);
       });
+
+    gearBtn.addEventListener('click', function () {
+      const opening = settingsPanel.hasAttribute('hidden');
+      if (opening) { settingsPanel.removeAttribute('hidden'); gearBtn.setAttribute('aria-expanded', 'true'); }
+      else { settingsPanel.setAttribute('hidden', ''); gearBtn.setAttribute('aria-expanded', 'false'); }
+    });
+
+    Object.keys(typeInputs).forEach(function (type) {
+      const input = typeInputs[type];
+      if (!input) return;
+      input.addEventListener('change', function () {
+        settings = withType(settings, type, input.checked);
+        saveSettings(settings).then(function () { renderTypeSwitches(); refreshState(activeTab); });
+      });
+    });
+
+    siteToggle.addEventListener('change', function () {
+      if (!tabInfo || tabInfo.type === 'other') return;
+      settings = withSite(settings, tabInfo.origin, siteToggle.checked);
+      saveSettings(settings).then(function () { refreshState(activeTab); });
+    });
 
     btnToggle.addEventListener('click', function () {
       runAction('NOTEBACK_TOGGLE_SIDEBAR', 'Toggling sidebar…', function () { window.close(); });
@@ -73,23 +111,31 @@ document.addEventListener('DOMContentLoaded', function () {
   /* --- state ------------------------------------------------------------- */
 
   function refreshState(tab) {
-    const url = (tab && tab.url) || '';
-    const isFile = /^file:\/\//i.test(url);
-    const isLocalHttp = /^https?:\/\/(localhost|127\.0\.0\.1)([:/]|$)/i.test(url);
-    if (!(isFile || isLocalHttp)) {
+    if (!tab) return Promise.resolve();
+    if (!tabInfo || tabInfo.type === 'other') {
+      hideSiteRow();
       setStatus('Noteback works on local file:// and localhost documents.');
       disableActions(true);
       return Promise.resolve();
     }
     return ping(tab.id).then(function (pong) {
+      // Content script is injected (PING answered).
+      hideOnboarding();
       if (pong && pong.booted) {
         disableActions(false);
+        showSiteRow(true);
         setStatus(countLabel(pong));
-        hideOnboarding();
-        return;
+      } else {
+        // Injected but dormant by settings.
+        disableActions(true);
+        showSiteRow(false);
+        setStatus('Noteback is off on this site.');
       }
-      return handleNotBooted(isFile);
-    }).catch(function () { return handleNotBooted(isFile); });
+    }).catch(function () {
+      // Not injected at all (file access off, or page still loading).
+      hideSiteRow();
+      return handleNotBooted(tabInfo.type === 'file');
+    });
   }
 
   function handleNotBooted(isFile) {
@@ -205,6 +251,92 @@ document.addEventListener('DOMContentLoaded', function () {
           const err = chrome.runtime && chrome.runtime.lastError;
           if (err) { reject(new Error(err.message || String(err))); return; }
           resolve(resp);
+        });
+      } catch (e) { reject(e); }
+    });
+  }
+
+  /* --- settings + per-origin --------------------------------------------- */
+
+  function deriveTabInfo(tab) {
+    const url = (tab && tab.url) || '';
+    try {
+      const u = new URL(url);
+      const loc = { protocol: u.protocol, hostname: u.hostname, host: u.host, origin: u.origin };
+      return {
+        type: policy ? policy.classifyOrigin(loc) : 'other',
+        origin: policy ? policy.originOf(loc) : u.origin
+      };
+    } catch (e) { return { type: 'other', origin: '' }; }
+  }
+
+  function typeOn(type) {
+    const norm = policy ? policy.normalizeSettings(settings) : { origins: { file: true, localhost: true, '127.0.0.1': true } };
+    return norm.origins[type] !== false;
+  }
+
+  function renderTypeSwitches() {
+    const norm = policy ? policy.normalizeSettings(settings) : { origins: { file: true, localhost: true, '127.0.0.1': true } };
+    if (typeInputs.file) typeInputs.file.checked = norm.origins.file;
+    if (typeInputs.localhost) typeInputs.localhost.checked = norm.origins.localhost;
+    if (typeInputs['127.0.0.1']) typeInputs['127.0.0.1'].checked = norm.origins['127.0.0.1'];
+  }
+
+  function showSiteRow(active) {
+    if (!tabInfo || tabInfo.type === 'other') { hideSiteRow(); return; }
+    siteRow.removeAttribute('hidden');
+    siteOriginEl.textContent = tabInfo.origin;
+    if (!typeOn(tabInfo.type)) {
+      // Per-site can't override a type that's switched off.
+      siteToggle.checked = false;
+      siteToggle.disabled = true;
+      siteHint.textContent = tabInfo.type + ' is off in settings';
+      siteHint.hidden = false;
+    } else {
+      siteToggle.disabled = false;
+      siteToggle.checked = !!active;
+      siteHint.hidden = true;
+      siteHint.textContent = '';
+    }
+  }
+
+  function hideSiteRow() { siteRow.setAttribute('hidden', ''); }
+
+  function withType(s, type, on) {
+    const norm = policy ? policy.normalizeSettings(s) : { origins: { file: true, localhost: true, '127.0.0.1': true }, disabledSites: [] };
+    norm.origins[type] = !!on;
+    return norm;
+  }
+
+  function withSite(s, origin, on) {
+    const norm = policy ? policy.normalizeSettings(s) : { origins: { file: true, localhost: true, '127.0.0.1': true }, disabledSites: [] };
+    const list = norm.disabledSites.slice();
+    const idx = list.indexOf(origin);
+    if (on) { if (idx !== -1) list.splice(idx, 1); }   // enable site → remove from disabled
+    else { if (idx === -1) list.push(origin); }        // disable site → add to disabled
+    norm.disabledSites = list;
+    return norm;
+  }
+
+  function getSettings() {
+    return new Promise(function (resolve) {
+      try {
+        chrome.storage.local.get(SETTINGS_KEY, function (items) {
+          const err = chrome.runtime && chrome.runtime.lastError;
+          resolve((!err && items && items[SETTINGS_KEY]) || null);
+        });
+      } catch (e) { resolve(null); }
+    });
+  }
+
+  function saveSettings(s) {
+    return new Promise(function (resolve, reject) {
+      const bag = {}; bag[SETTINGS_KEY] = s;
+      try {
+        chrome.storage.local.set(bag, function () {
+          const err = chrome.runtime && chrome.runtime.lastError;
+          if (err) { reject(new Error(err.message || String(err))); return; }
+          resolve();
         });
       } catch (e) { reject(e); }
     });
