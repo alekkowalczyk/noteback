@@ -256,6 +256,17 @@
     '.nb-mi-sub{display:block;font:400 11.5px/1.3 var(--nb-ui);color:var(--nb-ink-soft);margin-top:2px;}',
     '.nb-menu-sep{height:1px;background:var(--nb-line);margin:4px 9px;}',
 
+    /* earlier-feedback history + snapshot popup */
+    '.nb-history{margin-top:10px;border-top:1px solid var(--nb-line);padding-top:8px;}',
+    '.nb-hist-draft{font-size:12px;color:var(--nb-ink-soft,#6b7280);margin:8px 0 4px;}',
+    '.nb-hist-item{display:block;width:100%;text-align:left;border:none;background:none;cursor:pointer;padding:6px 8px;border-radius:8px;font:inherit;color:inherit;}',
+    '.nb-hist-item:hover:not(:disabled){background:var(--nb-accent-wash);}',
+    '.nb-hist-item:disabled{opacity:.55;cursor:default;}',
+    '.nb-hist-backdrop{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;}',
+    '.nb-hist-panel{position:relative;width:min(820px,92vw);height:min(80vh,720px);background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35);}',
+    '.nb-hist-close{position:absolute;top:8px;right:8px;z-index:2;border:none;background:#0001;border-radius:50%;width:28px;height:28px;cursor:pointer;}',
+    '.nb-hist-frame{width:100%;height:100%;border:0;background:#fff;}',
+
     /* toast + success check (transitions.dev) */
     '.nb-toast{position:fixed;bottom:20px;right:20px;display:inline-flex;align-items:center;gap:9px;',
     '  background:#2b2b29;color:#f4f4f2;padding:11px 15px 11px 13px;border-radius:13px;font:500 13px/1.2 var(--nb-ui);',
@@ -395,6 +406,7 @@
     const exporter = cfg.exporter || {};
     const getState = cfg.getState || (function () { return null; });
     const setState = cfg.setState || function () {};
+    const history = cfg.history || null;
     const onChange = cfg.onChange || function () {};
     // Prefer the runtime markdown module directly so we can hand it the document
     // markup for line references; fall back to the boot-supplied renderer.
@@ -487,6 +499,10 @@
       '      <button type="button" class="nb-menu-item nb-save-pdf" role="menuitem">' +
       '        <span class="nb-mi-label">PDF/Print</span>' +
       '        <span class="nb-mi-sub">print-ready, no comments</span></button>' +
+      '      <div class="nb-menu-sep" role="none"></div>' +
+      '      <button type="button" class="nb-menu-item nb-clear-comments" role="menuitem">' +
+      '        <span class="nb-mi-label">Clear my comments (this draft)</span>' +
+      '      </button>' +
       '    </div>' +
       '  </div>' +
       '</div>' +
@@ -516,6 +532,19 @@
     sidebar.querySelector('.nb-save-comments').addEventListener('click', function () { closeSaveMenu(); saveCanvas(); });
     sidebar.querySelector('.nb-save-clean').addEventListener('click', function () { closeSaveMenu(); saveClean(); });
     sidebar.querySelector('.nb-save-pdf').addEventListener('click', function () { closeSaveMenu(); savePdf(); });
+    const clearBtn = sidebar.querySelector('.nb-clear-comments');
+    if (!history) { clearBtn.style.display = 'none'; }
+    else {
+      clearBtn.addEventListener('click', function () {
+        closeSaveMenu();
+        Promise.resolve(history.clearCurrent()).then(function () {
+          const empty = { schemaVersion: 1, docId: (getState() || {}).docId || '', docTitle: (getState() || {}).docTitle || '', comments: [] };
+          setState(empty);
+          repaintHighlights();
+          renderSidebar();
+        });
+      });
+    }
 
     /* --- info dialog (install-as-a-skill) ------------------------------- */
     const infoBtn = sidebar.querySelector('.nb-info');
@@ -1130,6 +1159,7 @@
           '<strong>No notes yet</strong>' +
           'Select any text and click <b>Comment</b>, or add a note about the whole document above.';
         elList.appendChild(empty);
+        renderHistory();
         updateLauncher();
         return;
       }
@@ -1146,7 +1176,78 @@
         orphans.forEach(function (c) { elList.appendChild(renderItem(c, 'orphan')); });
       }
 
+      renderHistory();
       updateLauncher();
+    }
+
+    let historyLoaded = false;
+    function renderHistory() {
+      if (!history) return;
+      const existing = elList.querySelector('.nb-history');
+      if (existing) existing.remove();
+      const wrap = doc.createElement('div');
+      wrap.className = 'nb-history';
+      wrap.setAttribute('data-noteback-ui', 'history');
+      elList.appendChild(wrap);
+      Promise.resolve(history.getHistory()).then(function (drafts) {
+        if (!drafts || drafts.length === 0) { wrap.remove(); return; }
+        const label = doc.createElement('div');
+        label.className = 'nb-group-label';
+        label.textContent = 'Earlier feedback (' + drafts.length + (drafts.length === 1 ? ' draft)' : ' drafts)');
+        wrap.appendChild(label);
+        drafts.forEach(function (d) {
+          const dl = doc.createElement('div');
+          dl.className = 'nb-hist-draft';
+          dl.textContent = 'Draft \u00B7 ' + formatWhen(d.lastEditedAt || d.firstSeenAt) + ' (' + d.comments.length + ')';
+          wrap.appendChild(dl);
+          d.comments.forEach(function (c) {
+            const item = doc.createElement('button');
+            item.type = 'button';
+            item.className = 'nb-hist-item';
+            const quote = (c.anchor && c.anchor.quote) ? condense(c.anchor.quote) : '(note on the whole document)';
+            item.textContent = '\u201C' + quote + '\u201D \u2014 ' + (c.body || '');
+            if (c.anchor && d.hasSnapshot && c.sectionId) {
+              item.addEventListener('click', function () { openHistoryPopup(d.contentHash, c); });
+            } else {
+              item.disabled = true;
+            }
+            wrap.appendChild(item);
+          });
+        });
+      });
+    }
+
+    function condense(q) {
+      if (rt().markdown && rt().markdown.condenseQuote) return rt().markdown.condenseQuote(q);
+      return q.length > 80 ? q.slice(0, 77) + '\u2026' : q;
+    }
+    function formatWhen(iso) {
+      const d = new Date(iso || 0);
+      if (isNaN(d.getTime())) return 'earlier';
+      return d.toLocaleString();
+    }
+
+    function openHistoryPopup(contentHash, comment) {
+      Promise.resolve(history.getSection({ contentHash: contentHash, sectionId: comment.sectionId })).then(function (sec) {
+        const back = doc.createElement('div');
+        back.className = 'nb-hist-backdrop';
+        back.setAttribute('data-noteback-ui', 'history-popup');
+        const panel = doc.createElement('div');
+        panel.className = 'nb-hist-panel';
+        const close = doc.createElement('button');
+        close.type = 'button'; close.className = 'nb-hist-close'; close.textContent = '\u2715';
+        close.addEventListener('click', function () { back.remove(); });
+        back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
+        const frame = doc.createElement('iframe');
+        frame.className = 'nb-hist-frame';
+        const quote = (comment.anchor && comment.anchor.quote) || '';
+        const styles = (sec && sec.styles) || '';
+        const bodyHtml = (sec && sec.html) || '<p>(context no longer stored)</p>';
+        const script = '<scr' + 'ipt>(function(){try{var q=' + JSON.stringify(quote) + ';if(!q)return;var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);var n;while(n=w.nextNode()){var i=n.nodeValue.indexOf(q);if(i>=0){var r=document.createRange();r.setStart(n,i);r.setEnd(n,i+q.length);var m=document.createElement("mark");m.style.background="#fde68a";r.surroundContents(m);m.scrollIntoView({block:"center"});break;}}}catch(e){}})();</scr' + 'ipt>';
+        frame.srcdoc = '<!DOCTYPE html><html><head><base href="' + (typeof location !== 'undefined' ? location.href : '') + '"><style>' + styles + '</style></head><body>' + bodyHtml + script + '</body></html>';
+        panel.appendChild(close); panel.appendChild(frame);
+        back.appendChild(panel); uiRoot.appendChild(back);
+      });
     }
 
     function groupLabel(textValue) {

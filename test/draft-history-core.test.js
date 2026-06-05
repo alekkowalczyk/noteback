@@ -284,3 +284,14 @@ test('byte cap evicts oldest drafts but never the newest of each lineage', async
   // GC reduced total significantly from pre-GC (4 full snapshots ≈ 2500 bytes); active snapshot is preserved.
   assert.ok(total <= 700, 'total within byte cap after GC, got ' + total);
 });
+
+test('history attaches sectionId from the persisted map', async () => {
+  const store = fakeStore();
+  const dh = makeCore(store);
+  const key = 'file:///a.html';
+  const r1 = await dh.resolve({ contentText: 'This draft has plenty of body text here for hashing.', attachKey: key, fallbackComments: [] });
+  await dh.persist({ contentHash: r1.contentHash, comments: [{ id: 'c1', body: 'n', anchor: { quote: 'x', prefix: '', suffix: '', occurrence: 0 }, createdAt: 'x', author: null }], sections: [{ id: 's1', html: 'f' }], styles: '', sectionByCommentId: { c1: 's1' } });
+  const r2 = await dh.resolve({ contentText: 'A different draft body with plenty of text for hashing.', attachKey: key, fallbackComments: [] });
+  const hist = await dh.history({ lineageId: r2.lineageId, exceptHash: r2.contentHash });
+  assert.strictEqual(hist[0].comments[0].sectionId, 's1');
+});
