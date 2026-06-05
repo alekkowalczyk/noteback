@@ -40,7 +40,7 @@ function fakeStore(seed) {
   };
 }
 const idCodec = { compress: (s) => Promise.resolve(s), decompress: (s) => Promise.resolve(s) };
-function makeCore(store, t0) {
+function makeCore(store) {
   let n = 0;
   return core.createDraftHistory({
     store,
@@ -124,6 +124,28 @@ test('history lists only drafts with >=1 comment, newest first', async () => {
   await dh.persist({ contentHash: r3.contentHash, comments: [{ id: 'c3', body: 'three', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
   const hist = await dh.history({ lineageId: r3.lineageId, exceptHash: r3.contentHash });
   assert.deepStrictEqual(hist.map((d) => d.comments[0].body), ['one']);
+});
+
+test('history returns comment-bearing drafts newest-first', async () => {
+  const store = fakeStore();
+  const dh = makeCore(store);
+  const key = 'file:///a.html';
+  const rA = await dh.resolve({ contentText: 'Alpha draft has plenty of body text for hashing here.', attachKey: key, fallbackComments: [] });
+  await dh.persist({ contentHash: rA.contentHash, comments: [{ id: 'a', body: 'alpha', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
+  const rB = await dh.resolve({ contentText: 'Beta draft has plenty of body text for hashing here too.', attachKey: key, fallbackComments: [] });
+  await dh.persist({ contentHash: rB.contentHash, comments: [{ id: 'b', body: 'beta', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
+  const rC = await dh.resolve({ contentText: 'Gamma draft has plenty of body text for hashing here now.', attachKey: key, fallbackComments: [] });
+  const hist = await dh.history({ lineageId: rC.lineageId, exceptHash: rC.contentHash });
+  assert.deepStrictEqual(hist.map((d) => d.comments[0].body), ['beta', 'alpha']);
+});
+
+test('section returns the decompressed snapshot html + styles', async () => {
+  const store = fakeStore();
+  const dh = makeCore(store);
+  const r = await dh.resolve({ contentText: 'A draft with enough body text to clear the guard.', attachKey: 'file:///a.html', fallbackComments: [] });
+  await dh.persist({ contentHash: r.contentHash, comments: [{ id: 'c1', body: 'n', anchor: { quote: 'q', prefix: '', suffix: '', occurrence: 0 }, createdAt: 'x', author: null }], sections: [{ id: 's1', html: '<p>frag</p>' }], styles: 'body{color:red}', sectionByCommentId: { c1: 's1' } });
+  const sec = await dh.section({ contentHash: r.contentHash, sectionId: 's1' });
+  assert.deepStrictEqual(sec, { html: '<p>frag</p>', styles: 'body{color:red}' });
 });
 
 test('clearCurrent empties the draft (kept out of history) but leaves siblings', async () => {

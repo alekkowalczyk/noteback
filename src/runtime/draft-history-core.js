@@ -75,7 +75,7 @@
       return 'lin_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     });
     const codec = cfg.codec || { compress: function (s) { return Promise.resolve(s); }, decompress: function (s) { return Promise.resolve(s); } };
-    const limits = defaultLimits(cfg.limits);
+    const limits = defaultLimits(cfg.limits); // used by pruneLineage (Task 3)
 
     function genKey(h) { return GEN + h; }
     function linKey(id) { return LIN + id; }
@@ -124,6 +124,7 @@
     function ensureLineage(lineageId, hash, attachKey) {
       return store.get(linKey(lineageId)).then(function (lin) {
         lin = lin || { schemaVersion: 1, lineageId: lineageId, attachKeys: [], generations: [] };
+        lin = { schemaVersion: lin.schemaVersion || 1, lineageId: lin.lineageId || lineageId, attachKeys: (lin.attachKeys || []).slice(), generations: (lin.generations || []).slice() };
         if (lin.generations.indexOf(hash) === -1) lin.generations.push(hash);
         if (attachKey && lin.attachKeys.indexOf(attachKey) === -1) lin.attachKeys.push(attachKey);
         return store.set(linKey(lineageId), lin);
@@ -137,10 +138,15 @@
       });
     }
 
-    /** Write the current draft's comments + snapshot. */
+    /**
+     * Write the current draft's comments + snapshot.
+     * Callers pass ALREADY-compressed sections/styles; compression is the adapter's
+     * job. section() decompresses on read.
+     */
     function persist(p) {
       return store.get(genKey(p.contentHash)).then(function (gen) {
         if (!gen) return; // resolve() must run first
+        gen = Object.assign({}, gen);
         gen.comments = (p.comments || []).slice();
         gen.sections = p.sections || gen.sections || [];
         gen.styles = (p.styles != null) ? p.styles : (gen.styles || '');
@@ -156,7 +162,7 @@
     function history(q) {
       return store.get(linKey(q.lineageId)).then(function (lin) {
         if (!lin) return [];
-        const hashes = lin.generations.slice().reverse(); // newest last in array
+        const hashes = lin.generations.slice().reverse(); // generations are stored oldest->newest; reverse to walk newest-first
         const out = [];
         return hashes.reduce(function (chain, h) {
           return chain.then(function () {
@@ -169,7 +175,7 @@
                   firstSeenAt: gen.firstSeenAt, lastEditedAt: gen.lastEditedAt,
                   hasSnapshot: !!(gen.sections && gen.sections.length),
                   comments: gen.comments.map(function (c) {
-                    const cc = {}; for (const k in c) cc[k] = c[k];
+                    const cc = Object.assign({}, c);
                     cc.sectionId = map[c.id] || null; return cc;
                   })
                 });
@@ -195,6 +201,7 @@
     function clearCurrent(q) {
       return store.get(genKey(q.contentHash)).then(function (gen) {
         if (!gen) return;
+        gen = Object.assign({}, gen);
         gen.comments = [];
         gen.sections = [];
         gen.lastEditedAt = now();
