@@ -46,6 +46,25 @@ the code, that have already bitten us once.
   `documentElement.outerHTML` (file-absolute, tracks the opened file). Same
   `toMarkdown`, different `docHtml` origin. This is a deliberate, documented
   tradeoff — don't try to "fix" one to match the other.
+- **Draft identity is hashed from the CLEAN, pre-paint content root.** The
+  localStorage adapter resolves the content hash from `#noteback-doc-root`
+  `textContent` at construction, before highlights are painted — never recompute it
+  from the live DOM after `<mark>` wrappers are added, or the hash shifts.
+- **`window.localStorage` access can THROW (not just be absent) on `file://`** or
+  when storage is blocked — and `file://` is the primary canvas use case. The
+  `EMBEDDED_BOOT` adapter composition captures it inside a `try/catch`
+  (`nbLocalStorage`) and falls back to the in-file adapter; never reference
+  `window.localStorage` raw in the boot guard, or a blocked store crashes the whole
+  canvas mount (it did once — the overlay never appeared). Live-verified in Task 9.
+- **`file://` localStorage is one shared bucket** across all local canvases (Chrome).
+  Keys are content-hashed and namespaced (`nb:gen:`/`nb:lin:`/`nb:attach`) precisely
+  so distinct documents don't collide in that shared bucket.
+- **History snapshots render in an `<iframe srcdoc>`** with the draft's inline
+  `<style>` only; external stylesheets/remote images won't load there. That's
+  expected — the popup shows structure + text + the highlight, not a pixel-perfect
+  reproduction. The highlighted quote is interpolated into an injected `<script>`,
+  so it is escaped with `.replace(/<\//g, '<\\/')` to prevent a `</script>` in the
+  quote from breaking out (a real quote from an HTML/security doc can contain it).
 
 ## Live verification (Playwright)
 

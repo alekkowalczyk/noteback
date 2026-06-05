@@ -1,6 +1,6 @@
 # Browser-persistent comments + per-draft feedback history
 
-**Status:** design (approved in brainstorm; pending spec review)
+**Status:** canvas half implemented (Plan 1); extension half pending (Plan 2).
 **Date:** 2026-06-05
 **Scope:** both modes — embedded canvas (`npx noteback wrap`) **and** the extension —
 via one shared, storage-agnostic core.
