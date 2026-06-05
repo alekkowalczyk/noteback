@@ -22,9 +22,9 @@
   }
 
   /** cyrb53 — fast 53-bit non-crypto string hash (public domain). */
-  function cyrb53(str, seed) {
-    let h1 = 0xdeadbeef ^ (seed || 0);
-    let h2 = 0x41c6ce57 ^ (seed || 0);
+  function cyrb53(str, seed = 0) {
+    let h1 = 0xdeadbeef ^ seed;
+    let h2 = 0x41c6ce57 ^ seed;
     for (let i = 0; i < str.length; i++) {
       const ch = str.charCodeAt(i);
       h1 = Math.imul(h1 ^ ch, 2654435761);
@@ -46,5 +46,166 @@
     return cyrb53(norm, 0).toString(36) + '-' + cyrb53(norm, 0x9e3779b9).toString(36);
   }
 
-  return { MIN_HASH_CHARS, normalizeText, contentHash, cyrb53 };
+  const GEN = 'nb:gen:';
+  const LIN = 'nb:lin:';
+  const ATTACH = 'nb:attach';
+
+  function defaultLimits(l) {
+    l = l || {};
+    return {
+      snapshotDrafts: l.snapshotDrafts || 5,
+      metaDrafts: l.metaDrafts || 15,
+      ttlDays: l.ttlDays || 90,
+      maxBytes: l.maxBytes || 3000000
+    };
+  }
+
+  /**
+   * @param {Object} cfg
+   * @param {Object} cfg.store    async kv: get/set/remove/keys
+   * @param {() => string} cfg.now  ISO timestamp
+   * @param {() => string} cfg.mintId  unique lineage id
+   * @param {Object} cfg.codec    { compress(str)->Promise<str>, decompress(str)->Promise<str> }
+   * @param {Object} [cfg.limits]
+   */
+  function createDraftHistory(cfg) {
+    const store = cfg.store;
+    const now = cfg.now || (function () { return new Date().toISOString(); });
+    const mintId = cfg.mintId || (function () {
+      return 'lin_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    });
+    const codec = cfg.codec || { compress: function (s) { return Promise.resolve(s); }, decompress: function (s) { return Promise.resolve(s); } };
+    const limits = defaultLimits(cfg.limits);
+
+    function genKey(h) { return GEN + h; }
+    function linKey(id) { return LIN + id; }
+
+    function loadAttach() { return store.get(ATTACH).then(function (m) { return m || {}; }); }
+
+    /**
+     * Boot entry: resolve the current draft, seed/attach lineage, return comments.
+     * @returns {Promise<{degraded:boolean, contentHash:?string, lineageId:?string, comments:Array}>}
+     */
+    function resolve(opts) {
+      const hash = contentHash(opts.contentText);
+      if (hash == null) {
+        return Promise.resolve({ degraded: true, contentHash: null, lineageId: null, comments: opts.fallbackComments || [] });
+      }
+      const attachKey = String(opts.attachKey || '');
+      let gen, lineageId;
+      return store.get(genKey(hash)).then(function (existing) {
+        gen = existing;
+        if (gen) {
+          lineageId = gen.lineageId;
+          return ensureLineage(lineageId, hash, attachKey);
+        }
+        // New draft: attach to an existing lineage by attach key, else mint one.
+        return loadAttach().then(function (map) {
+          lineageId = map[attachKey];
+          if (!lineageId) lineageId = mintId();
+          gen = {
+            schemaVersion: 1, contentHash: hash, lineageId: lineageId,
+            docTitle: String(opts.docTitle || ''),
+            firstSeenAt: now(), lastEditedAt: now(),
+            comments: (opts.fallbackComments || []).slice(), sections: [], styles: ''
+          };
+          return store.set(genKey(hash), gen).then(function () {
+            return ensureLineage(lineageId, hash, attachKey);
+          });
+        });
+      }).then(function () {
+        return pruneLineage(lineageId).then(function () {
+          return { degraded: false, contentHash: hash, lineageId: lineageId, comments: (gen.comments || []).slice() };
+        });
+      });
+    }
+
+    /** Ensure the lineage record exists and records this hash + attach key. */
+    function ensureLineage(lineageId, hash, attachKey) {
+      return store.get(linKey(lineageId)).then(function (lin) {
+        lin = lin || { schemaVersion: 1, lineageId: lineageId, attachKeys: [], generations: [] };
+        if (lin.generations.indexOf(hash) === -1) lin.generations.push(hash);
+        if (attachKey && lin.attachKeys.indexOf(attachKey) === -1) lin.attachKeys.push(attachKey);
+        return store.set(linKey(lineageId), lin);
+      }).then(function () {
+        if (!attachKey) return;
+        return loadAttach().then(function (map) {
+          if (map[attachKey] === lineageId) return;
+          map[attachKey] = lineageId;
+          return store.set(ATTACH, map);
+        });
+      });
+    }
+
+    /** Write the current draft's comments + snapshot. */
+    function persist(p) {
+      return store.get(genKey(p.contentHash)).then(function (gen) {
+        if (!gen) return; // resolve() must run first
+        gen.comments = (p.comments || []).slice();
+        gen.sections = p.sections || gen.sections || [];
+        gen.styles = (p.styles != null) ? p.styles : (gen.styles || '');
+        gen.sectionByCommentId = p.sectionByCommentId || gen.sectionByCommentId || {};
+        gen.lastEditedAt = now();
+        return store.set(genKey(p.contentHash), gen).then(function () {
+          return pruneLineage(gen.lineageId);
+        });
+      });
+    }
+
+    /** Other drafts in the lineage with >=1 comment, newest first. */
+    function history(q) {
+      return store.get(linKey(q.lineageId)).then(function (lin) {
+        if (!lin) return [];
+        const hashes = lin.generations.slice().reverse(); // newest last in array
+        const out = [];
+        return hashes.reduce(function (chain, h) {
+          return chain.then(function () {
+            if (h === q.exceptHash) return;
+            return store.get(genKey(h)).then(function (gen) {
+              if (gen && gen.comments && gen.comments.length > 0) {
+                const map = gen.sectionByCommentId || {};
+                out.push({
+                  contentHash: h, lineageId: gen.lineageId, docTitle: gen.docTitle,
+                  firstSeenAt: gen.firstSeenAt, lastEditedAt: gen.lastEditedAt,
+                  hasSnapshot: !!(gen.sections && gen.sections.length),
+                  comments: gen.comments.map(function (c) {
+                    const cc = {}; for (const k in c) cc[k] = c[k];
+                    cc.sectionId = map[c.id] || null; return cc;
+                  })
+                });
+              }
+            });
+          });
+        }, Promise.resolve()).then(function () { return out; });
+      });
+    }
+
+    /** Decompress one history comment's section snapshot for the popup. */
+    function section(q) {
+      return store.get(genKey(q.contentHash)).then(function (gen) {
+        if (!gen || !gen.sections) return null;
+        const sec = gen.sections.filter(function (s) { return s.id === q.sectionId; })[0];
+        if (!sec) return null;
+        return Promise.all([codec.decompress(sec.html), codec.decompress(gen.styles || '')])
+          .then(function (parts) { return { html: parts[0], styles: parts[1] }; });
+      });
+    }
+
+    /** Empty the current draft's comments + snapshot (history kept). */
+    function clearCurrent(q) {
+      return store.get(genKey(q.contentHash)).then(function (gen) {
+        if (!gen) return;
+        gen.comments = [];
+        gen.sections = [];
+        gen.lastEditedAt = now();
+        return store.set(genKey(q.contentHash), gen);
+      });
+    }
+
+    function pruneLineage() { return Promise.resolve(); } // implemented in Task 3
+
+    return { resolve: resolve, persist: persist, history: history, section: section, clearCurrent: clearCurrent };
+  }
+
+  return { MIN_HASH_CHARS, normalizeText, contentHash, cyrb53, createDraftHistory };
 });
