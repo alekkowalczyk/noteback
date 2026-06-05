@@ -47,7 +47,7 @@
     [heading, prev, block, next].forEach(function (n) {
       if (n && out.indexOf(n) === -1) out.push(n);
     });
-    // Keep document order (heading may equal prev; dedup handled above).
+    // Order is document-natural by construction; dedup above handles heading === prev.
     return out;
   }
 

@@ -54,3 +54,23 @@ test('identityCodec round-trips', async () => {
   const c = snap.identityCodec;
   assert.strictEqual(await c.decompress(await c.compress('hi <b>x</b>')), 'hi <b>x</b>');
 });
+
+test('isHeading recognizes H1-H6, role=heading, and rejects others', () => {
+  assert.strictEqual(snap.isHeading(el('H1')), true);
+  assert.strictEqual(snap.isHeading(el('h3')), true); // case-insensitive
+  assert.strictEqual(snap.isHeading(el('P')), false);
+  assert.strictEqual(snap.isHeading(null), false);
+  assert.strictEqual(snap.isHeading({}), false); // no tagName
+  const aria = { tagName: 'DIV', getAttribute: function (n) { return n === 'role' ? 'heading' : null; } };
+  assert.strictEqual(snap.isHeading(aria), true);
+  const plainDiv = { tagName: 'DIV', getAttribute: function () { return null; } };
+  assert.strictEqual(snap.isHeading(plainDiv), false);
+});
+
+test('pickSectionNodes handles a block with no heading and no prev sibling', () => {
+  const parent = el('DIV');
+  const list = siblings(parent, [el('P', 'block'), el('P', 'next')]);
+  const block = list[0];
+  const picked = snap.pickSectionNodes(block);
+  assert.deepStrictEqual(picked.map((n) => n.textContent), ['block', 'next']);
+});
