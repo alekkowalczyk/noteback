@@ -158,14 +158,51 @@ test('install-skill copies the bundled skill into a target skills dir', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('resolveSkillsDir picks personal, project, or explicit scope', () => {
-  assert.strictEqual(cli.resolveSkillsDir({ dir: '/tmp/x' }), path.resolve('/tmp/x'));
+test('planInstall picks the .agents hub + .claude symlink (or a plain --dir copy)', () => {
+  // --dir is an explicit plain-copy override (no hub/symlink).
+  assert.deepStrictEqual(cli.planInstall({ dir: '/tmp/x' }), {
+    plain: true, dir: path.resolve('/tmp/x')
+  });
+  // Personal scope: real files in ~/.agents/skills, symlink in ~/.claude/skills.
+  assert.deepStrictEqual(cli.planInstall({ home: '/h' }), {
+    plain: false,
+    hub: path.join('/h', '.agents', 'skills'),
+    links: [{ dir: path.join('/h', '.claude', 'skills'), label: 'Claude Code' }]
+  });
+  // Project scope mirrors it under the CWD.
+  assert.deepStrictEqual(cli.planInstall({ project: true, cwd: '/p' }), {
+    plain: false,
+    hub: path.join('/p', '.agents', 'skills'),
+    links: [{ dir: path.join('/p', '.claude', 'skills'), label: 'Claude Code' }]
+  });
+});
+
+test('install-skill writes the .agents hub + a .claude symlink (covers Codex/OpenCode/Claude)', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'noteback-home-'));
+
+  assert.strictEqual(cli.installSkill({ home }), 0, 'install succeeds');
+
+  // Real files in the vendor-neutral hub (Codex + OpenCode read here).
+  const hubMd = path.join(home, '.agents', 'skills', cli.SKILL_NAME, 'SKILL.md');
+  assert.ok(fs.existsSync(hubMd), 'real SKILL.md under ~/.agents/skills/noteback/');
+  assert.match(fs.readFileSync(hubMd, 'utf8'), /name:\s*noteback\b/, 'it is the real skill');
+
+  // A relative symlink into Claude's dir (Claude Code does not read .agents).
+  const link = path.join(home, '.claude', 'skills', cli.SKILL_NAME);
+  assert.ok(fs.lstatSync(link).isSymbolicLink(), '~/.claude/skills/noteback is a symlink');
   assert.strictEqual(
-    cli.resolveSkillsDir({ project: true }),
-    path.join(process.cwd(), '.claude', 'skills')
+    fs.readlinkSync(link),
+    path.join('..', '..', '.agents', 'skills', cli.SKILL_NAME),
+    'symlink target is relative to the hub'
   );
-  assert.strictEqual(
-    cli.resolveSkillsDir({}),
-    path.join(os.homedir(), '.claude', 'skills')
-  );
+  assert.ok(fs.existsSync(path.join(link, 'SKILL.md')), 'symlink resolves to the skill');
+
+  // Idempotent, and a stale REAL dir at the Claude path is replaced by the symlink.
+  fs.rmSync(link, { recursive: true, force: true });
+  fs.mkdirSync(link, { recursive: true });
+  fs.writeFileSync(path.join(link, 'SKILL.md'), 'stale');
+  assert.strictEqual(cli.installSkill({ home }), 0, 're-install is safe');
+  assert.ok(fs.lstatSync(link).isSymbolicLink(), 'stale real dir replaced by a symlink');
+
+  fs.rmSync(home, { recursive: true, force: true });
 });

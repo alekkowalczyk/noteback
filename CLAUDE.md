@@ -66,6 +66,13 @@ the code, that have already bitten us once.
   branch. Needs: public repo, `name`+`description` frontmatter, on default branch.
 - `npx noteback wrap` / `npx noteback install-skill` → **npm** is the registry
   (the published `noteback` package's `bin`).
+- **`install-skill` mirrors `skills add`'s layout** (`bin/noteback.js`
+  `planInstall`): real files in the vendor-neutral `~/.agents/skills/` hub —
+  read **natively by Codex and OpenCode** — plus a relative symlink in
+  `~/.claude/skills/` (Claude Code reads only there). One install covers all
+  three; it does **not** use `~/.codex/skills/` (the current Codex docs read
+  `.agents/skills`, not `.codex/skills`). `--dir <path>` is a plain-copy escape
+  hatch (no hub/symlink). Idempotent: a stale dir/symlink at a target is replaced.
 - GitHub serves the *skill*; npm serves the *`wrap` CLI*. They're decoupled.
   `npm publish` requires 2FA (`npm publish --otp=<code>` or a granular token with
   "bypass 2fa"). Publishing and pushing are the **maintainer's** actions — don't

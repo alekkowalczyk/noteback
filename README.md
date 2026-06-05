@@ -105,16 +105,21 @@ npx skills add alekkowalczyk/noteback -g       # into ~/.claude/skills (global)
 npx skills add alekkowalczyk/noteback --list   # preview what's in the repo, install nothing
 
 # B) via the bundled installer — copies the skill out of the npm package:
-npx noteback install-skill            # → ~/.claude/skills/noteback/ (personal)
-npx noteback install-skill --project  # → ./.claude/skills/noteback/ (this repo)
-npx noteback install-skill --dir <path>   # → a specific skills directory
+npx noteback install-skill            # → ~/.agents/skills/noteback/ + ~/.claude/skills symlink
+npx noteback install-skill --project  # → ./.agents/skills/noteback/ + ./.claude/skills symlink
+npx noteback install-skill --dir <path>   # → a plain copy in a specific dir (no symlink)
 ```
 
-Restart Claude Code afterward so it discovers the skill. The skill then calls
+`install-skill` mirrors `skills add`: it writes the skill's real files to the
+**vendor-neutral `~/.agents/skills/` hub** — which **Codex** and **OpenCode** read
+natively — and **symlinks** it into `~/.claude/skills/` so **Claude Code** (which
+reads only there) picks it up too. One install, all three agents; re-running
+updates in place.
+
+Restart your agent afterward so it discovers the skill. The skill then calls
 `npx noteback wrap` itself, so the `wrap` CLI must be reachable on npm regardless
 of how the skill was installed. Prefer a managed setup? The same
-`skills/noteback/` folder can be vendored into a Claude Code
-plugin/marketplace instead.
+`skills/noteback/` folder can be vendored into a plugin/marketplace instead.
 
 > **Two registries, by design.** `npx skills add owner/repo`
 > ([vercel-labs/skills](https://github.com/vercel-labs/skills)) uses **GitHub**

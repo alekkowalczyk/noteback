@@ -118,19 +118,36 @@ function wrapFile(inputPath, outputPath) {
  * --------------------------------------------------------------------------- */
 
 /**
- * Resolve the skills directory to install into:
- *   --dir <path> → that directory; --project → <cwd>/.claude/skills;
- *   otherwise the personal scope ~/.claude/skills.
+ * Plan where `install-skill` writes, mirroring `npx skills add`:
+ *   - default / --project: the skill's **real files** go in the vendor-neutral
+ *     `<base>/.agents/skills/` hub — which **Codex** and **OpenCode** read
+ *     natively — and a **symlink** is placed in `<base>/.claude/skills/` so
+ *     **Claude Code** (which only reads there) picks it up too. One install
+ *     covers all three. `<base>` is the home dir, or the CWD with --project.
+ *   - --dir <path>: a plain real copy into `<path>/<name>/` — an explicit
+ *     override (no hub, no symlink) for vendoring or tests.
+ *
+ * `args.home` / `args.cwd` override the base dirs (for tests); they default to
+ * os.homedir() / process.cwd().
+ * @returns {{plain:true, dir:string}
+ *          |{plain:false, hub:string, links:{dir:string,label:string}[]}}
  */
-function resolveSkillsDir(args) {
-  if (args.dir) return path.resolve(args.dir);
-  if (args.project) return path.join(process.cwd(), '.claude', 'skills');
-  return path.join(os.homedir(), '.claude', 'skills');
+function planInstall(args) {
+  const a = args || {};
+  if (a.dir) return { plain: true, dir: path.resolve(a.dir) };
+  const base = a.project ? (a.cwd || process.cwd()) : (a.home || os.homedir());
+  return {
+    plain: false,
+    hub: path.join(base, '.agents', 'skills'),
+    // Only agents that DON'T read the .agents hub need a symlink. Codex and
+    // OpenCode read it natively; Claude Code reads ~/.claude/skills only.
+    links: [{ dir: path.join(base, '.claude', 'skills'), label: 'Claude Code' }]
+  };
 }
 
 /**
- * Copy the bundled skill into the resolved skills directory as
- * `<skillsDir>/noteback/`. Idempotent (overwrites to update in place).
+ * Install the bundled skill (see planInstall for the layout). Idempotent:
+ * existing targets are replaced, so re-running updates in place.
  * @returns {number} process exit code.
  */
 function installSkill(args) {
@@ -138,21 +155,51 @@ function installSkill(args) {
     process.stderr.write('noteback install-skill: bundled skill not found at ' + SKILL_SRC + '\n');
     return 1;
   }
-  const skillsDir = resolveSkillsDir(args || {});
-  const dest = path.join(skillsDir, SKILL_NAME);
+  const plan = planInstall(args || {});
   try {
-    fs.mkdirSync(skillsDir, { recursive: true });
-    fs.cpSync(SKILL_SRC, dest, { recursive: true });
+    if (plan.plain) {
+      const dest = path.join(plan.dir, SKILL_NAME);
+      fs.mkdirSync(plan.dir, { recursive: true });
+      fs.rmSync(dest, { recursive: true, force: true });
+      fs.cpSync(SKILL_SRC, dest, { recursive: true });
+      process.stdout.write(
+        'Installed the Noteback skill → ' + dest + '\n' +
+        'Restart your agent so it discovers the skill.\n'
+      );
+      return 0;
+    }
+
+    // 1) real files into the neutral hub (Codex + OpenCode read here natively)
+    const hubDest = path.join(plan.hub, SKILL_NAME);
+    fs.mkdirSync(plan.hub, { recursive: true });
+    fs.rmSync(hubDest, { recursive: true, force: true });
+    fs.cpSync(SKILL_SRC, hubDest, { recursive: true });
+
+    // 2) symlink the hub into each agent dir that doesn't read .agents itself
+    const lines = ['  ' + hubDest + '  (Codex + OpenCode)'];
+    for (const link of plan.links) {
+      const linkPath = path.join(link.dir, SKILL_NAME);
+      fs.mkdirSync(link.dir, { recursive: true });
+      fs.rmSync(linkPath, { recursive: true, force: true }); // replace stale dir/symlink
+      const rel = path.relative(link.dir, hubDest);          // ../../.agents/skills/noteback
+      try {
+        fs.symlinkSync(rel, linkPath);
+        lines.push('  ' + linkPath + ' → ' + rel + '  (' + link.label + ')');
+      } catch (e) {
+        // Symlinks may be unavailable (e.g. Windows without privilege): copy.
+        fs.cpSync(hubDest, linkPath, { recursive: true });
+        lines.push('  ' + linkPath + '  (' + link.label + ', copied — symlink unavailable)');
+      }
+    }
+    process.stdout.write(
+      'Installed the Noteback skill:\n' + lines.join('\n') + '\n' +
+      'Restart your agent so it discovers the skill.\n'
+    );
+    return 0;
   } catch (e) {
     process.stderr.write('noteback install-skill: ' + (e && e.message ? e.message : String(e)) + '\n');
     return 1;
   }
-  process.stdout.write(
-    'Installed the Noteback skill → ' + dest + '\n' +
-    'Restart Claude Code (or your agent) so it discovers the skill.\n' +
-    'It wraps HTML docs you hand off for review with `npx noteback wrap`.\n'
-  );
-  return 0;
 }
 
 /* --------------------------------------------------------------------------- *
@@ -168,12 +215,16 @@ const USAGE = [
   '',
   'Commands:',
   '  wrap           wrap an HTML doc as a feedback canvas (in place, or -o <path>)',
-  '  install-skill  install the Noteback agent skill into your Claude skills dir',
+  '  install-skill  install the Noteback agent skill (Codex / OpenCode / Claude Code)',
+  '',
+  'install-skill puts the skill in the ~/.agents/skills hub (read by Codex and',
+  'OpenCode) and symlinks it into ~/.claude/skills (for Claude Code) — one install,',
+  'all three. Re-running updates in place.',
   '',
   'Options:',
   '  -o, --out <path>   (wrap) write the canvas to <path> instead of rewriting in place',
-  '  --project          (install-skill) use ./.claude/skills instead of ~/.claude/skills',
-  '  --dir <path>       (install-skill) install into a specific skills directory',
+  '  --project          (install-skill) install into ./ (this repo) instead of your home dir',
+  '  --dir <path>       (install-skill) plain-copy into a specific skills directory (no symlink)',
   '  -h, --help         show this help',
   '',
   'The wrapped output opens directly in a browser (no extension): highlight text',
@@ -235,4 +286,4 @@ if (require.main === module) {
   process.exit(main(process.argv.slice(2)));
 }
 
-module.exports = { wrapHtml, wrapFile, deriveTitle, main, installSkill, resolveSkillsDir, RUNTIME_FILES, SKILL_NAME };
+module.exports = { wrapHtml, wrapFile, deriveTitle, main, installSkill, planInstall, RUNTIME_FILES, SKILL_NAME };
