@@ -214,20 +214,23 @@
      * and a coarse byte cap. `lin.generations` is oldest→newest.
      * @param {string} lineageId
      * @param {string} protectedHash  The current draft's hash — never remove or
-     *   strip this gen, regardless of TTL / metaDrafts rules.
+     *   strip this gen, regardless of TTL / metaDrafts rules. The lineage's
+     *   newest gen is likewise never removed or stripped (parity with
+     *   enforceByteCap, which already protects newest-per-lineage).
      */
     function pruneLineage(lineageId, protectedHash) {
       return store.get(linKey(lineageId)).then(function (lin) {
         if (!lin) return;
         const gens = lin.generations.slice(); // oldest -> newest
+        const newestHash = gens[gens.length - 1]; // newest of this lineage — never prune it
         const ttlCutoff = Date.parse(now()) - limits.ttlDays * 86400000;
 
         return gens.reduce(function (chain, h, idx) {
           return chain.then(function () {
             return store.get(genKey(h)).then(function (gen) {
               if (!gen) return;
-              // Fix A: never remove or strip the protected (current) draft.
-              if (h === protectedHash) return;
+              // Fix A: never remove or strip the protected (current) draft or the lineage's newest.
+              if (h === protectedHash || h === newestHash) return;
               const ageFromNewest = gens.length - 1 - idx; // 0 = newest
               const tooOld = isFinite(ttlCutoff) && Date.parse(gen.lastEditedAt) < ttlCutoff;
               const beyondMeta = ageFromNewest >= limits.metaDrafts;

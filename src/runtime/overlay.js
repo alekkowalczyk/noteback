@@ -540,6 +540,8 @@
         Promise.resolve(history.clearCurrent()).then(function () {
           const empty = { schemaVersion: 1, docId: (getState() || {}).docId || '', docTitle: (getState() || {}).docTitle || '', comments: [] };
           setState(empty);
+          return persist(empty); // write through to the in-file block / re-share copy (parity with delete)
+        }).then(function () {
           repaintHighlights();
           renderSidebar();
         });

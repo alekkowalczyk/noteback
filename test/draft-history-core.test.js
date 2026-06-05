@@ -295,3 +295,23 @@ test('history attaches sectionId from the persisted map', async () => {
   const hist = await dh.history({ lineageId: r2.lineageId, exceptHash: r2.contentHash });
   assert.strictEqual(hist[0].comments[0].sectionId, 's1');
 });
+
+test('TTL prune protects the newest draft of a lineage even when an older draft is reopened as current', async () => {
+  const store = fakeStore();
+  let clock = '2026-01-01T00:00:00Z';
+  const dh = core.createDraftHistory({ store, now: () => clock, mintId: () => 'lin_ttl', codec: idCodec, limits: { snapshotDrafts: 9, metaDrafts: 9, ttlDays: 60, maxBytes: 1e9 } });
+  const key = 'file:///doc.html';
+  const textA = 'Draft A body text that is long enough to clear the content guard.';
+  const textB = 'Draft B body text that is also long enough to clear the guard now.';
+  const rA = await dh.resolve({ contentText: textA, attachKey: key, fallbackComments: [] });
+  await dh.persist({ contentHash: rA.contentHash, comments: [{ id:'a', body:'a', anchor:null, createdAt:'x', author:null }], sections: [], styles: '' });
+  clock = '2026-02-01T00:00:00Z';
+  const rB = await dh.resolve({ contentText: textB, attachKey: key, fallbackComments: [] });
+  await dh.persist({ contentHash: rB.contentHash, comments: [{ id:'b', body:'b', anchor:null, createdAt:'x', author:null }], sections: [], styles: '' });
+  clock = '2026-05-01T00:00:00Z'; // both past ttlDays:60 relative to their lastEditedAt
+  const rA2 = await dh.resolve({ contentText: textA, attachKey: key, fallbackComments: [] });
+  assert.strictEqual(rA2.contentHash, rA.contentHash, 'reopening A keeps the same content hash');
+  const survivedB = await store.get('nb:gen:' + rB.contentHash);
+  assert.ok(survivedB, 'newest draft B survives TTL prune while older A is current');
+  assert.strictEqual(survivedB.comments.length, 1, 'B keeps its comment');
+});
