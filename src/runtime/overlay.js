@@ -182,6 +182,9 @@
     '.nb-cmd-copy{flex:none;border:1px solid var(--nb-line);background:#fff;cursor:pointer;border-radius:8px;',
     '  font:600 11px/1 var(--nb-ui);padding:6px 9px;color:var(--nb-ink-soft);transition:background .15s ease,color .15s ease;}',
     '.nb-cmd-copy:hover{background:#f3f2ef;color:var(--nb-ink);}',
+    '.nb-info-link{display:inline-block;margin-top:13px;font:600 12px/1 var(--nb-ui);',
+    '  color:#2563eb;text-decoration:none;}',
+    '.nb-info-link:hover{text-decoration:underline;}',
 
     /* list */
     '.nb-list{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:13px 14px 16px;scrollbar-width:thin;}',
@@ -498,6 +501,7 @@
       '      <button type="button" class="nb-cmd-copy" data-cmd="npx skills add alekkowalczyk/noteback" title="Copy command">Copy</button></div>' +
       '    <div class="nb-cmd"><code>npx noteback install-skill</code>' +
       '      <button type="button" class="nb-cmd-copy" data-cmd="npx noteback install-skill" title="Copy command">Copy</button></div>' +
+      '    <a class="nb-info-link" href="https://github.com/alekkowalczyk/noteback" target="_blank" rel="noopener noreferrer">View the project on GitHub ↗</a>' +
       '  </div>' +
       '</div>';
 
