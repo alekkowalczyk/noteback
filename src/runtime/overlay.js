@@ -1180,7 +1180,6 @@
       updateLauncher();
     }
 
-    let historyLoaded = false;
     function renderHistory() {
       if (!history) return;
       const existing = elList.querySelector('.nb-history');
@@ -1218,11 +1217,12 @@
     }
 
     function condense(q) {
-      if (rt().markdown && rt().markdown.condenseQuote) return rt().markdown.condenseQuote(q);
+      if (markdownApi && markdownApi.condenseQuote) return markdownApi.condenseQuote(q);
       return q.length > 80 ? q.slice(0, 77) + '\u2026' : q;
     }
     function formatWhen(iso) {
-      const d = new Date(iso || 0);
+      if (!iso) return 'earlier';
+      const d = new Date(iso);
       if (isNaN(d.getTime())) return 'earlier';
       return d.toLocaleString();
     }
@@ -1243,7 +1243,7 @@
         const quote = (comment.anchor && comment.anchor.quote) || '';
         const styles = (sec && sec.styles) || '';
         const bodyHtml = (sec && sec.html) || '<p>(context no longer stored)</p>';
-        const script = '<scr' + 'ipt>(function(){try{var q=' + JSON.stringify(quote) + ';if(!q)return;var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);var n;while(n=w.nextNode()){var i=n.nodeValue.indexOf(q);if(i>=0){var r=document.createRange();r.setStart(n,i);r.setEnd(n,i+q.length);var m=document.createElement("mark");m.style.background="#fde68a";r.surroundContents(m);m.scrollIntoView({block:"center"});break;}}}catch(e){}})();</scr' + 'ipt>';
+        const script = '<scr' + 'ipt>(function(){try{var q=' + JSON.stringify(quote).replace(/<\//g, '<\\/') + ';if(!q)return;var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);var n;while(n=w.nextNode()){var i=n.nodeValue.indexOf(q);if(i>=0){var r=document.createRange();r.setStart(n,i);r.setEnd(n,i+q.length);var m=document.createElement("mark");m.style.background="#fde68a";r.surroundContents(m);m.scrollIntoView({block:"center"});break;}}}catch(e){}})();</scr' + 'ipt>';
         frame.srcdoc = '<!DOCTYPE html><html><head><base href="' + (typeof location !== 'undefined' ? location.href : '') + '"><style>' + styles + '</style></head><body>' + bodyHtml + script + '</body></html>';
         panel.appendChild(close); panel.appendChild(frame);
         back.appendChild(panel); uiRoot.appendChild(back);
