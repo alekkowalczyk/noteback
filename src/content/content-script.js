@@ -94,9 +94,24 @@
     });
   }
 
+  /**
+   * Save a clean copy: the document with Noteback's UI removed and highlight
+   * <mark> wrappers unwrapped (docContentHtml), downloaded as a standalone .html.
+   * The worker has the `downloads` privilege; we just supply the bytes.
+   */
+  function onSaveClean(state) {
+    return sendToWorker({
+      type: 'NOTEBACK_EXPORT_CLEAN',
+      docId: docId,
+      docTitle: docTitle,
+      cleanHtml: '<!DOCTYPE html>\n' + docContentHtml()
+    });
+  }
+
   const exporter = {
     onCopyMarkdown: onCopyMarkdown,
-    onSaveCanvas: onSaveCanvas
+    onSaveCanvas: onSaveCanvas,
+    onSaveClean: onSaveClean
   };
 
   /* --- boot ---------------------------------------------------------------- */
