@@ -58,13 +58,13 @@
 
   const UI_ATTR = 'data-noteback-ui';
   const HL_CLASS = 'noteback-highlight';
+  const BLOCK_TAGS = /^(P|LI|PRE|BLOCKQUOTE|TD|TH|TR|DIV|SECTION|ARTICLE|H1|H2|H3|H4|H5|H6|UL|OL|TABLE|FIGURE)$/;
 
   /** Nearest block-level ancestor of a node (fallback: the node itself). */
   function enclosingBlock(node, rootNode) {
-    const BLOCK = /^(P|LI|PRE|BLOCKQUOTE|TD|TH|TR|DIV|SECTION|ARTICLE|H1|H2|H3|H4|H5|H6|UL|OL|TABLE|FIGURE)$/;
     let el = (node.nodeType === 1) ? node : node.parentElement;
     while (el && el !== rootNode) {
-      if (el.tagName && BLOCK.test(String(el.tagName).toUpperCase())) return el;
+      if (el.tagName && BLOCK_TAGS.test(String(el.tagName).toUpperCase())) return el;
       el = el.parentElement;
     }
     return (node.nodeType === 1) ? node : node.parentElement;
@@ -75,6 +75,9 @@
     const clone = node.cloneNode(true);
     const ui = clone.querySelectorAll ? clone.querySelectorAll('[' + UI_ATTR + ']') : [];
     for (let i = 0; i < ui.length; i++) { if (ui[i].parentNode) ui[i].parentNode.removeChild(ui[i]); }
+    // Unwrap highlight marks among descendants. (The cloned node is always a
+    // block element, never a bare highlight mark, so the mark tag is never the
+    // clone root — that only happens for highlighted text with no block wrapper.)
     const marks = clone.querySelectorAll ? clone.querySelectorAll('mark.' + HL_CLASS) : [];
     for (let j = 0; j < marks.length; j++) {
       const m = marks[j], p = m.parentNode; if (!p) continue;
@@ -86,7 +89,7 @@
 
   /** Inline <style> text from the document head (for snapshot styling). */
   function collectInlineStyles(doc) {
-    const styles = doc.querySelectorAll ? doc.querySelectorAll('head style, style') : [];
+    const styles = doc.querySelectorAll ? doc.querySelectorAll('style') : [];
     let out = '';
     for (let i = 0; i < styles.length; i++) {
       if (styles[i].getAttribute && styles[i].getAttribute(UI_ATTR)) continue; // skip our own
