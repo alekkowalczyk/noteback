@@ -1,167 +1,79 @@
-# Noteback — Annotate AI Docs & Copy/Share Feedback for Claude, ChatGPT & co.
+# Noteback
 
-**Noteback** is a zero-backend Chrome extension (Manifest V3) for **reviewing
-local AI-generated HTML documents** — specs, plans, design docs. Highlight a
-passage, attach a comment anchored to that exact quote, then either **copy your
-feedback as Markdown** to paste back to an AI or a teammate, or **save a
-self-contained "feedback canvas"** — a single HTML file with your highlights and
-comments baked in that anyone can open, read, comment on, and re-share **without
-installing anything**.
+**Noteback** lets you review local AI-generated HTML documents — specs, plans,
+design docs — right in your browser. Highlight a passage, attach a comment
+anchored to that exact quote (or leave a note on the whole document), then **copy
+your feedback as Markdown** to paste back to the AI, or **save a self-contained
+"feedback canvas"** — one HTML file with your highlights and comments baked in
+that anyone can open and comment on **without installing anything**.
+
+It runs **100% locally**: no server, no account, no telemetry, no network calls.
 
 > note it → send it back.
 
-It runs **entirely locally**: no server, no account, no telemetry, no network
-calls.
+## What it looks like
 
-**Keywords:** annotate AI docs · feedback for AI · review LLM specs · copy
-feedback to Claude / ChatGPT · code review · HTML annotation · text-quote
-highlighting · Chrome extension · Manifest V3.
+**1. Select text → leave a comment.** A floating button opens a composer anchored
+to the exact quote.
 
----
+![Selecting a passage and writing a comment](examples/screenshots/noteback-readme-composer.png)
 
-## Why Noteback
+**2. The sidebar lists every comment** — anchored notes and notes on the whole
+document — and lets you copy the feedback or save the canvas.
 
-The workflow it serves:
+![The Noteback sidebar listing comments](examples/screenshots/noteback-readme-sidebar.png)
 
-> An AI generates an HTML doc → you open it locally → you annotate it → you send
-> the feedback back to the AI (next prompt) **or** to the human who shared it
-> (who will likely paste it into *their* AI).
+Comments use text-quote anchoring (W3C / Hypothesis style), so highlights survive
+minor edits; a lost quote becomes an *unanchored* note instead of disappearing.
+**Copy feedback** produces clean Markdown with line references; **Save** exports
+the canvas with comments, a clean copy of the original, or a print-ready PDF.
 
-Generic web annotators are saturated (Web Highlights, Glasp, Hypothesis, …).
-Noteback wins the **local-AI-doc** niche with two co-equal pillars:
+## Install
 
-- **Frictionless browser overlay** — select text, type a note, done. Zero setup
-  beyond installing the extension.
-- **Best-in-class feedback export** — output that is excellent for **both** a
-  human reviewer **and** an AI model.
+You can use Noteback two ways — they share the same annotation engine. The
+essentials are below; see [`docs/install.md`](docs/install.md) for every flag and
+option.
 
-## What it does (v1 / MVP)
+### As an agent skill (no extension needed)
 
-- Injects on `file://`, `localhost`, and `127.0.0.1` documents.
-- Select text → floating **💬 Comment** button → popover → save.
-- Robust **text-quote anchoring** (W3C / Hypothesis style): `quote` + `prefix` /
-  `suffix` context + `occurrence` index, so highlights survive minor
-  DOM/whitespace changes. Lost quotes become **"unanchored"** comments rather
-  than disappearing.
-- Toggleable **sidebar** listing every comment; edit / delete.
-- **Copy feedback as Markdown** — clean, neutral, human- and AI-readable, with
-  line references back into the HTML file.
-- **Save…** menu with three exports: **HTML · with comments** (one self-contained,
-  fully interactive file), **HTML · clean copy** (the original document, no Noteback),
-  and **PDF/Print** (print-ready, no comments).
-- **Onboarding** for enabling "Allow access to file URLs."
-
-See [`docs/design.md`](docs/design.md)
-for the full design and [`CONTRACTS.md`](CONTRACTS.md) for the integration
-contracts (StorageAdapter, State schema, runtime namespace, canvas format).
-
-## Architecture — one portable runtime, two modes
-
-The annotation engine (selection → popover → highlight painting → comment list →
-serialization) is built **once** and runs in two modes via an injected
-`StorageAdapter`:
-
-| Mode | Host | State store |
-|------|------|-------------|
-| **Extension mode** | Content script on local pages | `chrome.storage.local` |
-| **Embedded mode** | Inlined into a saved canvas file | In-file `<script id="noteback-state">` JSON block |
-
-The "anyone can collaborate on the canvas without installing anything" capability
-falls out of the **same codebase** that powers the extension.
-
-- **No build step.** Vanilla JavaScript, no TypeScript, no npm dependencies, no
-  bundler — load the folder unpacked exactly as written.
-
-## Use as an agent skill — born-annotatable docs
-
-Noteback also ships a tiny CLI and an **agent skill** so an AI coding agent (Claude
-Code, etc.) can hand you documents that are *already* annotatable — no extension
-needed at all. When the agent writes a plan/spec/report as HTML, it wraps it:
+So an AI coding agent (Claude Code, Codex, …) can hand you documents that are
+*already* annotatable: it writes the doc as HTML, wraps it with the CLI, and you
+comment in the browser, then paste the Markdown back to iterate.
 
 ```sh
-npx noteback wrap plan.html            # rewrite in place → plan.html IS the canvas
-npx noteback wrap plan.html -o out.html  # keep the original, write a separate canvas
+npx skills add alekkowalczyk/noteback   # pull the skill from GitHub → ./.claude/skills
+npx noteback install-skill              # or install from npm → ~/.agents/skills + a ~/.claude symlink
 ```
 
-You open the file, comment, click **Copy feedback as Markdown**, and paste it back to
-the agent to iterate. The wrapper reuses the same tested canvas builder as the
-extension, and re-wrapping an existing canvas is idempotent (the old runtime + comment
-state are stripped before a fresh empty one is embedded).
+The agent then runs `npx noteback wrap doc.html` to turn any HTML into a canvas.
 
-The skill itself lives in [`skills/noteback/SKILL.md`](skills/noteback/SKILL.md):
-it tells the agent to prefer HTML for reviewable docs, wrap them, and treat your pasted
-Markdown as change requests. This is a third on-ramp to the **same embedded mode** the
-**Save… → HTML · with comments** menu item produces.
-
-### Install the skill
-
-Two install paths, because the skill and the CLI live in **two independent
-registries** (see note below):
-
-```sh
-# A) via the `skills` tool — pulls the skill straight from GitHub:
-npx skills add alekkowalczyk/noteback          # into ./.claude/skills
-npx skills add alekkowalczyk/noteback -g       # into ~/.claude/skills (global)
-npx skills add alekkowalczyk/noteback --list   # preview what's in the repo, install nothing
-
-# B) via the bundled installer — copies the skill out of the npm package:
-npx noteback install-skill            # → ~/.agents/skills/noteback/ + ~/.claude/skills symlink
-npx noteback install-skill --project  # → ./.agents/skills/noteback/ + ./.claude/skills symlink
-npx noteback install-skill --dir <path>   # → a plain copy in a specific dir (no symlink)
-```
-
-`install-skill` mirrors `skills add`: it writes the skill's real files to the
-**vendor-neutral `~/.agents/skills/` hub** — which **Codex** and **OpenCode** read
-natively — and **symlinks** it into `~/.claude/skills/` so **Claude Code** (which
-reads only there) picks it up too. One install, all three agents; re-running
-updates in place.
-
-Restart your agent afterward so it discovers the skill. The skill then calls
-`npx noteback wrap` itself, so the `wrap` CLI must be reachable on npm regardless
-of how the skill was installed. Prefer a managed setup? The same
-`skills/noteback/` folder can be vendored into a plugin/marketplace instead.
-
-> **Two registries, by design.** `npx skills add owner/repo`
-> ([vercel-labs/skills](https://github.com/vercel-labs/skills)) uses **GitHub**
-> as its registry — it clones this public repo and reads
-> `skills/noteback/SKILL.md` from the default branch. `npx noteback …`
-> uses **npm** — it runs the published `noteback` package's CLI. GitHub serves
-> the *skill*; npm serves the *`wrap` command*. They're decoupled, so either
-> on-ramp works on its own.
-
-## Install (unpacked, for development)
+### As a Chrome extension
 
 1. Clone this repo.
-2. Open `chrome://extensions`.
-3. Enable **Developer mode** (top-right).
-4. Click **Load unpacked** and select the repo root (the folder with
+2. Open `chrome://extensions` and enable **Developer mode** (top-right).
+3. Click **Load unpacked** and select the repo root (the folder with
    `manifest.json`).
-5. To annotate `file://` docs, open the extension's **Details** page and enable
+4. To annotate `file://` docs, open the extension's **Details** page and enable
    **"Allow access to file URLs."** (`localhost` / `127.0.0.1` need no toggle.)
 
-## Permissions (minimal by design)
+## Docs
 
-`storage` (persist comments), `activeTab` + `scripting` (act on the current tab
-on demand), `downloads` (export the canvas), and host access limited to
-`file:///*`, `http://localhost/*`, `http://127.0.0.1/*`. No remote code, which
-also eases Web Store review.
-
-## Privacy
-
-100% local. State lives only in `chrome.storage.local` and inside files you
-explicitly save. No analytics, no accounts, no network calls.
+- [`docs/install.md`](docs/install.md) — full install & CLI reference: every
+  `skills add` / `install-skill` / `wrap` flag, the extension steps, and
+  permissions.
+- [`docs/design.md`](docs/design.md) — the full design, motivation, positioning,
+  privacy posture, and the one-runtime / two-modes architecture.
+- [`CONTRACTS.md`](CONTRACTS.md) — runtime module API, State schema, runtime
+  namespace, and the canvas file format.
+- [`skills/noteback/SKILL.md`](skills/noteback/SKILL.md) — the agent skill itself.
+- [`CLAUDE.md`](CLAUDE.md) — engineering notes, gotchas, permissions, and the
+  two-registry distribution model (GitHub serves the skill, npm serves the CLI).
 
 ## Development
 
 ```sh
-# Run the runtime unit tests (Node built-in runner; no framework, no deps):
-npm test            # -> node --test "test/**/*.test.js"
-# or, equivalently:
-node --test         # auto-discovers test/
+npm test   # runtime unit tests on the Node built-in runner (no deps, no framework)
 ```
-
-The pure-logic runtime modules (`anchor`, `state`, `markdown`) are written to run
-**both** in the browser and under Node so they can be unit-tested directly.
 
 ## License
 
