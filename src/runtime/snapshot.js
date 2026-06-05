@@ -151,16 +151,21 @@
     return wrap.innerHTML;
   }
 
+  /** Index of the first node in `nodes` that is or contains `block` (-1 if none). */
+  function indexOfContaining(nodes, block) {
+    for (let i = 0; i < nodes.length; i++) { if (nodeContains(nodes[i], block)) return i; }
+    return -1;
+  }
+
   /**
-   * When a whole section exceeds the char budget, keep the nearest heading plus a
-   * contiguous window of blocks grown outward from the commented block until adding
-   * the next block would blow the cap.
+   * When the captured section(s) exceed the char budget, keep the nearest heading
+   * plus the protected core (the blocks the selection actually touches, indices
+   * protectLo..protectHi) and grow a window outward until the next block would blow
+   * the cap. The protected core is never dropped, so the whole selection stays in.
    */
-  function trimToCap(nodes, block, maxChars, doc) {
-    let anchor = 0;
-    for (let i = 0; i < nodes.length; i++) { if (nodeContains(nodes[i], block)) { anchor = i; break; } }
+  function trimToCap(nodes, protectLo, protectHi, maxChars, doc) {
     const heading = isHeading(nodes[0]) ? nodes[0] : null;
-    let lo = anchor, hi = anchor;
+    let lo = protectLo, hi = protectHi;
     function current() {
       const win = nodes.slice(lo, hi + 1);
       return (heading && lo > 0) ? [heading].concat(win) : win;
@@ -175,11 +180,15 @@
   }
 
   /**
-   * Build per-section snapshots for the given comments. Each anchored comment maps
-   * to its whole enclosing section; comments that share a section (which fits the
-   * cap) share one snapshot. Oversized sections are trimmed to a window around the
-   * commented block. Doc-level notes (anchor==null) and comments whose highlight
-   * isn't painted are skipped.
+   * Build per-section snapshots for the given comments. A selection that spans
+   * blocks paints one <mark> per text slice (all sharing the comment id), so a
+   * comment can touch several blocks — even several sections. Each comment maps to
+   * the UNION of every section its selection touches (first slice's section through
+   * the last's), so the popup shows the whole selected passage with context, not
+   * just the start. Single-section spans that fit the cap are shared between
+   * comments; oversized captures trim context around the touched blocks while always
+   * keeping the full selection. Doc-level notes (anchor==null) and comments whose
+   * highlight isn't painted are skipped.
    * @param {Object} cfg
    * @param {Node} cfg.root        the painted content root (#noteback-doc-root)
    * @param {Document} cfg.doc
@@ -191,22 +200,46 @@
     const root = cfg.root, doc = cfg.doc;
     const maxChars = cfg.maxSectionChars || 16000;
     const sections = [];
-    const keyed = []; // [{ key, id }] — key is the section heading (shared) or block (trimmed)
+    const keyed = []; // [{ key, id }] — key is the section heading (shared) or comment id (per-comment)
     const sectionByCommentId = {};
 
     (cfg.comments || []).forEach(function (c) {
       if (!c || c.anchor == null) return; // doc-level note: no section
-      const mark = root.querySelector('mark.' + HL_CLASS + '[data-noteback-id="' + c.id + '"]');
-      if (!mark) return; // orphaned / not painted
-      const block = enclosingBlock(mark, root);
-      const nodes = pickSectionNodes(block);
+      const marks = root.querySelectorAll('mark.' + HL_CLASS + '[data-noteback-id="' + c.id + '"]');
+      if (!marks || !marks.length) return; // orphaned / not painted
+
+      // Distinct blocks the selection touches, in document order.
+      const blocks = [];
+      for (let i = 0; i < marks.length; i++) {
+        const b = enclosingBlock(marks[i], root);
+        if (blocks.indexOf(b) === -1) blocks.push(b);
+      }
+      // Union of every section those blocks fall in, in document order (a contiguous
+      // selection touches contiguous sections, so no gaps).
+      const nodes = [];
+      const heads = [];
+      blocks.forEach(function (b) {
+        const sn = pickSectionNodes(b);
+        if (heads.indexOf(sn[0]) === -1) {
+          heads.push(sn[0]);
+          for (let i = 0; i < sn.length; i++) { if (nodes.indexOf(sn[i]) === -1) nodes.push(sn[i]); }
+        }
+      });
+
       let html = assembleHtml(nodes, doc);
       let key;
       if (html.length <= maxChars) {
-        key = nodes[0]; // whole section captured — share it across comments in the same section
+        // A single-section span can be shared between comments; a multi-section span
+        // is per-comment (its exact extent varies).
+        key = heads.length === 1 ? nodes[0] : c.id;
       } else {
-        key = block;    // oversized section — store a capped window around this block
-        html = assembleHtml(trimToCap(nodes, block, maxChars, doc), doc);
+        key = c.id;
+        let lo = indexOfContaining(nodes, blocks[0]);
+        let hi = indexOfContaining(nodes, blocks[blocks.length - 1]);
+        if (lo < 0) lo = 0;
+        if (hi < 0) hi = nodes.length - 1;
+        if (lo > hi) { const t = lo; lo = hi; hi = t; }
+        html = assembleHtml(trimToCap(nodes, lo, hi, maxChars, doc), doc);
       }
       let existingId = null;
       for (let i = 0; i < keyed.length; i++) { if (keyed[i].key === key) { existingId = keyed[i].id; break; } }

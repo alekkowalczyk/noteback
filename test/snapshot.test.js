@@ -150,6 +150,32 @@ function sceneDom(painted) {
   const block = nodes[2];
   const mark = { tagName: 'MARK', nodeType: 1, parentElement: block, getAttribute: function () { return null; }, querySelectorAll: function () { return []; }, cloneNode: function () { return { querySelectorAll: function () { return []; }, _html: '' }; } };
   root.querySelector = function (sel) { return (painted && /data-noteback-id="c1"/.test(sel)) ? mark : null; };
+  root.querySelectorAll = function (sel) { return (painted && /data-noteback-id="c1"/.test(sel)) ? [mark] : []; };
+  return { doc: doc, root: root };
+}
+
+/**
+ * Scene with three H2 sections (A/B/C). The comment's selection spans from a block
+ * in section A to a block in section B (two marks, same id), so the snapshot should
+ * union sections A and B but exclude C.
+ */
+function multiSectionDom() {
+  const mkWrap = function () {
+    const kids = [];
+    return { appendChild: function (c) { kids.push(c); }, get innerHTML() { return kids.map(function (k) { return k._html || ''; }).join(''); } };
+  };
+  const doc = { createElement: function (t) { return t === 'div' ? mkWrap() : fakeEl(t); }, querySelectorAll: function () { return []; } };
+  const root = { tagName: 'DIV', nodeType: 1, parentElement: null };
+  const nodes = [
+    fakeEl('H2', 'Sec A'), fakeEl('P', 'a1'), fakeEl('P', 'a2'),
+    fakeEl('H2', 'Sec B'), fakeEl('P', 'b1'), fakeEl('P', 'b2'),
+    fakeEl('H2', 'Sec C'), fakeEl('P', 'c1')
+  ];
+  nodes.forEach(function (n, i) { n.parentElement = root; n.previousElementSibling = nodes[i - 1] || null; n.nextElementSibling = nodes[i + 1] || null; });
+  function markIn(block) { return { tagName: 'MARK', nodeType: 1, parentElement: block, getAttribute: function () { return null; }, querySelectorAll: function () { return []; }, cloneNode: function () { return { querySelectorAll: function () { return []; }, _html: '' }; } }; }
+  const marks = [markIn(nodes[2]), markIn(nodes[4])]; // selection from a2 -> b1
+  root.querySelector = function () { return marks[0]; };
+  root.querySelectorAll = function (sel) { return /data-noteback-id="c1"/.test(sel) ? marks : []; };
   return { doc: doc, root: root };
 }
 
@@ -178,6 +204,19 @@ test('extractSections skips whole-document notes (anchor == null)', () => {
   const ex = snap.extractSections({ root: root, doc: doc, comments: [{ id: 'c1', body: 'doc note', anchor: null }] });
   assert.strictEqual(ex.sections.length, 0);
   assert.deepStrictEqual(ex.sectionByCommentId, {});
+});
+
+test('extractSections unions every section a multi-block selection spans (not just the start)', () => {
+  const { doc, root } = multiSectionDom();
+  const ex = snap.extractSections({ root: root, doc: doc, comments: [{ id: 'c1', body: 'spanning note', anchor: { quote: 'a2 ... b1' } }] });
+  assert.strictEqual(ex.sections.length, 1);
+  const html = ex.sections[0].html;
+  // Whole of section A and section B (both ends of the selection) are present...
+  ['Sec A', 'a1', 'a2', 'Sec B', 'b1', 'b2'].forEach(function (t) {
+    assert.ok(html.indexOf(t) !== -1, 'expected "' + t + '" in the snapshot');
+  });
+  // ...but the untouched section C is not.
+  assert.ok(html.indexOf('Sec C') === -1 && html.indexOf('c1') === -1, 'section C must be excluded');
 });
 
 test('extractSections trims an oversized section but still captures the commented block', () => {

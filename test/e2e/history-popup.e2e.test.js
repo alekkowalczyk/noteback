@@ -164,3 +164,72 @@ test('history snapshot is captured on create and the "Earlier feedback" entry op
     await context.close();
   }
 });
+
+/** Read the headings rendered inside the snapshot popup iframe (pierces shadow DOM). */
+async function popupHeadings(page) {
+  return page.evaluate(() => {
+    function findFrame(node) {
+      if (node.shadowRoot) {
+        const f = node.shadowRoot.querySelector('iframe.nb-hist-frame');
+        if (f) return f;
+        for (const c of node.shadowRoot.querySelectorAll('*')) { const r = findFrame(c); if (r) return r; }
+      }
+      for (const c of node.children || []) { const r = findFrame(c); if (r) return r; }
+      return null;
+    }
+    const f = findFrame(document.documentElement);
+    const d = f.contentDocument;
+    return Array.from(d.body.querySelectorAll('h1,h2,h3,h4,h5,h6')).map((h) => h.textContent.trim());
+  });
+}
+
+test('a selection spanning sections captures BOTH ends in the popup, not just the start', { timeout: 90000 }, async () => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+  const page = await context.newPage();
+  try {
+    // --- Draft 1: drag-select from the Overview paragraph down into Architecture ---
+    serveMode = 'd1';
+    await page.goto(baseURL + '?v=ms1');
+    await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
+    await page.reload();
+    await page.waitForTimeout(300);
+
+    const pts = await page.evaluate(() => {
+      const root = document.getElementById('noteback-doc-root');
+      const ps = Array.from(root.querySelectorAll('p'));
+      const start = ps.find((p) => /RealtimeSync keeps client/.test(p.textContent));
+      const end = ps.find((p) => /Incoming edits are written/.test(p.textContent));
+      start.scrollIntoView({ block: 'start' });
+      const a = start.getBoundingClientRect(), b = end.getBoundingClientRect();
+      return { ax: a.left + 6, ay: a.top + 6, bx: b.left + 120, by: b.top + 6 };
+    });
+    await page.mouse.move(pts.ax, pts.ay);
+    await page.mouse.down();
+    await page.mouse.move((pts.ax + pts.bx) / 2, (pts.ay + pts.by) / 2, { steps: 8 });
+    await page.mouse.move(pts.bx, pts.by, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(600);
+
+    await page.locator('button.noteback-fab').click();
+    const ta = page.locator('.nb-popover textarea');
+    await ta.waitFor({ state: 'visible', timeout: 3000 });
+    await ta.fill('comment spanning two sections');
+    await page.locator('.nb-savecomment').click();
+    await page.waitForTimeout(500);
+
+    // --- Draft 2: open the earlier-feedback entry's popup ---
+    serveMode = 'd2';
+    await page.goto(baseURL + '?v=ms2');
+    await page.waitForTimeout(400);
+    await page.locator('.nb-launcher').click();
+    await page.waitForTimeout(300);
+    await page.locator('.nb-hist-item').first().click();
+    await page.waitForTimeout(400);
+
+    const headings = await popupHeadings(page);
+    assert.ok(headings.includes('Overview'), 'start-of-selection section is present');
+    assert.ok(headings.includes('Architecture'), 'end-of-selection section is present too (not just the start)');
+  } finally {
+    await context.close();
+  }
+});
