@@ -118,7 +118,7 @@
               styles = ex.styles || '';
               sections = ex.sections || [];
             }
-          } catch (e) { sections = []; styles = ''; }
+          } catch (e) { sections = []; styles = ''; sectionByCommentId = {}; }
           return Promise.all([
             Promise.all(sections.map(function (s) { return codec.compress(s.html).then(function (h) { return { id: s.id, html: h }; }); })),
             codec.compress(styles)
