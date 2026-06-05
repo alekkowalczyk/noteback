@@ -14,7 +14,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
-  const MIN_HASH_CHARS = 10;
+  const MIN_HASH_CHARS = 32;
 
   /** Trim + collapse all whitespace runs to a single space (case preserved). */
   function normalizeText(text) {
