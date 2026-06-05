@@ -114,7 +114,7 @@
           });
         });
       }).then(function () {
-        return pruneLineage(lineageId).then(function () {
+        return pruneLineage(lineageId, hash).then(function () {
           return { degraded: false, contentHash: hash, lineageId: lineageId, comments: (gen.comments || []).slice() };
         });
       });
@@ -153,7 +153,7 @@
         gen.sectionByCommentId = p.sectionByCommentId || gen.sectionByCommentId || {};
         gen.lastEditedAt = now();
         return store.set(genKey(p.contentHash), gen).then(function () {
-          return pruneLineage(gen.lineageId);
+          return pruneLineage(gen.lineageId, p.contentHash);
         });
       });
     }
@@ -212,8 +212,11 @@
     /**
      * Enforce retention for a lineage: snapshot window, metadata window, TTL,
      * and a coarse byte cap. `lin.generations` is oldest→newest.
+     * @param {string} lineageId
+     * @param {string} protectedHash  The current draft's hash — never remove or
+     *   strip this gen, regardless of TTL / metaDrafts rules.
      */
-    function pruneLineage(lineageId) {
+    function pruneLineage(lineageId, protectedHash) {
       return store.get(linKey(lineageId)).then(function (lin) {
         if (!lin) return;
         const gens = lin.generations.slice(); // oldest -> newest
@@ -222,24 +225,25 @@
         return gens.reduce(function (chain, h, idx) {
           return chain.then(function () {
             return store.get(genKey(h)).then(function (gen) {
-              if (!gen) return { h: h, drop: true };
+              if (!gen) return;
+              // Fix A: never remove or strip the protected (current) draft.
+              if (h === protectedHash) return;
               const ageFromNewest = gens.length - 1 - idx; // 0 = newest
               const tooOld = isFinite(ttlCutoff) && Date.parse(gen.lastEditedAt) < ttlCutoff;
               const beyondMeta = ageFromNewest >= limits.metaDrafts;
               const beyondSnapshot = ageFromNewest >= limits.snapshotDrafts;
               if (beyondMeta || tooOld) {
-                return store.remove(genKey(h)).then(function () { return { h: h, drop: true }; });
+                return store.remove(genKey(h));
               }
               if (beyondSnapshot && (gen.sections.length || gen.styles)) {
                 gen = Object.assign({}, gen);
                 gen.sections = [];
                 gen.styles = '';
-                return store.set(genKey(h), gen).then(function () { return { h: h, drop: false }; });
+                return store.set(genKey(h), gen);
               }
-              return { h: h, drop: false };
             });
           });
-        }, Promise.resolve({})).then(function () {
+        }, Promise.resolve()).then(function () {
           // Re-read survivors to rebuild the lineage list in order.
           const kept = [];
           return gens.reduce(function (chain, h) {
@@ -247,40 +251,65 @@
               return store.get(genKey(h)).then(function (gen) { if (gen) kept.push(h); });
             });
           }, Promise.resolve()).then(function () {
-            lin.generations = kept;
+            // Clone lin before mutating (match ensureLineage's pattern).
+            lin = { schemaVersion: lin.schemaVersion || 1, lineageId: lin.lineageId, attachKeys: (lin.attachKeys || []).slice(), generations: kept };
             return store.set(linKey(lineageId), lin);
           });
-        }).then(function () { return enforceByteCap(); });
+        }).then(function () { return enforceByteCap(protectedHash); });
       });
     }
 
-    /** Coarse global byte cap: evict oldest drafts' snapshots, then drafts. */
-    function enforceByteCap() {
+    /** Coarse global byte cap: evict oldest drafts' snapshots, then drafts.
+     *  Never evicts the newest gen of any lineage, and never evicts protectedHash. */
+    function enforceByteCap(protectedHash) {
       return store.keys().then(function (keys) {
         const genKeys = keys.filter(function (k) { return k.indexOf(GEN) === 0; });
         return Promise.all(genKeys.map(function (k) {
           return store.get(k).then(function (g) { return { key: k, gen: g }; });
-        })).then(function (entries) {
+        })).then(function (all) {
+          const entries = all.filter(function (e) { return e.gen; });
+          // Build protected key set: newest gen of each lineage + protectedHash.
+          const newestKeyByLineage = {};
+          entries.forEach(function (e) {
+            const lid = e.gen.lineageId;
+            const t = Date.parse(e.gen.lastEditedAt) || 0;
+            if (!newestKeyByLineage[lid] || t > newestKeyByLineage[lid].t) {
+              newestKeyByLineage[lid] = { t: t, key: e.key };
+            }
+          });
+          const protectedKeys = {};
+          Object.keys(newestKeyByLineage).forEach(function (lid) { protectedKeys[newestKeyByLineage[lid].key] = true; });
+          if (protectedHash) protectedKeys[GEN + protectedHash] = true;
+
           function total() {
-            return entries.reduce(function (sum, e) {
-              return sum + (e.gen ? JSON.stringify(e.gen).length : 0);
-            }, 0);
+            return entries.reduce(function (s, e) { return s + (e.gen ? JSON.stringify(e.gen).length : 0); }, 0);
           }
           entries.sort(function (a, b) {
-            return Date.parse((a.gen && a.gen.lastEditedAt) || 0) - Date.parse((b.gen && b.gen.lastEditedAt) || 0);
+            return (Date.parse(a.gen.lastEditedAt) || 0) - (Date.parse(b.gen.lastEditedAt) || 0);
           });
-          const ops = [];
+
+          const setOps = [], removeKeys = {};
+          // Pass 1: strip snapshots from oldest entries while over cap.
           for (let i = 0; i < entries.length && total() > limits.maxBytes; i++) {
             const e = entries[i];
-            if (!e.gen) continue;
-            if (e.gen.sections.length || e.gen.styles) { e.gen = Object.assign({}, e.gen); e.gen.sections = []; e.gen.styles = ''; ops.push(store.set(e.key, e.gen)); }
+            if (e.gen && (e.gen.sections.length || e.gen.styles)) {
+              e.gen = Object.assign({}, e.gen);
+              e.gen.sections = [];
+              e.gen.styles = '';
+              setOps.push(e);
+            }
           }
+          // Pass 2: remove unprotected entries while still over cap.
           for (let j = 0; j < entries.length && total() > limits.maxBytes; j++) {
             const e = entries[j];
-            if (!e.gen) continue;
-            ops.push(store.remove(e.key)); e.gen = null;
+            if (!e.gen || protectedKeys[e.key]) continue;
+            removeKeys[e.key] = true;
+            e.gen = null;
           }
-          return Promise.all(ops);
+          // Execute: SET first, then REMOVE; skip SET for any key that is also removed.
+          const sets = setOps.filter(function (e) { return !removeKeys[e.key]; });
+          return Promise.all(sets.map(function (e) { return store.set(e.key, e.gen); }))
+            .then(function () { return Promise.all(Object.keys(removeKeys).map(function (k) { return store.remove(k); })); });
         });
       });
     }

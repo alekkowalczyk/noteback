@@ -164,7 +164,6 @@ test('clearCurrent empties the draft (kept out of history) but leaves siblings',
 });
 
 function coreWithLimits(store, limits) {
-  let n = 0;
   return core.createDraftHistory({
     store,
     now: () => '2026-06-05T00:00:00Z',
@@ -207,4 +206,54 @@ test('GC removes drafts beyond metaDrafts entirely', async () => {
   const lin = await store.get('nb:lin:lin_fixed');
   assert.strictEqual(lin.generations.indexOf(hashes[0]), -1, 'removed from lineage list');
   assert.strictEqual(lin.generations.length, 2);
+});
+
+test('reopening an aged-out draft does not delete it (current draft protected from TTL)', async () => {
+  const store = fakeStore();
+  let clock = '2026-01-01T00:00:00Z';
+  const dh = core.createDraftHistory({ store, now: () => clock, mintId: () => 'lin_a', codec: idCodec, limits: { snapshotDrafts: 9, metaDrafts: 9, ttlDays: 30, maxBytes: 1e9 } });
+  const key = 'file:///a.html';
+  const text = 'An aging draft body with plenty of text to clear the guard.';
+  const r1 = await dh.resolve({ contentText: text, attachKey: key, fallbackComments: [] });
+  await dh.persist({ contentHash: r1.contentHash, comments: [{ id: 'c1', body: 'keep me', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
+  clock = '2026-06-01T00:00:00Z'; // far beyond ttlDays:30
+  const r2 = await dh.resolve({ contentText: text, attachKey: key, fallbackComments: [] }); // refresh same content
+  assert.strictEqual(r2.contentHash, r1.contentHash);
+  assert.ok(await store.get('nb:gen:' + r1.contentHash), 'current draft NOT deleted by its own resolve');
+  assert.strictEqual(r2.comments.length, 1, 'comments still present after refresh');
+  await dh.persist({ contentHash: r2.contentHash, comments: [{ id: 'c1', body: 'keep me', anchor: null, createdAt: 'x', author: null }, { id: 'c2', body: 'added', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
+  assert.strictEqual((await store.get('nb:gen:' + r2.contentHash)).comments.length, 2, 'persist after refresh is not silently lost');
+});
+
+test('TTL removes an aged-out OLDER draft in the lineage but keeps the current one', async () => {
+  const store = fakeStore();
+  let clock = '2026-01-01T00:00:00Z';
+  const dh = core.createDraftHistory({ store, now: () => clock, mintId: () => 'lin_b', codec: idCodec, limits: { snapshotDrafts: 9, metaDrafts: 9, ttlDays: 30, maxBytes: 1e9 } });
+  const key = 'file:///b.html';
+  const rOld = await dh.resolve({ contentText: 'The very first old draft body text for hashing here.', attachKey: key, fallbackComments: [] });
+  await dh.persist({ contentHash: rOld.contentHash, comments: [{ id: 'o', body: 'old', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
+  clock = '2026-06-01T00:00:00Z';
+  const rNew = await dh.resolve({ contentText: 'A brand new current draft body text for hashing now.', attachKey: key, fallbackComments: [] });
+  assert.strictEqual(await store.get('nb:gen:' + rOld.contentHash), null, 'aged-out older draft removed');
+  assert.ok(await store.get('nb:gen:' + rNew.contentHash), 'current draft kept');
+});
+
+test('byte cap evicts oldest drafts but never the newest of each lineage', async () => {
+  const store = fakeStore();
+  let clock = '2026-01-01T00:00:00Z';
+  const dh = core.createDraftHistory({ store, now: () => clock, mintId: () => 'lin_c', codec: idCodec, limits: { snapshotDrafts: 99, metaDrafts: 99, ttlDays: 99999, maxBytes: 600 } });
+  const key = 'file:///c.html';
+  const hashes = [];
+  for (let i = 0; i < 4; i++) {
+    clock = '2026-01-0' + (i + 1) + 'T00:00:00Z';
+    const r = await dh.resolve({ contentText: 'Draft variant ' + i + ' with plenty of body text for hashing here.', attachKey: key, fallbackComments: [] });
+    hashes.push(r.contentHash);
+    await dh.persist({ contentHash: r.contentHash, comments: [{ id: 'c' + i, body: 'body' + i, anchor: null, createdAt: 'x', author: null }], sections: [{ id: 's1', html: 'Z'.repeat(300) }], styles: '' });
+  }
+  assert.ok(await store.get('nb:gen:' + hashes[3]), 'newest draft of the lineage survives');
+  assert.strictEqual((await store.get('nb:gen:' + hashes[3])).comments.length, 1, 'newest keeps its comment');
+  let total = 0;
+  const keys = await store.keys();
+  for (const k of keys) { if (k.indexOf('nb:gen:') === 0) { const g = await store.get(k); if (g) total += JSON.stringify(g).length; } }
+  assert.ok(total <= 600, 'total within byte cap, got ' + total);
 });
