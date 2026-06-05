@@ -96,6 +96,38 @@ function createInFileStateAdapter(doc) { ... }
   content. (It does NOT persist to disk — re-sharing is handled by the exporter's
   download / File System Access flow, §6.)
 
+### 1.3 Settings: per-origin activation (extension mode only)
+
+Stored in `chrome.storage.local` under the single key **`nb:settings`** (distinct
+from per-document state, which is keyed `"noteback:" + docId`, §1.1). Shape:
+
+```jsonc
+{
+  "version": 1,
+  "origins": { "file": true, "localhost": true, "127.0.0.1": true },
+  "disabledSites": []   // canonical origins, e.g. "http://localhost:3000"; "file://" for file pages
+}
+```
+
+A missing/partial object reads as **all-on, nothing disabled** (current behavior;
+zero migration). `src/content/origin-policy.js` is the single source of truth and
+is shared by the content script (gating) and the popup (rendering toggles):
+
+- `classifyOrigin(loc) -> 'file' | 'localhost' | '127.0.0.1' | 'other'`
+- `originOf(loc) -> canonical origin` (`"file://"` for file pages)
+- `normalizeSettings(s) -> { origins, disabledSites }` (defaults filled)
+- `isActive({type, origin}, settings)` — **active** iff `origins[type] !== false`
+  **and** `origin ∉ disabledSites`. Per-type is the master gate; per-site only
+  subtracts a single origin. `'other'` is never active.
+
+**Active** → the content script mounts the overlay. **Dormant** → injected but
+mounts nothing (no chip, launcher, or listeners); stored comments are untouched.
+The content script re-evaluates live on `chrome.storage.onChanged`, so popup
+toggles take effect without a page reload. `NOTEBACK_PING` reports
+`{ booted, dormant, originType, origin }` so the popup distinguishes "off by
+settings" from "no file access". The embedded canvas is unaffected — it has no
+settings and always shows its UI.
+
 ---
 
 ## 2. State schema (schemaVersion 1)
