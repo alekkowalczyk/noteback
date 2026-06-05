@@ -440,7 +440,7 @@
       '</div>' +
       '<div class="nb-list"></div>' +
       '<div class="nb-foot">' +
-      '  <button type="button" class="nb-btn nb-secondary nb-copy">Copy feedback as Markdown</button>' +
+      '  <button type="button" class="nb-btn nb-secondary nb-copy">Copy feedback</button>' +
       '  <div class="nb-save-wrap">' +
       '    <button type="button" class="nb-btn nb-save-btn" aria-haspopup="menu" aria-expanded="false">Save<span class="nb-caret" aria-hidden="true">▾</span></button>' +
       '    <div class="nb-menu" role="menu" aria-label="Save options">' +
