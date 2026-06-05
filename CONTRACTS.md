@@ -421,13 +421,17 @@ Node tests require the file directly:
 | `src/runtime/markdown.js`                 | `markdown`              | yes                    | pure        |
 | `src/runtime/highlight.js`                | `highlight`             | no                     | DOM         |
 | `src/runtime/overlay.js`                  | `overlay`               | no                     | DOM         |
+| `src/runtime/draft-history-core.js`       | `draftHistory`          | yes                    | pure-ish    |
+| `src/runtime/snapshot.js`                 | `snapshot`              | yes                    | mixed       |
 | `src/runtime/boot.js`                     | `boot`                  | no                     | DOM         |
 | `src/adapters/chrome-storage-adapter.js`  | `chromeStorageAdapter`  | no                     | DOM (chrome)|
 | `src/adapters/infile-state-adapter.js`    | `infileStateAdapter`    | no                     | DOM         |
+| `src/adapters/localstorage-state-adapter.js` | `localStorageStateAdapter` | yes (tests)        | DOM         |
 | `src/canvas/exporter.js`                  | `exporter`              | yes (pure parts)       | mixed       |
 
-**Runtime dependency order** (the order in `content_scripts[].js`, the order the
-service worker concatenates for inlining, and the order in `web_accessible_resources`):
+**Runtime dependency order** (the order the service worker concatenates for
+inlining, the order in `web_accessible_resources`, and the order in
+`bin/noteback.js` / `examples/build-canvas.js`):
 
 ```
 src/runtime/anchor.js
@@ -435,7 +439,10 @@ src/runtime/state.js
 src/runtime/markdown.js
 src/runtime/highlight.js
 src/runtime/overlay.js
+src/runtime/draft-history-core.js
+src/runtime/snapshot.js
 src/adapters/infile-state-adapter.js
+src/adapters/localstorage-state-adapter.js
 src/canvas/exporter.js
 src/runtime/boot.js
 ```
@@ -443,6 +450,14 @@ src/runtime/boot.js
 (`chrome-storage-adapter.js` and `content-script.js` are loaded **only** in extension
 mode, appended after the shared runtime; they are NOT inlined into the canvas, which
 uses `InFileStateAdapter` instead.)
+
+The draft-history modules — `draft-history-core.js`, `snapshot.js`, and the
+canvas-only `localstorage-state-adapter.js` — are inlined into the canvas and listed
+in `web_accessible_resources`, but are **not** yet loaded by the extension
+`content_scripts[].js`: Plan 1 leaves the live extension unchanged. The extension
+binding (which adds `draft-history-core.js` + `snapshot.js` to `content_scripts`)
+lands in a later plan; `localstorage-state-adapter.js` stays canvas-only, mirroring
+how `chrome-storage-adapter.js` is extension-only.
 
 ---
 

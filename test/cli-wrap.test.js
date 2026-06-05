@@ -177,6 +177,13 @@ test('planInstall picks the .agents hub + .claude symlink (or a plain --dir copy
   });
 });
 
+test('wrapHtml inlines the draft-history runtime modules', () => {
+  const html = cli.wrapHtml(DOC, { sourceName: 'plan.html' });
+  assert.match(html, /NotebackRuntime\.draftHistory/);
+  assert.match(html, /NotebackRuntime\.snapshot/);
+  assert.match(html, /NotebackRuntime\.localStorageStateAdapter/);
+});
+
 test('install-skill writes the .agents hub + a .claude symlink (covers Codex/OpenCode/Claude)', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'noteback-home-'));
 
