@@ -8,9 +8,14 @@ the code, that have already bitten us once.
 
 ## Hard constraints (do not break)
 
-- **Zero npm dependencies, no build step, no TypeScript.** It loads unpacked
-  exactly as written. Don't add a bundler, a framework, or a `dependencies`
-  entry. Tests run on the **Node built-in runner** (`npm test` → `node --test`).
+- **Zero RUNTIME dependencies, no build step, no TypeScript.** The shipped code
+  (`bin`, `src`, `skills`) loads unpacked exactly as written — never add a bundler,
+  a framework, or a `dependencies` entry, and never `require` a package from
+  `src/`. Tests run on the **Node built-in runner** (`npm test` → `node --test`).
+  The **one** allowed exception is `devDependencies`: Playwright backs the browser
+  e2e (`test/e2e/`, `npm run test:e2e`) that covers overlay DOM behaviour the Node
+  suite can't. It is test-only and never reaches users (`files` ships `bin`/`src`/
+  `skills` only). Needs the browser binary once: `npx playwright install chromium`.
 - **One runtime, two modes.** The annotation engine in `src/runtime/` runs both
   as the extension content script (`ChromeStorageAdapter`) and inlined into a
   saved canvas file (`InFileStateAdapter`). Anything in `src/runtime/` must work
@@ -75,11 +80,12 @@ the code, that have already bitten us once.
   the comment's later "Earlier feedback" entry is silently un-clickable
   (`hasSnapshot:false`, `sectionId:null` → the overlay `disable`s the button: no
   pointer cursor, clicks ignored). This shipped once and was found only in the live
-  canvas — **no `node --test` test catches it** because the bug lives in the
-  overlay's DOM paint/persist ordering, which has no Node-side DOM. The Node tests
-  cover the seams around it (`extractSections` with/without a painted mark;
-  `history()` reporting `hasSnapshot`/`sectionId`); the ordering itself is held by
-  this comment + live verification (real drag-select → reload → click the entry).
+  canvas — the Node suite can't catch it (the bug lives in the overlay's DOM
+  paint/persist ordering, which has no Node-side DOM). It is now guarded by the
+  browser e2e `test/e2e/history-popup.e2e.test.js` (real drag-select → reload as a
+  new draft → click the entry → assert the popup opens); that test fails on the
+  pre-fix ordering. The Node tests cover the seams around it (`extractSections`
+  with/without a painted mark; `history()` reporting `hasSnapshot`/`sectionId`).
 
 ## Live verification (Playwright)
 
