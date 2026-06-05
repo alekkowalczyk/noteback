@@ -156,6 +156,32 @@
     '  transition:background .15s ease,color .15s ease,transform .15s ease;}',
     '.nb-x:hover{background:#ececea;color:var(--nb-ink);}',
     '.nb-x:active{transform:scale(.9);}',
+    '.nb-head-ctrls{display:flex;align-items:center;gap:4px;flex:none;}',
+    '.nb-info{border:none;background:none;font-size:18px;line-height:1;cursor:pointer;color:var(--nb-ink-faint);',
+    '  width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none;',
+    '  transition:background .15s ease,color .15s ease,transform .15s ease;}',
+    '.nb-info:hover{background:#ececea;color:var(--nb-ink);}',
+    '.nb-info:active{transform:scale(.9);}',
+
+    /* info dialog (install-as-a-skill) */
+    '.nb-info-dialog{position:absolute;inset:0;z-index:5;display:flex;align-items:flex-start;justify-content:center;',
+    '  padding:54px 16px 16px;background:rgba(40,40,38,.28);}',
+    '.nb-info-dialog[hidden]{display:none;}',
+    '.nb-info-card{width:100%;background:var(--nb-paper);border:1px solid var(--nb-line);border-radius:14px;',
+    '  box-shadow:0 18px 50px -20px rgba(40,40,38,.5);padding:14px 14px 16px;}',
+    '.nb-info-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;}',
+    '.nb-info-title{font:700 14px/1.2 var(--nb-round);color:var(--nb-ink);}',
+    '.nb-info-x{border:none;background:none;font-size:18px;line-height:1;cursor:pointer;color:var(--nb-ink-faint);',
+    '  width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex:none;}',
+    '.nb-info-x:hover{background:#ececea;color:var(--nb-ink);}',
+    '.nb-info-note{margin:0 0 12px;font:400 12.5px/1.5 var(--nb-ui);color:var(--nb-ink-soft);}',
+    '.nb-cmd{display:flex;align-items:center;gap:8px;margin-top:8px;}',
+    '.nb-cmd code{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;',
+    '  font:500 11.5px/1.4 var(--nb-mono,ui-monospace,SFMono-Regular,Menlo,monospace);',
+    '  background:#f3f2ef;border:1px solid var(--nb-line);border-radius:8px;padding:6px 8px;color:var(--nb-ink);}',
+    '.nb-cmd-copy{flex:none;border:1px solid var(--nb-line);background:#fff;cursor:pointer;border-radius:8px;',
+    '  font:600 11px/1 var(--nb-ui);padding:6px 9px;color:var(--nb-ink-soft);transition:background .15s ease,color .15s ease;}',
+    '.nb-cmd-copy:hover{background:#f3f2ef;color:var(--nb-ink);}',
 
     /* list */
     '.nb-list{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:13px 14px 16px;scrollbar-width:thin;}',
@@ -436,7 +462,10 @@
     sidebar.innerHTML =
       '<div class="nb-head">' +
       '  <div class="nb-titlewrap"><span class="nb-title">Noteback</span> <span class="nb-count"></span></div>' +
-      '  <button type="button" class="nb-x" title="Close" aria-label="Close">×</button>' +
+      '  <div class="nb-head-ctrls">' +
+      '    <button type="button" class="nb-info" title="Install Noteback as a skill" aria-label="About Noteback" aria-expanded="false">ⓘ</button>' +
+      '    <button type="button" class="nb-x" title="Close" aria-label="Close">×</button>' +
+      '  </div>' +
       '</div>' +
       '<div class="nb-list"></div>' +
       '<div class="nb-foot">' +
@@ -457,6 +486,19 @@
       '        <span class="nb-mi-sub">print-ready, no comments</span></button>' +
       '    </div>' +
       '  </div>' +
+      '</div>' +
+      '<div class="nb-info-dialog" role="dialog" aria-label="About Noteback" hidden>' +
+      '  <div class="nb-info-card">' +
+      '    <div class="nb-info-head">' +
+      '      <span class="nb-info-title">Hand yourself annotatable docs</span>' +
+      '      <button type="button" class="nb-info-x" title="Close" aria-label="Close">×</button>' +
+      '    </div>' +
+      '    <p class="nb-info-note">Noteback also ships as an agent skill + CLI, so an AI (Claude Code, etc.) can give you HTML that is already annotatable.</p>' +
+      '    <div class="nb-cmd"><code>npx skills add alekkowalczyk/noteback</code>' +
+      '      <button type="button" class="nb-cmd-copy" data-cmd="npx skills add alekkowalczyk/noteback" title="Copy command">Copy</button></div>' +
+      '    <div class="nb-cmd"><code>npx noteback install-skill</code>' +
+      '      <button type="button" class="nb-cmd-copy" data-cmd="npx noteback install-skill" title="Copy command">Copy</button></div>' +
+      '  </div>' +
       '</div>';
 
     const elCount = sidebar.querySelector('.nb-count');
@@ -470,6 +512,30 @@
     sidebar.querySelector('.nb-save-comments').addEventListener('click', function () { closeSaveMenu(); saveCanvas(); });
     sidebar.querySelector('.nb-save-clean').addEventListener('click', function () { closeSaveMenu(); saveClean(); });
     sidebar.querySelector('.nb-save-pdf').addEventListener('click', function () { closeSaveMenu(); savePdf(); });
+
+    /* --- info dialog (install-as-a-skill) ------------------------------- */
+    const infoBtn = sidebar.querySelector('.nb-info');
+    const infoDialog = sidebar.querySelector('.nb-info-dialog');
+    let infoOpen = false;
+    function openInfo() { infoDialog.hidden = false; infoOpen = true; infoBtn.setAttribute('aria-expanded', 'true'); }
+    function closeInfo() { infoDialog.hidden = true; infoOpen = false; infoBtn.setAttribute('aria-expanded', 'false'); }
+    infoBtn.addEventListener('click', function (e) { e.stopPropagation(); if (infoOpen) closeInfo(); else openInfo(); });
+    infoDialog.querySelector('.nb-info-x').addEventListener('click', closeInfo);
+    // Click on the dim backdrop (but not the card) closes it.
+    infoDialog.addEventListener('click', function (e) { if (e.target === infoDialog) closeInfo(); });
+    const infoCopyBtns = infoDialog.querySelectorAll('.nb-cmd-copy');
+    for (let i = 0; i < infoCopyBtns.length; i++) {
+      infoCopyBtns[i].addEventListener('click', function () {
+        const cmd = this.getAttribute('data-cmd') || '';
+        Promise.resolve(copyToClipboard(cmd)).then(function (ok) {
+          toast(ok ? 'Copied command' : 'Copy failed — select & copy manually', { success: !!ok });
+        });
+      });
+    }
+    const onDocKeydownInfo = function (e) {
+      if (e.key === 'Escape' && infoOpen) { closeInfo(); if (infoBtn && infoBtn.focus) infoBtn.focus(); }
+    };
+    doc.addEventListener('keydown', onDocKeydownInfo);
 
     /* --- launcher (always-visible pill that opens the sidebar) ---------- */
     const launcher = doc.createElement('button');
@@ -1559,6 +1625,7 @@
       doc.removeEventListener('click', onDocClickOutside);
       doc.removeEventListener('click', onDocClickSaveMenu);
       doc.removeEventListener('keydown', onDocKeydownSaveMenu);
+      doc.removeEventListener('keydown', onDocKeydownInfo);
       cancelFabTimer();
       closePopover();
       if (fab.parentNode) fab.parentNode.removeChild(fab);
