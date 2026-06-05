@@ -68,6 +68,19 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       );
       return true; // async response
 
+    case 'NOTEBACK_EXPORT_CLEAN':
+      // Content script supplies the already-cleaned HTML (Noteback UI stripped,
+      // highlights unwrapped). We only name it and trigger the download.
+      exportClean({
+        docId: msg.docId,
+        docTitle: msg.docTitle,
+        cleanHtml: msg.cleanHtml
+      }).then(
+        function (result) { sendResponse({ ok: true, downloadId: result }); },
+        function (err) { sendResponse({ ok: false, error: String((err && err.message) || err) }); }
+      );
+      return true; // async response
+
     case 'NOTEBACK_CHECK_FILE_ACCESS':
       checkFileUrlAccess().then(
         function (allowed) { sendResponse({ ok: true, allowed: allowed }); },
@@ -158,6 +171,21 @@ function exportCanvas(input) {
     const filename = suggestedFilename(input.docTitle, input.docId);
     return triggerDownload(html, filename);
   });
+}
+
+/**
+ * Download a clean (Noteback-free) copy of the document. The content script has
+ * already stripped our UI and unwrapped highlights, so there is no assembly to
+ * do — just name it and hand it to the downloads API.
+ * @param {{docId:string, docTitle:string, cleanHtml:string}} input
+ * @returns {Promise<number>} the downloads API download id.
+ */
+function exportClean(input) {
+  input = input || {};
+  const html = String(input.cleanHtml || '');
+  if (!html) return Promise.reject(new Error('no clean HTML provided'));
+  const filename = suggestedFilename(input.docTitle, input.docId);
+  return triggerDownload(html, filename);
 }
 
 /** Fetch + concatenate every runtime file in dependency order. */

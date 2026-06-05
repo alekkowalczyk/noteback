@@ -4,8 +4,9 @@
  * Responsibility: the mode-agnostic annotation UI —
  *   - floating "💬 Comment" button that appears on text selection,
  *   - comment popover (textarea) for create / edit,
- *   - sidebar listing all comments (with their quotes), edit/delete, the two
- *     export actions, and an "unanchored" group for orphans.
+ *   - sidebar listing all comments (with their quotes), edit/delete, a footer
+ *     "Save…" menu (HTML with comments / clean HTML / PDF) plus copy-as-markdown,
+ *     and an "unanchored" group for orphans.
  * This is the SAME component used in the extension and inside the saved canvas.
  *
  * It is storage- and export-agnostic: it receives a StorageAdapter (CONTRACTS.md
@@ -19,7 +20,8 @@
  *   mountOverlay({ root, adapter, exporter, getState, setState, onChange,
  *                  toMarkdown }) -> { destroy(), refresh(), toggleSidebar(),
  *                                     openSidebar(), closeSidebar(),
- *                                     copyMarkdown(), saveCanvas() }
+ *                                     copyMarkdown(), saveCanvas(), saveClean(),
+ *                                     savePdf() }
  *
  * The overlay owns the live State for the duration of the session. `boot.js`
  * injects `getState`/`setState` so a single State instance is shared between the
@@ -94,6 +96,15 @@
     '@media (prefers-reduced-motion: reduce){',
     '  .noteback-fab,mark.noteback-highlight,mark.noteback-highlight-flash{transition:none !important;animation:none !important;}',
     '  .noteback-fab,.noteback-fab.nb-in{opacity:1;transform:none;animation:none !important;}',
+    '}',
+    // Printing (incl. "Save as PDF" from the menu): hide every Noteback-injected
+    // node and render highlights as plain text, so the printout/PDF is the clean
+    // document. [data-noteback-ui] covers the sidebar host, launcher, fab and our
+    // injected <style>; highlights stay inline but lose their honey styling.
+    '@media print{',
+    '  [data-noteback-ui]{display:none !important;}',
+    '  mark.noteback-highlight,mark.noteback-highlight-flash{',
+    '    background:transparent !important;box-shadow:none !important;color:inherit !important;}',
     '}'
   ].join('');
 
@@ -145,6 +156,35 @@
     '  transition:background .15s ease,color .15s ease,transform .15s ease;}',
     '.nb-x:hover{background:#ececea;color:var(--nb-ink);}',
     '.nb-x:active{transform:scale(.9);}',
+    '.nb-head-ctrls{display:flex;align-items:center;gap:4px;flex:none;}',
+    '.nb-info{border:none;background:none;font-size:18px;line-height:1;cursor:pointer;color:var(--nb-ink-faint);',
+    '  width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none;',
+    '  transition:background .15s ease,color .15s ease,transform .15s ease;}',
+    '.nb-info:hover{background:#ececea;color:var(--nb-ink);}',
+    '.nb-info:active{transform:scale(.9);}',
+
+    /* info dialog (install-as-a-skill) */
+    '.nb-info-dialog{position:absolute;inset:0;z-index:5;display:flex;align-items:flex-start;justify-content:center;',
+    '  padding:54px 16px 16px;background:rgba(40,40,38,.28);}',
+    '.nb-info-dialog[hidden]{display:none;}',
+    '.nb-info-card{width:100%;background:var(--nb-paper);border:1px solid var(--nb-line);border-radius:14px;',
+    '  box-shadow:0 18px 50px -20px rgba(40,40,38,.5);padding:14px 14px 16px;}',
+    '.nb-info-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;}',
+    '.nb-info-title{font:700 14px/1.2 var(--nb-round);color:var(--nb-ink);}',
+    '.nb-info-x{border:none;background:none;font-size:18px;line-height:1;cursor:pointer;color:var(--nb-ink-faint);',
+    '  width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex:none;}',
+    '.nb-info-x:hover{background:#ececea;color:var(--nb-ink);}',
+    '.nb-info-note{margin:0 0 12px;font:400 12.5px/1.5 var(--nb-ui);color:var(--nb-ink-soft);}',
+    '.nb-cmd{display:flex;align-items:center;gap:8px;margin-top:8px;}',
+    '.nb-cmd code{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;',
+    '  font:500 11.5px/1.4 var(--nb-mono,ui-monospace,SFMono-Regular,Menlo,monospace);',
+    '  background:#f3f2ef;border:1px solid var(--nb-line);border-radius:8px;padding:6px 8px;color:var(--nb-ink);}',
+    '.nb-cmd-copy{flex:none;border:1px solid var(--nb-line);background:#fff;cursor:pointer;border-radius:8px;',
+    '  font:600 11px/1 var(--nb-ui);padding:6px 9px;color:var(--nb-ink-soft);transition:background .15s ease,color .15s ease;}',
+    '.nb-cmd-copy:hover{background:#f3f2ef;color:var(--nb-ink);}',
+    '.nb-info-link{display:inline-block;margin-top:13px;font:600 12px/1 var(--nb-ui);',
+    '  color:#2563eb;text-decoration:none;}',
+    '.nb-info-link:hover{text-decoration:underline;}',
 
     /* list */
     '.nb-list{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:13px 14px 16px;scrollbar-width:thin;}',
@@ -193,6 +233,28 @@
     '.nb-btn:active{transform:translateY(1px) scale(.995);}',
     '.nb-btn.nb-secondary{background:var(--nb-card);color:var(--nb-accent-ink);border-color:var(--nb-line-strong);box-shadow:none;}',
     '.nb-btn.nb-secondary:hover{background:var(--nb-accent-wash);border-color:var(--nb-accent);}',
+
+    /* save menu — a dropdown that grows upward from the footer "Save" button */
+    '.nb-save-wrap{position:relative;}',
+    '.nb-save-btn{width:100%;}',
+    '.nb-save-btn .nb-caret{margin-left:6px;font-size:10px;line-height:1;opacity:.85;transition:transform .18s var(--dropdown-ease);}',
+    '.nb-save-wrap.nb-menu-open .nb-save-btn .nb-caret{transform:rotate(180deg);}',
+    '.nb-menu{position:absolute;left:0;right:0;bottom:calc(100% + 8px);z-index:2147483647;',
+    '  background:var(--nb-card);border:1px solid var(--nb-line-strong);border-radius:14px;padding:6px;',
+    '  box-shadow:0 20px 46px -16px rgba(40,40,38,.5),0 2px 8px rgba(40,40,38,.12);transform-origin:bottom center;',
+    '  transform:scale(var(--dropdown-pre-scale));opacity:0;pointer-events:none;',
+    '  transition:transform var(--dropdown-open-dur) var(--dropdown-ease),opacity var(--dropdown-open-dur) var(--dropdown-ease);',
+    '  will-change:transform,opacity;}',
+    '.nb-menu.is-open{transform:scale(1);opacity:1;pointer-events:auto;}',
+    '.nb-menu.is-closing{transform:scale(var(--dropdown-closing-scale));opacity:0;pointer-events:none;',
+    '  transition:transform var(--dropdown-close-dur) var(--dropdown-ease),opacity var(--dropdown-close-dur) var(--dropdown-ease);}',
+    '.nb-menu-item{display:block;width:100%;text-align:left;border:none;background:none;cursor:pointer;',
+    '  padding:9px 11px;border-radius:10px;transition:background .14s ease;}',
+    '.nb-menu-item:hover,.nb-menu-item:focus-visible{background:var(--nb-accent-wash);outline:none;}',
+    '.nb-mi-label{display:block;font:700 13px/1.25 var(--nb-round);color:var(--nb-ink);}',
+    '.nb-menu-item:hover .nb-mi-label,.nb-menu-item:focus-visible .nb-mi-label{color:var(--nb-accent-deep);}',
+    '.nb-mi-sub{display:block;font:400 11.5px/1.3 var(--nb-ui);color:var(--nb-ink-soft);margin-top:2px;}',
+    '.nb-menu-sep{height:1px;background:var(--nb-line);margin:4px 9px;}',
 
     /* toast + success check (transitions.dev) */
     '.nb-toast{position:fixed;bottom:20px;right:20px;display:inline-flex;align-items:center;gap:9px;',
@@ -290,7 +352,7 @@
     '  opacity:1;transform:translateY(0);filter:blur(0);}',
 
     '@media (prefers-reduced-motion: reduce){',
-    '  .nb-sidebar,.nb-popover,.nb-launcher,.nb-toast,.nb-launcher-badge,.nb-badge-dot,',
+    '  .nb-sidebar,.nb-popover,.nb-menu,.nb-launcher,.nb-toast,.nb-launcher-badge,.nb-badge-dot,',
     '  .nb-list.nb-reveal .nb-item,.nb-list.nb-reveal .nb-group-label,.nb-list.nb-reveal .nb-empty{',
     '    transition:none !important;animation:none !important;}',
     '  .nb-toast-check,.nb-toast-check svg path{animation:none !important;}',
@@ -403,19 +465,81 @@
     sidebar.innerHTML =
       '<div class="nb-head">' +
       '  <div class="nb-titlewrap"><span class="nb-title">Noteback</span> <span class="nb-count"></span></div>' +
-      '  <button type="button" class="nb-x" title="Close" aria-label="Close">×</button>' +
+      '  <div class="nb-head-ctrls">' +
+      '    <button type="button" class="nb-info" title="Install Noteback as a skill" aria-label="About Noteback" aria-expanded="false">ⓘ</button>' +
+      '    <button type="button" class="nb-x" title="Close" aria-label="Close">×</button>' +
+      '  </div>' +
       '</div>' +
       '<div class="nb-list"></div>' +
       '<div class="nb-foot">' +
-      '  <button type="button" class="nb-btn nb-secondary nb-copy">Copy feedback as markdown</button>' +
-      '  <button type="button" class="nb-btn nb-save">Save as HTML with comments</button>' +
+      '  <button type="button" class="nb-btn nb-secondary nb-copy">Copy feedback</button>' +
+      '  <div class="nb-save-wrap">' +
+      '    <button type="button" class="nb-btn nb-save-btn" aria-haspopup="menu" aria-expanded="false">Save<span class="nb-caret" aria-hidden="true">▾</span></button>' +
+      '    <div class="nb-menu" role="menu" aria-label="Save options">' +
+      '      <button type="button" class="nb-menu-item nb-save-comments" role="menuitem">' +
+      '        <span class="nb-mi-label">HTML · with comments</span>' +
+      '        <span class="nb-mi-sub">highlights &amp; notes, re-shareable</span></button>' +
+      '      <div class="nb-menu-sep" role="none"></div>' +
+      '      <button type="button" class="nb-menu-item nb-save-clean" role="menuitem">' +
+      '        <span class="nb-mi-label">HTML · clean copy</span>' +
+      '        <span class="nb-mi-sub">the original, no Noteback</span></button>' +
+      '      <div class="nb-menu-sep" role="none"></div>' +
+      '      <button type="button" class="nb-menu-item nb-save-pdf" role="menuitem">' +
+      '        <span class="nb-mi-label">PDF/Print</span>' +
+      '        <span class="nb-mi-sub">print-ready, no comments</span></button>' +
+      '    </div>' +
+      '  </div>' +
+      '</div>' +
+      '<div class="nb-info-dialog" role="dialog" aria-label="About Noteback" hidden>' +
+      '  <div class="nb-info-card">' +
+      '    <div class="nb-info-head">' +
+      '      <span class="nb-info-title">Hand yourself annotatable docs</span>' +
+      '      <button type="button" class="nb-info-x" title="Close" aria-label="Close">×</button>' +
+      '    </div>' +
+      '    <p class="nb-info-note">Noteback also ships as an agent skill + CLI, so an AI (Claude Code, etc.) can give you HTML that is already annotatable.</p>' +
+      '    <div class="nb-cmd"><code>npx skills add alekkowalczyk/noteback</code>' +
+      '      <button type="button" class="nb-cmd-copy" data-cmd="npx skills add alekkowalczyk/noteback" title="Copy command">Copy</button></div>' +
+      '    <div class="nb-cmd"><code>npx noteback install-skill</code>' +
+      '      <button type="button" class="nb-cmd-copy" data-cmd="npx noteback install-skill" title="Copy command">Copy</button></div>' +
+      '    <a class="nb-info-link" href="https://github.com/alekkowalczyk/noteback" target="_blank" rel="noopener noreferrer">View the project on GitHub ↗</a>' +
+      '  </div>' +
       '</div>';
 
     const elCount = sidebar.querySelector('.nb-count');
     const elList = sidebar.querySelector('.nb-list');
+    const saveWrap = sidebar.querySelector('.nb-save-wrap');
+    const saveBtn = sidebar.querySelector('.nb-save-btn');
+    const saveMenu = sidebar.querySelector('.nb-menu');
     sidebar.querySelector('.nb-x').addEventListener('click', closeSidebar);
     sidebar.querySelector('.nb-copy').addEventListener('click', copyMarkdown);
-    sidebar.querySelector('.nb-save').addEventListener('click', saveCanvas);
+    saveBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleSaveMenu(); });
+    sidebar.querySelector('.nb-save-comments').addEventListener('click', function () { closeSaveMenu(); saveCanvas(); });
+    sidebar.querySelector('.nb-save-clean').addEventListener('click', function () { closeSaveMenu(); saveClean(); });
+    sidebar.querySelector('.nb-save-pdf').addEventListener('click', function () { closeSaveMenu(); savePdf(); });
+
+    /* --- info dialog (install-as-a-skill) ------------------------------- */
+    const infoBtn = sidebar.querySelector('.nb-info');
+    const infoDialog = sidebar.querySelector('.nb-info-dialog');
+    let infoOpen = false;
+    function openInfo() { infoDialog.hidden = false; infoOpen = true; infoBtn.setAttribute('aria-expanded', 'true'); }
+    function closeInfo() { infoDialog.hidden = true; infoOpen = false; infoBtn.setAttribute('aria-expanded', 'false'); }
+    infoBtn.addEventListener('click', function (e) { e.stopPropagation(); if (infoOpen) closeInfo(); else openInfo(); });
+    infoDialog.querySelector('.nb-info-x').addEventListener('click', closeInfo);
+    // Click on the dim backdrop (but not the card) closes it.
+    infoDialog.addEventListener('click', function (e) { if (e.target === infoDialog) closeInfo(); });
+    const infoCopyBtns = infoDialog.querySelectorAll('.nb-cmd-copy');
+    for (let i = 0; i < infoCopyBtns.length; i++) {
+      infoCopyBtns[i].addEventListener('click', function () {
+        const cmd = this.getAttribute('data-cmd') || '';
+        Promise.resolve(copyToClipboard(cmd)).then(function (ok) {
+          toast(ok ? 'Copied command' : 'Copy failed — select & copy manually', { success: !!ok });
+        });
+      });
+    }
+    const onDocKeydownInfo = function (e) {
+      if (e.key === 'Escape' && infoOpen) { closeInfo(); if (infoBtn && infoBtn.focus) infoBtn.focus(); }
+    };
+    doc.addEventListener('keydown', onDocKeydownInfo);
 
     /* --- launcher (always-visible pill that opens the sidebar) ---------- */
     const launcher = doc.createElement('button');
@@ -1213,13 +1337,42 @@
       if (exporter && typeof exporter.onSaveCanvas === 'function') {
         try {
           await exporter.onSaveCanvas(s);
-          toast('Saving HTML canvas…');
+          toast('Saving HTML with comments…');
         } catch (e) {
           toast('Save failed');
         }
         return;
       }
       toast('Saving the canvas is only available with the extension here.');
+    }
+
+    // "HTML · clean copy" — the original document with all Noteback stripped.
+    async function saveClean() {
+      const s = getState();
+      if (exporter && typeof exporter.onSaveClean === 'function') {
+        try {
+          await exporter.onSaveClean(s);
+          toast('Saving clean HTML…');
+        } catch (e) {
+          toast('Save failed');
+        }
+        return;
+      }
+      toast('Clean HTML export is available in the saved canvas.');
+    }
+
+    // "PDF" — print to PDF. The @media print rules (BUTTON_CSS) hide all Noteback
+    // UI and neutralize highlights, so the printout is the clean document. Print is
+    // universally available, so this works in every mode; the hook is an override.
+    function savePdf() {
+      if (exporter && typeof exporter.onSavePdf === 'function') {
+        try { exporter.onSavePdf(getState()); return; } catch (e) { /* fall through */ }
+      }
+      if (win && typeof win.print === 'function') {
+        try { win.print(); } catch (e) { toast('Printing unavailable here'); }
+      } else {
+        toast('Printing unavailable here');
+      }
     }
 
     async function copyToClipboard(textValue) {
@@ -1319,12 +1472,52 @@
       }, total);
     }
     function closeSidebar() {
+      closeSaveMenu();
       sidebar.classList.remove('nb-open');
       launcher.classList.remove('nb-hidden');
     }
     function toggleSidebar() {
       if (sidebar.classList.contains('nb-open')) closeSidebar();
       else openSidebar();
+    }
+
+    /* ------------------------------------------------------------------- *
+     * Save menu (footer dropdown: with-comments / clean / PDF)            *
+     * ------------------------------------------------------------------- */
+
+    let saveMenuOpen = false;
+    let saveMenuCloseTimer = null;
+
+    function openSaveMenu() {
+      if (saveMenuOpen) return;
+      saveMenuOpen = true;
+      if (saveMenuCloseTimer) {
+        (win && win.clearTimeout ? win.clearTimeout : clearTimeout)(saveMenuCloseTimer);
+        saveMenuCloseTimer = null;
+      }
+      saveMenu.classList.remove('is-closing');
+      saveWrap.classList.add('nb-menu-open');
+      saveBtn.setAttribute('aria-expanded', 'true');
+      void saveMenu.offsetWidth; // reflow so the closed scale applies before growing
+      saveMenu.classList.add('is-open');
+    }
+
+    function closeSaveMenu() {
+      if (!saveMenuOpen) return;
+      saveMenuOpen = false;
+      saveWrap.classList.remove('nb-menu-open');
+      saveBtn.setAttribute('aria-expanded', 'false');
+      saveMenu.classList.remove('is-open');
+      saveMenu.classList.add('is-closing');
+      const settle = function () { saveMenu.classList.remove('is-closing'); saveMenuCloseTimer = null; };
+      const ms = reduceMotion() ? 0 : POPOVER_CLOSE_MS;
+      if (ms && win && win.setTimeout) saveMenuCloseTimer = win.setTimeout(settle, ms);
+      else settle();
+    }
+
+    function toggleSaveMenu() {
+      if (saveMenuOpen) closeSaveMenu();
+      else openSaveMenu();
     }
 
     /* ------------------------------------------------------------------- *
@@ -1403,6 +1596,25 @@
     doc.addEventListener('click', onDocClick);
     doc.addEventListener('click', onDocClickOutside);
 
+    // The save menu closes on any click outside its wrapper (the Save button +
+    // dropdown). The Save button stops propagation, so its own toggling click
+    // never reaches here; menu-item clicks already closed it.
+    const onDocClickSaveMenu = function (e) {
+      if (!saveMenuOpen) return;
+      const path = (typeof e.composedPath === 'function') ? e.composedPath() : [];
+      if (path.indexOf(saveWrap) !== -1) return;
+      closeSaveMenu();
+    };
+    // Escape closes the save menu and returns focus to its button.
+    const onDocKeydownSaveMenu = function (e) {
+      if (e.key === 'Escape' && saveMenuOpen) {
+        closeSaveMenu();
+        if (saveBtn && saveBtn.focus) saveBtn.focus();
+      }
+    };
+    doc.addEventListener('click', onDocClickSaveMenu);
+    doc.addEventListener('keydown', onDocKeydownSaveMenu);
+
     // Initial render so the sidebar reflects loaded state when first opened.
     renderSidebar();
 
@@ -1415,6 +1627,9 @@
       doc.removeEventListener('mouseup', onDocMouseUp);
       doc.removeEventListener('click', onDocClick);
       doc.removeEventListener('click', onDocClickOutside);
+      doc.removeEventListener('click', onDocClickSaveMenu);
+      doc.removeEventListener('keydown', onDocKeydownSaveMenu);
+      doc.removeEventListener('keydown', onDocKeydownInfo);
       cancelFabTimer();
       closePopover();
       if (fab.parentNode) fab.parentNode.removeChild(fab);
@@ -1438,6 +1653,8 @@
       closeSidebar: closeSidebar,
       copyMarkdown: copyMarkdown,
       saveCanvas: saveCanvas,
+      saveClean: saveClean,
+      savePdf: savePdf,
       focusComment: focusComment
     };
   }

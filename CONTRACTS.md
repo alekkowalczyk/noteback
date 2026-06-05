@@ -7,7 +7,7 @@ portable runtime works identically in **extension mode** (content script +
 in-file JSON state block).
 
 Read this together with the design spec:
-`docs/superpowers/specs/2026-06-03-noteback-design.md`.
+`docs/design.md`.
 
 ---
 
@@ -95,6 +95,38 @@ function createInFileStateAdapter(doc) { ... }
 - `save(state)` writes `JSON.stringify(state)` back into that script element's text
   content. (It does NOT persist to disk — re-sharing is handled by the exporter's
   download / File System Access flow, §6.)
+
+### 1.3 Settings: per-origin activation (extension mode only)
+
+Stored in `chrome.storage.local` under the single key **`nb:settings`** (distinct
+from per-document state, which is keyed `"noteback:" + docId`, §1.1). Shape:
+
+```jsonc
+{
+  "version": 1,
+  "origins": { "file": true, "localhost": true, "127.0.0.1": true },
+  "disabledSites": []   // canonical origins, e.g. "http://localhost:3000"; "file://" for file pages
+}
+```
+
+A missing/partial object reads as **all-on, nothing disabled** (current behavior;
+zero migration). `src/content/origin-policy.js` is the single source of truth and
+is shared by the content script (gating) and the popup (rendering toggles):
+
+- `classifyOrigin(loc) -> 'file' | 'localhost' | '127.0.0.1' | 'other'`
+- `originOf(loc) -> canonical origin` (`"file://"` for file pages)
+- `normalizeSettings(s) -> { origins, disabledSites }` (defaults filled)
+- `isActive({type, origin}, settings)` — **active** iff `origins[type] !== false`
+  **and** `origin ∉ disabledSites`. Per-type is the master gate; per-site only
+  subtracts a single origin. `'other'` is never active.
+
+**Active** → the content script mounts the overlay. **Dormant** → injected but
+mounts nothing (no chip, launcher, or listeners); stored comments are untouched.
+The content script re-evaluates live on `chrome.storage.onChanged`, so popup
+toggles take effect without a page reload. `NOTEBACK_PING` reports
+`{ booted, dormant, originType, origin }` so the popup distinguishes "off by
+settings" from "no file access". The embedded canvas is unaffected — it has no
+settings and always shows its UI.
 
 ---
 
@@ -284,6 +316,10 @@ function mountOverlay(cfg) { ... }
   selection exists). These two outside-click behaviors are intentionally opposite.
 - Own UI is marked `data-noteback-ui`; outside-click detection uses
   `composedPath()` so clicks inside the shadow-DOM panel count as "inside".
+- **Footer "Save…" menu** (a dropdown over the Save button) closes on item-click,
+  outside-click (`composedPath()` excludes its wrapper), or Escape; the Save button
+  `stopPropagation()`s its own toggle so the same click can't immediately re-close it.
+  Closing the sidebar also closes the menu. Items map to the exporter hooks above.
 
 ### 3.6 `canvas/exporter.js` (pure-ish → `NotebackRuntime.exporter`)
 
@@ -305,6 +341,30 @@ function downloadCanvas(html, filename) { ... }
 /** Feature-detected in-place save via File System Access API; falls back to download. */
 async function saveCanvasInPlace(html, suggestedName) { ... }
 ```
+
+**Exporter hooks object** (the `cfg.exporter` passed to `mountOverlay`/`boot`). All
+hooks are **optional** — the overlay feature-detects each and falls back when absent.
+Each receives the current `State`.
+
+```js
+/**
+ * @typedef {Object} ExporterHooks
+ * @property {(state: State) => void|Promise<void>}   [onCopyMarkdown] Copy feedback as Markdown.
+ * @property {(state: State) => void|Promise<void>}   [onSaveCanvas]   Save HTML *with* comments (re-shareable canvas).
+ * @property {(state: State) => void|Promise<void>}   [onSaveClean]    Save HTML *without* Noteback (the original document).
+ * @property {(state: State) => void}                 [onSavePdf]      Produce a PDF. Omit to use the overlay's default (`window.print()`).
+ */
+```
+
+Footer **Save…** menu → hooks: *HTML · with comments* → `onSaveCanvas`,
+*HTML · clean copy* → `onSaveClean`, *PDF/Print* → `onSavePdf` (default `window.print()`).
+PDF cleanliness relies on the runtime's `@media print` rules (overlay `BUTTON_CSS`),
+which hide every `[data-noteback-ui]` node and strip highlight styling — so a PDF is
+the clean document without needing a hook. The embedded canvas supplies `onSaveCanvas`
++ `onSaveClean`; both serialize the live document (clean copy additionally removes the
+state block, the inlined runtime `<script>`, the `#noteback-doc-root` wrapper, the
+guiding comment, and the title suffix) and persist via `saveCanvasInPlace`/`downloadCanvas`
+under the plain document filename.
 
 ### 3.7 `runtime/boot.js` (DOM-only → `NotebackRuntime.boot`)
 Single entry point used by **both** modes.

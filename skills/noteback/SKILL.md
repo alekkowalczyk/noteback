@@ -1,5 +1,5 @@
 ---
-name: noteback-canvas
+name: noteback
 description: Use when you write an HTML document, plan, spec, design, report, or similar deliverable for the user to READ AND GIVE FEEDBACK ON. Wraps the HTML as a self-contained Noteback feedback canvas so the user can highlight text, leave comments (including whole-document notes) in their browser with NO extension, and copy the feedback back as Markdown to iterate. Do not use for HTML that is a build artifact (a website page, an email template, a UI component) rather than something the user reviews.
 ---
 

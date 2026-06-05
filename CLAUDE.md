@@ -2,7 +2,7 @@
 
 Project-local guidance for working in this repo. Read alongside `README.md`
 (what/why), `CONTRACTS.md` (the runtime module API + behavioral invariants), and
-`docs/superpowers/specs/2026-06-03-noteback-design.md` (the original design).
+`docs/design.md` (the original design).
 This file records the **non-obvious gotchas** — things you can't infer by reading
 the code, that have already bitten us once.
 
@@ -62,10 +62,17 @@ the code, that have already bitten us once.
 
 - `npx skills add alekkowalczyk/noteback` → **GitHub** is the registry
   ([vercel-labs/skills](https://github.com/vercel-labs/skills)). It clones the
-  public repo and reads `skills/noteback-canvas/SKILL.md` from the default
+  public repo and reads `skills/noteback/SKILL.md` from the default
   branch. Needs: public repo, `name`+`description` frontmatter, on default branch.
 - `npx noteback wrap` / `npx noteback install-skill` → **npm** is the registry
   (the published `noteback` package's `bin`).
+- **`install-skill` mirrors `skills add`'s layout** (`bin/noteback.js`
+  `planInstall`): real files in the vendor-neutral `~/.agents/skills/` hub —
+  read **natively by Codex and OpenCode** — plus a relative symlink in
+  `~/.claude/skills/` (Claude Code reads only there). One install covers all
+  three; it does **not** use `~/.codex/skills/` (the current Codex docs read
+  `.agents/skills`, not `.codex/skills`). `--dir <path>` is a plain-copy escape
+  hatch (no hub/symlink). Idempotent: a stale dir/symlink at a target is replaced.
 - GitHub serves the *skill*; npm serves the *`wrap` CLI*. They're decoupled.
   `npm publish` requires 2FA (`npm publish --otp=<code>` or a granular token with
   "bypass 2fa"). Publishing and pushing are the **maintainer's** actions — don't

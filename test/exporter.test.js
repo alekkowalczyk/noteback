@@ -278,6 +278,19 @@ test('EMBEDDED_BOOT is itself valid JavaScript', () => {
   });
 });
 
+test('embedded boot wires the clean-HTML export (Save… → HTML · clean copy)', () => {
+  const boot = exporter.EMBEDDED_BOOT;
+  assert.ok(boot.includes('onSaveClean'), 'embedded boot exposes the onSaveClean hook');
+  assert.ok(boot.includes('rebuildCleanHtml'), 'a clean-HTML builder is defined');
+  // The clean copy is the plain document: it must remove the state block + the
+  // inlined runtime <script> and unwrap the doc-root (parallels rebuildHtml, which
+  // keeps them for the re-shareable canvas).
+  assert.ok(boot.includes('noteback-state'), 'clean rebuild targets the state block');
+  assert.ok(/NotebackRuntime/.test(boot), 'clean rebuild detects the inlined runtime script');
+  assert.ok(boot.includes('noteback-doc-root'), 'clean rebuild unwraps the doc root');
+  assert.doesNotThrow(function () { new vm.Script(boot); }, 'embedded boot still parses');
+});
+
 test('extractBodyMarkup handles a full document, a bare fragment, and unwraps doc-root', () => {
   assert.strictEqual(
     exporter.extractBodyMarkup('<html><head><title>t</title></head><body><p>hi</p></body></html>'),

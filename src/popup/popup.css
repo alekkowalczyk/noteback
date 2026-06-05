@@ -24,9 +24,24 @@ body {
 }
 
 .nb-popup__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 10px 12px;
   border-bottom: 1px solid var(--nb-border);
 }
+
+.nb-gear {
+  border: none;
+  background: none;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #666;
+}
+.nb-gear:hover { background: #f0f0f0; }
 
 .nb-popup__title {
   margin: 0;
@@ -133,3 +148,93 @@ body {
   font-size: 12px;
   color: #666;
 }
+
+/* --- Save dropdown ------------------------------------------------------- */
+.nb-save-wrap { position: relative; }
+
+.nb-save-btn { display: flex; align-items: center; justify-content: space-between; }
+.nb-caret { margin-left: 6px; font-size: 10px; opacity: 0.8; }
+
+.nb-save-menu {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--nb-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.nb-save-menu[hidden] { display: none; }
+
+.nb-menu-item {
+  padding: 8px 10px;
+  font: inherit;
+  text-align: left;
+  background: #fff;
+  border: none;
+  border-bottom: 1px solid var(--nb-border);
+  cursor: pointer;
+  color: var(--nb-fg);
+}
+.nb-menu-item:last-child { border-bottom: none; }
+.nb-menu-item:hover { background: #fffbeb; }
+
+/* --- toggle switch ------------------------------------------------------- */
+.nb-switch { position: relative; display: inline-block; width: 34px; height: 20px; flex: none; }
+.nb-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.nb-switch__slider {
+  position: absolute; inset: 0; cursor: pointer;
+  background: #ccc; border-radius: 20px; transition: background .15s;
+}
+.nb-switch__slider::before {
+  content: ""; position: absolute; height: 16px; width: 16px; left: 2px; top: 2px;
+  background: #fff; border-radius: 50%; transition: transform .15s;
+}
+.nb-switch input:checked + .nb-switch__slider { background: #2563eb; }
+.nb-switch input:checked + .nb-switch__slider::before { transform: translateX(14px); }
+.nb-switch input:disabled + .nb-switch__slider { opacity: 0.45; cursor: not-allowed; }
+
+/* --- per-site row -------------------------------------------------------- */
+.nb-site-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 4px; padding: 6px 2px;
+  border-top: 1px solid var(--nb-border);
+}
+.nb-site-row[hidden] { display: none; }
+.nb-site-label { flex: 1; font-size: 12px; color: #444; }
+.nb-site-label code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px; background: rgba(0,0,0,0.06); padding: 0 3px; border-radius: 3px;
+}
+.nb-site-hint { flex-basis: 100%; font-size: 11px; color: #92400e; }
+.nb-site-hint[hidden] { display: none; }
+
+/* --- settings panel ------------------------------------------------------ */
+.nb-popup__settings { padding: 8px 12px 12px; border-top: 1px solid var(--nb-border); }
+.nb-popup__settings[hidden] { display: none; }
+.nb-settings__title { font-size: 12px; font-weight: 600; color: #444; margin-bottom: 6px; }
+.nb-setting-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 0; font-size: 13px;
+}
+
+/* --- info (install-as-a-skill) ------------------------------------------- */
+.nb-popup__head-ctrls { display: flex; align-items: center; gap: 2px; }
+
+.nb-popup__info { padding: 8px 12px 12px; border-top: 1px solid var(--nb-border); font-size: 12.5px; }
+.nb-popup__info[hidden] { display: none; }
+.nb-info-note { margin: 0 0 10px; color: #444; line-height: 1.5; }
+
+.nb-cmd { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.nb-cmd code {
+  flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px;
+  background: #f3f3f1; border: 1px solid var(--nb-border); border-radius: 6px; padding: 6px 8px;
+}
+.nb-cmd-copy {
+  flex: none; border: 1px solid var(--nb-border); background: #fff; cursor: pointer;
+  border-radius: 6px; font: 600 11px/1 inherit; padding: 6px 9px; color: #555;
+}
+.nb-cmd-copy:hover { background: #f3f3f1; color: var(--nb-fg); }
+
+.nb-info-link { display: inline-block; margin-top: 12px; font-weight: 600; font-size: 12px; color: #2563eb; text-decoration: none; }
+.nb-info-link:hover { text-decoration: underline; }

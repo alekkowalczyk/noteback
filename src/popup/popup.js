@@ -2,48 +2,88 @@
  * Noteback — popup.js  (toolbar popup logic)
  *
  * Wires the popup buttons to the active tab's content script / the service
- * worker, and renders the onboarding card when "Allow access to file URLs" is
- * OFF on a file:// document (spec §9).
- *
- *   - Toggle sidebar    -> NOTEBACK_TOGGLE_SIDEBAR  (content script).
- *   - Copy as Markdown  -> NOTEBACK_COPY_MARKDOWN   (content script copies).
- *   - Save as HTML canvas -> NOTEBACK_SAVE_CANVAS   (content script -> worker).
- *
- * The content script may not be present on a file:// page when file-URL access
- * is disabled (it never injected); we detect that with a PING and show the
- * onboarding card instead of dead buttons.
+ * worker, renders the file-URL onboarding card, and drives the Save dropdown.
  */
-
 'use strict';
 
 document.addEventListener('DOMContentLoaded', function () {
   const byId = function (id) { return document.getElementById(id); };
+  const policy = (window.NotebackRuntime || {}).originPolicy || null;
+  const SETTINGS_KEY = (policy && policy.SETTINGS_KEY) || 'nb:settings';
 
   const btnToggle = byId('nb-toggle-sidebar');
   const btnCopy = byId('nb-copy-markdown');
-  const btnSave = byId('nb-save-canvas');
+  const saveBtn = byId('nb-save-btn');
+  const saveMenu = byId('nb-save-menu');
   const onboardingEl = byId('nb-onboarding');
   const statusEl = byId('nb-status');
+  const gearBtn = byId('nb-gear');
+  const infoBtn = byId('nb-info-btn');
+  const settingsPanel = byId('nb-settings');
+  const infoSection = byId('nb-info');
+  const siteRow = byId('nb-site-row');
+  const siteOriginEl = byId('nb-site-origin');
+  const siteToggle = byId('nb-site-toggle');
+  const siteHint = byId('nb-site-hint');
+  const typeInputs = {
+    file: byId('nb-type-file'),
+    localhost: byId('nb-type-localhost'),
+    '127.0.0.1': byId('nb-type-127')
+  };
 
   let activeTab = null;
+  let tabInfo = { type: 'other', origin: '' };
+  let settings = null;
 
   init();
 
   function init() {
+    getSettings().then(function (s) { settings = s; renderTypeSwitches(); });
+
     getActiveTab()
-      .then(function (tab) {
-        activeTab = tab;
-        return refreshState(tab);
-      })
+      .then(function (tab) { activeTab = tab; tabInfo = deriveTabInfo(tab); return refreshState(tab); })
       .catch(function () {
         setStatus('Open a local HTML document to start annotating.');
         disableActions(true);
       });
 
-    btnToggle.addEventListener('click', function () {
-      runAction('NOTEBACK_TOGGLE_SIDEBAR', 'Toggling sidebar…', function () {
-        window.close();
+    gearBtn.addEventListener('click', function () {
+      const opening = settingsPanel.hasAttribute('hidden');
+      if (opening) {
+        settingsPanel.removeAttribute('hidden'); gearBtn.setAttribute('aria-expanded', 'true');
+        hideInfo();
+      } else { settingsPanel.setAttribute('hidden', ''); gearBtn.setAttribute('aria-expanded', 'false'); }
+    });
+
+    infoBtn.addEventListener('click', function () {
+      const opening = infoSection.hasAttribute('hidden');
+      if (opening) {
+        infoSection.removeAttribute('hidden'); infoBtn.setAttribute('aria-expanded', 'true');
+        settingsPanel.setAttribute('hidden', ''); gearBtn.setAttribute('aria-expanded', 'false');
+      } else { hideInfo(); }
+    });
+    infoSection.addEventListener('click', function (e) {
+      const item = e.target.closest('.nb-cmd-copy');
+      if (item) copyCmd(item.getAttribute('data-cmd') || '');
+    });
+
+    Object.keys(typeInputs).forEach(function (type) {
+      const input = typeInputs[type];
+      if (!input) return;
+      input.addEventListener('change', function () {
+        settings = withType(settings, type, input.checked);
+        saveSettings(settings).then(function () { renderTypeSwitches(); refreshState(activeTab); });
       });
+    });
+
+    siteToggle.addEventListener('change', function () {
+      if (!tabInfo || tabInfo.type === 'other') return;
+      settings = withSite(settings, tabInfo.origin, siteToggle.checked);
+      saveSettings(settings).then(function () { refreshState(activeTab); });
+    });
+
+    btnToggle.addEventListener('click', function () {
+      runAction('NOTEBACK_TOGGLE_SIDEBAR', 'Toggling sidebar…', function () { window.close(); });
     });
 
     btnCopy.addEventListener('click', function () {
@@ -52,56 +92,76 @@ document.addEventListener('DOMContentLoaded', function () {
       }, /*keepOpen*/ true);
     });
 
-    btnSave.addEventListener('click', function () {
-      runAction('NOTEBACK_SAVE_CANVAS', 'Saving HTML canvas…', function (resp) {
-        setStatus(resp && resp.ok ? 'Saving HTML canvas…' : 'Save failed.');
-        if (resp && resp.ok) setTimeout(function () { window.close(); }, 600);
-      }, /*keepOpen*/ true);
+    saveBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (saveMenu.hasAttribute('hidden')) openSaveMenu(); else closeSaveMenu();
     });
+    saveMenu.addEventListener('click', function (e) {
+      const item = e.target.closest('[data-save]');
+      if (!item) return;
+      closeSaveMenu();
+      doSave(item.getAttribute('data-save'));
+    });
+    document.addEventListener('click', function () { closeSaveMenu(); });
   }
 
-  /**
-   * Determine whether the content script is live in the tab and whether the
-   * onboarding card is needed (file:// + access disabled).
-   */
-  function refreshState(tab) {
-    const url = (tab && tab.url) || '';
-    const isFile = /^file:\/\//i.test(url);
-    const isLocalHttp = /^https?:\/\/(localhost|127\.0\.0\.1)([:/]|$)/i.test(url);
-    const isSupported = isFile || isLocalHttp;
+  /* --- save dropdown ----------------------------------------------------- */
 
-    if (!isSupported) {
+  function openSaveMenu() { saveMenu.removeAttribute('hidden'); saveBtn.setAttribute('aria-expanded', 'true'); }
+  function closeSaveMenu() { saveMenu.setAttribute('hidden', ''); saveBtn.setAttribute('aria-expanded', 'false'); }
+
+  function doSave(kind) {
+    const map = {
+      comments: { type: 'NOTEBACK_SAVE_CANVAS', pending: 'Saving HTML with comments…' },
+      clean: { type: 'NOTEBACK_SAVE_CLEAN', pending: 'Saving clean HTML…' },
+      pdf: { type: 'NOTEBACK_SAVE_PDF', pending: 'Opening print…' }
+    };
+    const m = map[kind];
+    if (!m) return;
+    runAction(m.type, m.pending, function (resp) {
+      setStatus(resp && resp.ok ? m.pending : 'Save failed.');
+      if (resp && resp.ok && kind !== 'pdf') setTimeout(function () { window.close(); }, 600);
+    }, /*keepOpen*/ true);
+  }
+
+  /* --- state ------------------------------------------------------------- */
+
+  function refreshState(tab) {
+    if (!tab) return Promise.resolve();
+    if (!tabInfo || tabInfo.type === 'other') {
+      hideSiteRow();
       setStatus('Noteback works on local file:// and localhost documents.');
       disableActions(true);
       return Promise.resolve();
     }
-
-    // Is the content script booted in this tab?
     return ping(tab.id).then(function (pong) {
+      // Content script is injected (PING answered).
+      hideOnboarding();
       if (pong && pong.booted) {
         disableActions(false);
-        const n = countLabel(pong);
-        setStatus(n);
-        hideOnboarding();
-        return;
+        showSiteRow(true);
+        setStatus(countLabel(pong));
+      } else {
+        // Injected but dormant by settings.
+        disableActions(true);
+        showSiteRow(false);
+        setStatus('Noteback is off on this site.');
       }
-      // Not booted. On a file:// page this usually means file-URL access is off.
-      return handleNotBooted(isFile);
     }).catch(function () {
-      return handleNotBooted(isFile);
+      // Not injected at all (file access off, or page still loading).
+      hideSiteRow();
+      return handleNotBooted(tabInfo.type === 'file');
     });
   }
 
   function handleNotBooted(isFile) {
     if (isFile) {
-      // Confirm via the service worker whether file access is the cause.
       return checkFileAccess().then(function (allowed) {
         if (!allowed) {
           showOnboarding();
           disableActions(true);
           setStatus('Action needed to annotate local files.');
         } else {
-          // Access is on but the script hasn't booted (e.g. page still loading).
           disableActions(true);
           setStatus('Reload the page, then reopen Noteback.');
         }
@@ -120,29 +180,17 @@ document.addEventListener('DOMContentLoaded', function () {
   /* --- actions ----------------------------------------------------------- */
 
   function runAction(type, pending, onDone, keepOpen) {
-    if (!activeTab || activeTab.id == null) {
-      setStatus('No active document.');
-      return;
-    }
+    if (!activeTab || activeTab.id == null) { setStatus('No active document.'); return; }
     setStatus(pending);
     sendToTab(activeTab.id, { type: type }).then(
-      function (resp) {
-        if (typeof onDone === 'function') onDone(resp);
-        if (!keepOpen && (!resp || resp.ok !== false)) {
-          // Default: leave the popup open unless the handler closed it.
-        }
-      },
-      function (err) {
-        setStatus('Could not reach the page. Reload and try again.');
-        void err;
-      }
+      function (resp) { if (typeof onDone === 'function') onDone(resp); void keepOpen; },
+      function (err) { setStatus('Could not reach the page. Reload and try again.'); void err; }
     );
   }
 
   function disableActions(disabled) {
-    [btnToggle, btnCopy, btnSave].forEach(function (b) {
-      if (b) b.disabled = !!disabled;
-    });
+    [btnToggle, btnCopy, saveBtn].forEach(function (b) { if (b) b.disabled = !!disabled; });
+    if (disabled) closeSaveMenu();
   }
 
   /* --- onboarding card --------------------------------------------------- */
@@ -165,7 +213,6 @@ document.addEventListener('DOMContentLoaded', function () {
       '  <p class="nb-card__note">Serving docs from <code>localhost</code> or' +
       '   <code>127.0.0.1</code> needs no toggle.</p>' +
       '</div>';
-
     const openBtn = document.getElementById('nb-open-details');
     if (openBtn) {
       openBtn.addEventListener('click', function () {
@@ -177,16 +224,11 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  function hideOnboarding() {
-    onboardingEl.hidden = true;
-    onboardingEl.innerHTML = '';
-  }
+  function hideOnboarding() { onboardingEl.hidden = true; onboardingEl.innerHTML = ''; }
 
   /* --- messaging --------------------------------------------------------- */
 
-  function ping(tabId) {
-    return sendToTab(tabId, { type: 'NOTEBACK_PING' });
-  }
+  function ping(tabId) { return sendToTab(tabId, { type: 'NOTEBACK_PING' }); }
 
   function checkFileAccess() {
     return sendToWorker({ type: 'NOTEBACK_CHECK_FILE_ACCESS' })
@@ -214,9 +256,7 @@ document.addEventListener('DOMContentLoaded', function () {
           if (err) { reject(new Error(err.message || String(err))); return; }
           resolve(resp);
         });
-      } catch (e) {
-        reject(e);
-      }
+      } catch (e) { reject(e); }
     });
   }
 
@@ -228,20 +268,114 @@ document.addEventListener('DOMContentLoaded', function () {
           if (err) { reject(new Error(err.message || String(err))); return; }
           resolve(resp);
         });
-      } catch (e) {
-        reject(e);
-      }
+      } catch (e) { reject(e); }
     });
+  }
+
+  /* --- settings + per-origin --------------------------------------------- */
+
+  function deriveTabInfo(tab) {
+    const url = (tab && tab.url) || '';
+    try {
+      const u = new URL(url);
+      const loc = { protocol: u.protocol, hostname: u.hostname, host: u.host, origin: u.origin };
+      return {
+        type: policy ? policy.classifyOrigin(loc) : 'other',
+        origin: policy ? policy.originOf(loc) : u.origin
+      };
+    } catch (e) { return { type: 'other', origin: '' }; }
+  }
+
+  function typeOn(type) {
+    const norm = policy ? policy.normalizeSettings(settings) : { origins: { file: true, localhost: true, '127.0.0.1': true } };
+    return norm.origins[type] !== false;
+  }
+
+  function renderTypeSwitches() {
+    const norm = policy ? policy.normalizeSettings(settings) : { origins: { file: true, localhost: true, '127.0.0.1': true } };
+    if (typeInputs.file) typeInputs.file.checked = norm.origins.file;
+    if (typeInputs.localhost) typeInputs.localhost.checked = norm.origins.localhost;
+    if (typeInputs['127.0.0.1']) typeInputs['127.0.0.1'].checked = norm.origins['127.0.0.1'];
+  }
+
+  function showSiteRow(active) {
+    if (!tabInfo || tabInfo.type === 'other') { hideSiteRow(); return; }
+    siteRow.removeAttribute('hidden');
+    siteOriginEl.textContent = tabInfo.origin;
+    if (!typeOn(tabInfo.type)) {
+      // Per-site can't override a type that's switched off.
+      siteToggle.checked = false;
+      siteToggle.disabled = true;
+      siteHint.textContent = tabInfo.type + ' is off in settings';
+      siteHint.hidden = false;
+    } else {
+      siteToggle.disabled = false;
+      siteToggle.checked = !!active;
+      siteHint.hidden = true;
+      siteHint.textContent = '';
+    }
+  }
+
+  function hideSiteRow() { siteRow.setAttribute('hidden', ''); }
+
+  function withType(s, type, on) {
+    const norm = policy ? policy.normalizeSettings(s) : { origins: { file: true, localhost: true, '127.0.0.1': true }, disabledSites: [] };
+    norm.origins[type] = !!on;
+    return norm;
+  }
+
+  function withSite(s, origin, on) {
+    const norm = policy ? policy.normalizeSettings(s) : { origins: { file: true, localhost: true, '127.0.0.1': true }, disabledSites: [] };
+    const list = norm.disabledSites.slice();
+    const idx = list.indexOf(origin);
+    if (on) { if (idx !== -1) list.splice(idx, 1); }   // enable site → remove from disabled
+    else { if (idx === -1) list.push(origin); }        // disable site → add to disabled
+    norm.disabledSites = list;
+    return norm;
+  }
+
+  function getSettings() {
+    return new Promise(function (resolve) {
+      try {
+        chrome.storage.local.get(SETTINGS_KEY, function (items) {
+          const err = chrome.runtime && chrome.runtime.lastError;
+          resolve((!err && items && items[SETTINGS_KEY]) || null);
+        });
+      } catch (e) { resolve(null); }
+    });
+  }
+
+  function saveSettings(s) {
+    return new Promise(function (resolve, reject) {
+      const bag = {}; bag[SETTINGS_KEY] = s;
+      try {
+        chrome.storage.local.set(bag, function () {
+          const err = chrome.runtime && chrome.runtime.lastError;
+          if (err) { reject(new Error(err.message || String(err))); return; }
+          resolve();
+        });
+      } catch (e) { reject(e); }
+    });
+  }
+
+  /* --- info dialog ------------------------------------------------------- */
+
+  function hideInfo() { infoSection.setAttribute('hidden', ''); infoBtn.setAttribute('aria-expanded', 'false'); }
+
+  function copyCmd(cmd) {
+    if (!cmd) return;
+    const done = function (ok) { setStatus(ok ? 'Copied command.' : 'Copy failed — select & copy manually.'); };
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(cmd).then(function () { done(true); }, function () { done(false); });
+        return;
+      }
+    } catch (e) { /* fall through */ }
+    done(false);
   }
 
   /* --- misc -------------------------------------------------------------- */
 
-  function setStatus(text) {
-    if (statusEl) statusEl.textContent = text || '';
-  }
-
-  function truncate(s, n) {
-    s = String(s == null ? '' : s);
-    return s.length > n ? s.slice(0, n - 1) + '…' : s;
-  }
+  function setStatus(text) { if (statusEl) statusEl.textContent = text || ''; }
+  function truncate(s, n) { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 });
