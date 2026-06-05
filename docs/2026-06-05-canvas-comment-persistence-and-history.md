@@ -2,448 +2,428 @@
 
 **Status:** design (approved in brainstorm; pending spec review)
 **Date:** 2026-06-05
-**Scope:** embedded canvas only (`npx noteback wrap` output). Extension mode untouched.
+**Scope:** both modes — embedded canvas (`npx noteback wrap`) **and** the extension —
+via one shared, storage-agnostic core.
 
 ---
 
 ## 1. Problem
 
-A Noteback feedback canvas (`npx noteback wrap plan.html`) keeps its comments in
-the in-file `<script id="noteback-state">` block, and `InFileStateAdapter.save()`
-only mutates the **in-memory** DOM — it never writes to disk. So:
+Noteback keeps a document's comments in an annotation State persisted by a
+`StorageAdapter` (CONTRACTS.md §1). Today neither mode remembers feedback *across
+drafts*, and the canvas additionally loses it on refresh:
 
-- **Refresh loses everything.** Reloading the file re-reads the unchanged on-disk
-  copy, and the reviewer's comments are gone unless they explicitly saved the
-  canvas.
-- **No memory across drafts.** When the agent regenerates the document and re-wraps
-  it, there is no record of the feedback the reviewer left on previous drafts.
+- **Canvas:** `InFileStateAdapter.save()` only mutates the in-memory DOM, never disk
+  — so a **refresh loses all comments** unless the reviewer explicitly saved the
+  file.
+- **Extension:** `ChromeStorageAdapter` keys by **URL** in `chrome.storage.local`, so
+  comments *do* survive reload — but when the agent regenerates the document the
+  comments persist against the same URL and silently re-anchor (often orphaning).
+  There is **no clean-slate-on-regenerate and no record of earlier drafts.**
 
-We want two things, which turn out to be one feature:
+We want one feature in both modes:
 
-1. Comments **survive a browser refresh** automatically.
-2. When the agent **regenerates** the document, the current view starts clean — but
-   the feedback from earlier drafts is **retained and viewable** as read-only
-   history, including the ability to see each old comment's highlighted passage in
-   the context of the draft it was made on.
+1. Comments **survive a refresh/reload** automatically.
+2. A real content change = a new **draft**: the current view starts clean; the prior
+   draft's comments move to **read-only history**.
+3. Read-only **"Earlier feedback"** in the sidebar, grouped by draft, where clicking
+   an old comment shows its quoted passage **highlighted in the cleaned HTML of the
+   section it was made in**, styled to resemble the original.
 
-Both are achieved by adding a browser-side persistence layer keyed on **document
-content**, with a per-draft history model layered on top.
+The identity is a hash of the document's **content**, computed at runtime — which is
+mode-agnostic, so the same core powers both the canvas (`localStorage`) and the
+extension (`chrome.storage`).
 
 ---
 
 ## 2. Goals / non-goals
 
 **Goals**
-- Comments persist across refresh, per document, in the browser (no save step).
-- A real content change to the document = a new "draft": the current comment view
-  starts clean; the prior draft's comments move to read-only history.
-- Read-only **"Earlier feedback"** history in the sidebar, grouped by draft.
-- Click a history comment → see its quoted passage **highlighted in the cleaned
-  HTML of the section it was made in**, styled to resemble the original.
-- Survive **file moves/renames** for both current comments and history.
+- Comments persist across refresh/reload, per document, with no save step.
+- Content change ⇒ new draft; prior draft archived to read-only history.
+- "Earlier feedback" history UI (shared overlay) in **both** modes.
+- Click a history comment ⇒ its quote highlighted in the cleaned HTML of its section,
+  styled to resemble the original.
+- Survive **file moves/renames** (canvas) for current comments and history.
+- A single **storage-agnostic core** with thin `localStorage` and `chrome.storage`
+  bindings.
+- **Gating** so the draft model only engages where content is stable; dynamic pages
+  keep today's behavior (see §3.3).
 - Graceful, silent degradation where browser storage is unavailable.
-- **No CLI or template change** — the feature is entirely in the runtime that
-  `wrap` already inlines.
+- No wrap-time logic change (no id stamped into the file).
 
 **Non-goals (v1)**
-- No "bring forward into the current draft" / restore action. History is read-only.
-- No history for **extension-mode** annotations (see §10). Different stack,
-  different identity signal, separate effort.
-- No cross-device sync. localStorage is per-browser, per-origin.
+- No "bring forward into the current draft" / restore. History is read-only.
+- No draft model on **dynamic** pages — those fall back to today's URL-keyed
+  persistence (§3.3).
+- No cross-device sync (storage is per-browser).
 - No change to the Markdown copy-back loop or the re-shareable "Save with comments"
-  download.
+  export.
 
 ---
 
 ## 3. Identity model
 
-Two identifiers.
+Three concepts: **draft** (which version), **lineage** (which document, to group
+drafts), and **gating** (whether the draft model engages at all).
 
-### 3.1 Draft identity — content hash
+### 3.1 Draft identity — content hash (mode-agnostic)
 
-A **draft** is identified by a hash of the document's **normalized visible text**,
-computed in the browser at boot:
+A draft is identified by a hash of the document's **normalized visible text**,
+computed in the browser at boot from an injected **content root**:
 
-- Source: `textContent` of `#noteback-doc-root`.
-- Normalize: trim, collapse all runs of whitespace to a single space. (Case
-  preserved.)
+- Content root: **canvas** → `#noteback-doc-root`; **extension** → `document.body`
+  (the same root the overlay already annotates). The two never need to agree — a doc
+  is reviewed in one mode at a time.
+- Normalize: `textContent`, trimmed, runs of whitespace collapsed to one space (case
+  preserved).
 - Hash: a vendored non-crypto string hash (cyrb53-style, 53-bit; optionally doubled
-  with a second seed for a 106-bit key). `crypto.subtle` is **not** used — it is not
-  guaranteed on `file://`.
+  for a 106-bit key). `crypto.subtle` is **not** used — not guaranteed on `file://`.
 
-Rationale (decided in brainstorm):
-- Refresh → identical content → same hash → comments reload.
-- Real edit (typo, changed number, rewritten sentence) → new hash → new draft,
-  clean current view, prior draft archived to history.
-- Cosmetic/markup churn (re-indentation, attribute reordering, class/style changes)
-  does **not** reset feedback, because only visible words are hashed.
-- A revert to previous content re-surfaces that content's draft (accepted, conscious
-  behavior).
-- Identical content shares identity (accepted as a feature for real documents).
+Rationale (decided in brainstorm): refresh → same hash → comments reload; a real edit
+→ new hash → new draft + clean view + prior draft archived; cosmetic/markup churn
+doesn't reset (only visible words are hashed); a content revert re-surfaces that
+draft (accepted); identical content shares identity (accepted as a feature for real
+documents).
 
-**Small-content guard.** If the normalized text is shorter than a threshold
-(`MIN_HASH_CHARS`, default 32), the document has no stable identity → the adapter
-falls back to in-file-only behavior (no persistence, no history). This avoids
-conflating near-empty / boilerplate stubs in the shared `file://` bucket.
+**Small-content guard:** below `MIN_HASH_CHARS` (default 32) of normalized text the
+document has no stable identity → fall back to the binding's inner adapter (no
+drafts/history).
 
-### 3.2 Lineage — grouping drafts into a history
+### 3.2 Lineage — grouping drafts (mode-agnostic, via an injected attach key)
 
-A **lineage** groups the drafts of one document so history can be shown. Because
-successive drafts have *different* content (and thus different hashes), they need an
-explicit link:
+Successive drafts have different hashes, so they need an explicit link. Each
+generation record stores a `lineageId`; a `lineage` record holds its ordered draft
+hashes plus the set of **attach keys** it has been seen at. An attach-key index maps
+attach key → `lineageId`, used only to bind a freshly-seen draft to an existing
+lineage.
 
-- Each generation record stores a `lineageId`.
-- A `lineage` record holds an ordered list of its draft hashes plus the set of
-  `hrefs` it has been seen at.
-- An href index (`location.href` normalized to `origin + pathname`, dropping query
-  and hash) maps a path → `lineageId`, used **only** to attach a freshly-seen draft
-  to an existing lineage.
+The **attach key** is supplied by the binding:
+- **Canvas:** normalized `location.href` (`origin + pathname`, drop query/hash). This
+  makes current comments **and** history survive a move/rename: on reopen, the draft
+  is found by content hash, its `lineageId` yields the full history, and the new path
+  is added to the lineage.
+- **Extension:** the page **URL** (the existing `docId`). Stable per page.
 
-This makes both current comments and history **survive a move/rename**: on reopen at
-a new path, the draft is found by its content hash, its `lineageId` yields the full
-history, and the new href is added to the lineage. The one unrecoverable corner case
-is *move **and** regenerate at the new path before reopening* — acceptable, and no
-worse under any alternative identity scheme.
+The one unrecoverable corner case (canvas) is *move **and** regenerate at the new
+path before reopening* — acceptable.
+
+### 3.3 Gating — where the draft model engages
+
+The content-hash model assumes content is **stable across reloads**. That holds for
+static documents but not for dynamic pages (an SPA, anything with timestamps/ads),
+where the hash would churn and every reload would look like a new draft — *worse*
+than today. So the draft model is gated:
+
+| Context | Draft model | Fallback when off |
+|---|---|---|
+| Canvas (wrapped file) | On (when storage available + content guard passes) | in-file only |
+| Extension · `file://` | On by default | — |
+| Extension · `localhost` / `127.0.0.1` | **Off by default; per-site opt-in** | URL-keyed (today) |
+| Extension · `other` | n/a (extension inactive there — CONTRACTS.md §1.3) | — |
+
+The predicate lives in `src/content/origin-policy.js` (the existing single source of
+truth for activation), e.g. `draftModelActive({type, origin}, settings)`, and reuses
+the `nb:settings` object (a new opt-in list of origins). When the draft model is
+**off**, the extension behaves exactly as today (URL-keyed `ChromeStorageAdapter`).
 
 ---
 
-## 4. Storage layout (localStorage)
+## 4. Storage layout (logical keys)
 
-All keys are namespaced; all values are JSON. Snapshots are compressed (see §6.3).
+The same logical keys back both modes — `localStorage` for the canvas,
+`chrome.storage.local` for the extension. Snapshots are compressed (§6.3). Keys are
+namespaced and never collide with the existing `noteback:<docId>` state or
+`nb:settings`.
 
 ```jsonc
-// One per draft, keyed by content hash.
-"nb:gen:<contentHash>" = {
+"nb:gen:<contentHash>" = {            // one per draft
   "schemaVersion": 1,
-  "contentHash": "<hash>",
-  "lineageId": "<id>",
+  "contentHash": "<hash>", "lineageId": "<id>",
   "docTitle": "RealtimeSync Plan",
-  "firstSeenAt": "<ISO-8601>",     // when this draft was first opened in this browser
-  "lastEditedAt": "<ISO-8601>",
+  "firstSeenAt": "<ISO-8601>", "lastEditedAt": "<ISO-8601>",
   "comments": [ /* State.comments per CONTRACTS.md §2 */ ],
   "sections": [ { "id": "s1", "html": "<compressed clean fragment>" } ],
   "styles": "<compressed inline <style> text from the draft's <head>>"
 }
-
-// One per lineage (document).
-"nb:lin:<lineageId>" = {
-  "schemaVersion": 1,
-  "lineageId": "<id>",
-  "hrefs": [ "file:///Users/.../plan.html" ],
+"nb:lin:<lineageId>" = {              // one per document
+  "schemaVersion": 1, "lineageId": "<id>",
+  "attachKeys": [ "file:///Users/.../plan.html" ],
   "generations": [ "<hashOldest>", "...", "<hashNewest>" ]
 }
-
-// Path → lineage, for attaching new drafts.
-"nb:href" = { "file:///Users/.../plan.html": "<lineageId>" }
+"nb:attach" = { "<attachKey>": "<lineageId>" }   // attach key -> lineage
 ```
 
-`lineageId` is a runtime-minted random id (`c_`-style, like comment ids). No
-timestamps come from the system clock inside pure functions — the adapter passes
-`new Date().toISOString()` at the call site, mirroring `state.js`'s discipline.
+`chrome.storage.local` has a larger quota than `localStorage` (and can request
+unlimited), so byte budgeting (§6.4) is looser in extension mode.
 
 ---
 
 ## 5. Architecture
 
-Approach: a **decorator adapter** over the existing `InFileStateAdapter`. It
-satisfies the same `StorageAdapter` contract (CONTRACTS.md §1), so `boot()` is
-unchanged.
+A storage-agnostic **core** plus two thin **bindings**, each a decorator over the
+mode's existing adapter (so `boot()` is unchanged and the existing persist/re-share
+path stays intact).
 
 ```
-EMBEDDED_BOOT builds:
-  LocalStorageStateAdapter ── decorates ──► InFileStateAdapter
-        │                                          │
-   window.localStorage                      #noteback-state block
-   nb:gen / nb:lin / nb:href                (in-memory; re-share path intact)
+            ┌─────────────────────────────────────────┐
+            │  draft-history core  (pure-ish, async)   │
+            │  hash · lineage · gen-store ops · GC      │
+            └───────────────▲───────────────▲──────────┘
+                            │               │
+        ┌───────────────────┴──┐   ┌────────┴───────────────────┐
+        │ LocalStorageBinding  │   │ ChromeStorageBinding        │
+        │ store: localStorage  │   │ store: chrome.storage.local │
+        │ inner: InFileState…  │   │ inner: ChromeStorage…       │
+        │ attachKey: href      │   │ attachKey: URL · gated      │
+        └──────────▲───────────┘   └───────────▲─────────────────┘
+              canvas EMBEDDED_BOOT        extension content-script
 ```
 
-### 5.1 New module — `src/adapters/localstorage-state-adapter.js`
+### 5.1 Core — `src/runtime/draft-history-core.js`
 
-DOM adapter, attaches to `NotebackRuntime.localStorageStateAdapter`. Factory takes
-injectable `doc` and `storage` so the **pure** parts are unit-testable under Node
-(dual-export for the pure helpers; see §8).
+Pure-ish, dual-export (`NotebackRuntime.draftHistory` + `module.exports`), so it's
+unit-testable under Node. It owns identity, lineage, gen-store CRUD, history
+assembly, and GC. It is **storage-agnostic**: it talks to an injected async
+key-value `store` and an injected `now()`; it never touches `localStorage`,
+`chrome.*`, or the DOM directly (the content root's text is passed in).
 
 ```js
-createLocalStorageStateAdapter({ doc, storage, inner, now, snapshotFns }) -> {
-  load(): Promise<State|null>,
-  save(state): Promise<void>,
-  // history + clear extensions (consumed by the overlay, see §7):
-  getHistory(): Array<DraftSummary>,     // other drafts in this lineage, newest first
-  getSection(commentRef): SectionView|null,  // decompress + return a history comment's snapshot
-  clearCurrent(): Promise<void>          // wipe THIS draft's comments (history kept)
+createDraftHistory({ store, now, limits }) -> {
+  resolve({ contentText, attachKey, fallbackComments, docTitle })
+      -> { degraded, contentHash, lineageId, comments },   // boot: load/seed + wire lineage + GC
+  persist({ contentHash, comments, sections, styles }) -> Promise<void>,
+  history({ lineageId, exceptHash }) -> Promise<DraftSummary[]>,   // newest first, ≥1 comment
+  section({ contentHash, sectionId }) -> Promise<SectionView|null>,
+  clearCurrent({ contentHash }) -> Promise<void>
 }
 ```
 
-Behavior:
-- **Resolve identity** once at construction (DOM is clean pre-paint): compute
-  `contentHash`; if guard fails or `storage` is unavailable → set a `degraded` flag
-  and delegate everything to `inner`.
-- **load()**: if `nb:gen:<hash>` exists → return its `comments` (refresh / revert /
-  moved copy). Else → `inner.load()` (fresh wrap → empty; saved annotated canvas →
-  its in-file comments). Either way, ensure the lineage + href index are wired
-  (§5.2) and prune (§6.4).
-- **save(state)**: write `comments` (+ rebuilt `sections`/`styles`) into
-  `nb:gen:<hash>`, bump `lastEditedAt`, persist lineage; **and** call `inner.save`
-  (keeps the in-file block current so "Save with comments" / re-share still reflect
-  the latest comments).
-- **clearCurrent()**: set this draft's `comments` to `[]` and `sections` to `[]`,
-  persist, and `inner.save(emptyState)`.
+`store` interface (both bindings implement it): `get(key)`, `set(key, val)`,
+`remove(key)`, `keys()` — all `Promise`-returning. The `localStorage` binding wraps
+sync calls in resolved Promises; the `chrome.storage` binding is natively async.
 
-All `storage` access is wrapped in try/catch; any failure flips `degraded` and
-delegates to `inner` (today's behavior).
+### 5.2 Snapshot module — `src/runtime/snapshot.js`
 
-### 5.2 Boot-time lineage wiring
+DOM module (`NotebackRuntime.snapshot`); see §6. Pure sub-helpers (block-selection
+rules over an injected node, dedupe, compressor round-trip) dual-exported for tests.
 
-On first `load()`:
-1. `hash = contentHash`.
-2. If `nb:gen:<hash>` exists → `lineageId = gen.lineageId`; add current normalized
-   href to `nb:lin:<lineageId>.hrefs` and to `nb:href`.
-3. Else (new draft):
-   a. `lineageId = nb:href[normHref]` if present, else mint a new lineage.
-   b. Create `nb:gen:<hash>` seeded from `inner.load()` (usually empty).
-   c. Append `hash` to `nb:lin:<lineageId>.generations`; record href.
+### 5.3 Canvas binding — `src/adapters/localstorage-state-adapter.js`
 
-### 5.3 `EMBEDDED_BOOT` change (`src/canvas/exporter.js`)
+Decorator over `InFileStateAdapter`. Resolves identity once at construction
+(`contentRoot = #noteback-doc-root`, `attachKey = normalized location.href`,
+`store = localStorage`). `load()` → core seed/load; `save()` → core `persist`
+(rebuilding sections via `snapshot`) **and** write-through `inner.save` (keeps the
+in-file block current for "Save with comments"). Exposes `getHistory`/`getSection`/
+`clearCurrent` for the overlay. Degraded (no storage / guard fails) → delegate to
+`inner`.
 
-Compose the new adapter around the existing in-file adapter and pass the history +
-clear hooks into the overlay's exporter/menu config:
+### 5.4 Extension binding — `src/adapters/chrome-history-adapter.js`
 
-```js
-var inner = RT.infileStateAdapter.createInFileStateAdapter(document, { onChange: ... });
-var adapter = RT.localStorageStateAdapter
-  ? RT.localStorageStateAdapter.createLocalStorageStateAdapter({
-      doc: document,
-      storage: (typeof window !== 'undefined' && window.localStorage) || null,
-      inner: inner,
-      now: function () { return new Date().toISOString(); },
-      snapshotFns: RT.snapshot
-    })
-  : inner;
-```
+Decorator over the existing `ChromeStorageAdapter`. Same shape, with
+`contentRoot = document.body`, `attachKey = page URL`, `store = chrome.storage.local`.
+**Gated:** if `draftModelActive(...)` is false (§3.3), it is a no-op pass-through to
+`ChromeStorageAdapter` (today's behavior). When active, it layers the draft model and
+write-throughs to the inner adapter (so the URL-keyed record mirrors the current
+draft, preserving the re-share path and the fallback if gating later flips off).
 
-There is **no wrap-time logic change**: no id is minted, no template token is added,
-`buildCanvasHtml` and `canvas-template.html` are untouched, and the hash is computed
-at runtime. The only `bin/noteback.js` / manifest edit is mechanical — the two new
-runtime modules must be added to every list that defines the inlined runtime so they
-reach the canvas (see §11): `RUNTIME_FILES` in `bin/noteback.js`, the service
-worker's concatenation order, `web_accessible_resources` in `manifest.json`, and the
-dependency-order table in CONTRACTS.md §4. They go in embedded-mode position
-(alongside `infile-state-adapter.js`, before `boot.js`); they are not needed in the
-live extension's `content_scripts`.
+### 5.5 Wiring
+
+- **Canvas** (`exporter.js` `EMBEDDED_BOOT`): compose the localStorage binding around
+  the in-file adapter; pass `getHistory`/`getSection`/`clearCurrent` into the
+  overlay. No wrap-time/template change (§11).
+- **Extension** (`content-script.js`): choose the adapter — when `draftModelActive`,
+  wrap `ChromeStorageAdapter` in the chrome history binding; else use it directly.
+  Pass `root = document.body`. Re-evaluate on settings change (the content script
+  already listens to `chrome.storage.onChanged`).
 
 ---
 
 ## 6. Section snapshots (history context popup)
 
-Per draft that has comments, store a small clean snapshot of just the commented
-sections, so a history comment can be viewed in the context it was made in.
+Per draft with comments, store a small clean snapshot of just the commented sections.
 
 ### 6.1 What a section is
 
-For each comment, locate the block containing its anchored quote (in a **cleaned
-clone** of `#noteback-doc-root` — no runtime, no state block, no `<mark>` wrappers,
-no `[data-noteback-ui]`). Capture:
-
-- the **enclosing block** element (`<p>`, `<li>`, `<pre>`, `<td>`/`<tr>`, `<section>`
-  child, etc.),
-- its **immediate previous and next sibling** blocks (surrounding context),
-- the **nearest preceding section heading** — the closest `h1`–`h6` /
-  `[role="heading"]` walking backward through previous siblings and up ancestors — if
-  one is found, prepended for orientation.
-
-A size cap (`MAX_SECTION_CHARS`) prevents a comment inside a huge block/table from
-dragging in the whole thing; over the cap, fall back to a smaller slice around the
-quote.
-
-Sections are **deduped within a draft** (two comments in one paragraph → one
-section); each comment references its section `id`. Whole-document notes
-(`anchor === null`) get **no** section — the popup shows "note on the whole
-document".
+For each comment, in a **cleaned clone** of the content root (no runtime, no state
+block, no `<mark>`/`[data-noteback-ui]`), locate the block containing its anchored
+quote and capture: the **enclosing block** + its **immediate previous/next sibling**
++ the **nearest preceding section heading** (`h1`–`h6` / `[role=heading]`, searching
+back through previous siblings and up ancestors), if found. A size cap
+(`MAX_SECTION_CHARS`) falls back to a smaller slice around the quote for huge
+blocks/tables. Sections are **deduped within a draft**; each comment references its
+section `id`. Whole-document notes (`anchor === null`) get no section ("note on the
+whole document").
 
 ### 6.2 Styling fidelity
 
-Stash the draft's inline `<head>` `<style>` text **once** per draft (`styles`).
-Render a section in a sandboxed `<iframe srcdoc>` whose `<head>` contains those
-styles and a `<base href="...">` (the lineage href) so relative assets resolve. The
-highlight is painted with the existing anchor against the snapshot text — it always
-resolves, because the snapshot is the very text the anchor was built from.
-
-Caveat: external stylesheets (`<link rel=stylesheet>`) and remote/relative images
-may not load in the snapshot. Inline `<style>` — the norm for agent-generated review
-docs — does.
+Stash the draft's inline `<head>` `<style>` text once (`styles`). Render a section in
+a sandboxed `<iframe srcdoc>` whose head contains those styles and a
+`<base href="...">` (the attach key) so relative assets resolve; paint the highlight
+with the existing anchor against the snapshot text (always resolves — it's the very
+text the anchor was built from). Caveat: external stylesheets and remote/relative
+images may not load — inline `<style>` does. (More relevant in the extension, where
+real pages lean on linked CSS.)
 
 ### 6.3 Capture + compression
 
-- Capture runs on save (debounced with the existing persistence), from the cleaned
-  clone, reusing `exporter`'s existing UI/mark-stripping logic where practical.
-- Fragments and styles are compressed before storage. Preferred: native
-  `CompressionStream('gzip')` + base64 when available; fallback: a vendored
-  LZ-string-style compressor (≈3 KB, no npm dependency — consistent with the repo's
-  zero-dependency rule). If neither is available, store uncompressed and rely on §6.4
-  budgeting.
-- New module `src/runtime/snapshot.js` (DOM; attaches to `NotebackRuntime.snapshot`)
-  owns section extraction and (de)compression. Pure sub-helpers (block selection
-  rules over an injected node, dedupe, compressor round-trip) are dual-exported for
-  Node tests.
+Capture runs on save (debounced with persistence), from the cleaned clone, reusing
+`exporter`'s UI/mark-stripping where practical. Compress before storage: prefer native
+`CompressionStream('gzip')` + base64; else a vendored LZ-string-style compressor
+(≈3 KB, no npm dep — consistent with the repo's zero-dependency rule); else store
+uncompressed and rely on budgeting.
 
 ### 6.4 Garbage collection / limits
 
-Pruned on boot and after each save:
-- **Snapshots:** keep `sections`/`styles` for the **last `SNAPSHOT_DRAFTS` (5)**
-  drafts per lineage; older drafts keep comment metadata only.
-- **Metadata:** keep comment metadata (quote + body) for the last
-  `META_DRAFTS` (15) drafts per lineage.
-- **TTL:** drop drafts whose `lastEditedAt` is older than `TTL_DAYS` (90).
-- **Byte cap:** an overall `MAX_BYTES` budget across all Noteback keys; evict oldest
-  drafts (snapshots first, then metadata) until under budget.
-- A draft whose snapshot was evicted still renders in history as quote + body, with
-  no "view in context" affordance. **No silent total loss** of a comment's text
-  until it ages past `META_DRAFTS` / `TTL_DAYS`.
-
-All limits are module constants, easy to tune.
+Pruned on boot and after save: snapshots kept for the last `SNAPSHOT_DRAFTS` (5)
+drafts per lineage; comment metadata kept for `META_DRAFTS` (15); `TTL_DAYS` (90)
+TTL; an overall `MAX_BYTES` budget (looser for `chrome.storage`) evicting oldest
+drafts (snapshots first, then metadata). An evicted snapshot still renders as
+quote + body with no "view in context". No silent total loss until metadata ages out.
+All limits are module constants.
 
 ---
 
-## 7. UI (`src/runtime/overlay.js`)
+## 7. UI (`src/runtime/overlay.js` — shared by both modes)
 
 ### 7.1 "Earlier feedback" history section
 
-A collapsed-by-default, **read-only** section in the sidebar beneath the current
-draft's comments. Source: `adapter.getHistory()`. Grouped by draft, newest first:
-
-```
-── This draft (3)                       [editable, as today]
-   • "a single Redis instance"  use a cluster
-   ...
-▾ Earlier feedback (2 drafts)            [read-only]
-   Draft · Jun 4, 14:30 (4)
-     • "single worker pool"  what about HA?
-   Draft · Jun 3, 09:10 (1)
-     • "polls every 5s"  too chatty
-```
-
-- Draft label: relative/absolute time from `firstSeenAt` (or `lastEditedAt`) +
-  comment count.
-- Each item shows the condensed quote + body (reusing `markdown.condenseQuote`),
-  read-only (no edit/delete).
-- Whole-document notes show as "note on the whole document".
-- Only drafts with **≥1 comment** are listed; a cleared or never-commented draft does
-  not appear. Hidden entirely when there is no such history or when the adapter is
-  degraded.
+Collapsed-by-default, **read-only** section beneath the current draft's comments,
+sourced from `adapter.getHistory()`, grouped by draft (newest first) with a timestamp
+(`firstSeenAt`/`lastEditedAt`) and count. Items show the condensed quote + body
+(`markdown.condenseQuote`), read-only. Only drafts with **≥1 comment** appear; a
+cleared/never-commented draft does not. Hidden when there's no such history or the
+adapter is degraded/off. Because the overlay is shared, this appears in **both**
+modes automatically.
 
 ### 7.2 History comment popup
 
-Clicking a history item opens a popover/modal (`[data-noteback-ui]`, so it is
-hidden from print/clean exports) containing the `<iframe srcdoc>` snapshot (§6.2)
-with the quote highlighted and scrolled into view. If the section was GC'd, show the
-quote + body as text with a small "context no longer stored" note.
+Clicking a history item opens a popover (`[data-noteback-ui]`, hidden from
+print/clean exports) containing the `<iframe srcdoc>` snapshot (§6.2) with the quote
+highlighted and scrolled into view. GC'd section → quote + body text with a "context
+no longer stored" note.
 
 ### 7.3 "Clear my comments"
 
-A new item in the footer **Save…/▾** menu: **"Clear my comments (this draft)"**.
-Calls `adapter.clearCurrent()`, then resets the live State to empty and repaints
-(removes highlights). History from other drafts is **retained**. Hidden when
-degraded.
+New **Save…/▾** item — "Clear my comments (this draft)" — calls
+`adapter.clearCurrent()`, resets the live State to empty, repaints. Other drafts'
+history is retained. Hidden when degraded/off.
+
+### 7.4 Extension popup opt-in (`src/popup/`)
+
+For `localhost` / `127.0.0.1`, add a per-site toggle "Remember drafts & history on
+this site" that writes the opt-in into `nb:settings`. `file://` is on by default and
+needs no toggle. Reuses the existing popup settings UI and live `onChanged` sync.
 
 ---
 
 ## 8. Testing
 
-Node built-in runner only (`node --test`), zero dependencies — consistent with the
-repo.
+Node built-in runner only (`node --test`), zero dependencies.
 
-**Pure helpers (new unit tests):**
-- `normalizeText` + `contentHash`: determinism; whitespace/markup-insensitivity;
-  text changes ⇒ different hash; small-content guard threshold.
-- Lineage logic: new draft mints/attaches lineage; refresh hits existing gen; move
-  (same hash, new href) preserves comments + history and records the new href.
-- `load`/`save` precedence: localStorage hit vs. in-file fallback; write-through to
-  `inner.save`.
-- GC: snapshot vs. metadata retention, TTL, byte-cap eviction order; evicted
-  snapshot still yields quote + body.
-- Compression round-trip (fragment in == fragment out).
-- Section selection rules over an injected lightweight node graph (enclosing block +
-  siblings + nearest heading; size-cap fallback; dedupe).
+**Pure / core (new unit tests, fake async `store` + fake `chrome` where needed):**
+- `normalizeText` + `contentHash`: determinism; whitespace/markup-insensitivity; text
+  change ⇒ different hash; small-content guard.
+- Core lineage: new draft mints/attaches lineage; refresh hits existing gen; move
+  (same hash, new attach key) preserves comments + history and records the new key.
+- `resolve`/`persist` precedence: store hit vs. inner fallback; write-through.
+- GC: snapshot vs. metadata retention, TTL, byte-cap eviction order; evicted snapshot
+  still yields quote + body.
+- Compression round-trip; section selection rules (enclosing block + siblings +
+  nearest heading; size-cap; dedupe).
+- `draftModelActive` predicate: `file` on; `localhost`/`127.0.0.1` off until opted
+  in; `other` off — mirrors `isActive` tests in `origin-policy.test.js`.
 
-Tests inject a fake `storage` (Map-backed) and, where needed, a minimal fake `doc`,
-so no real DOM is required. DOM-only glue (iframe rendering, sidebar wiring) follows
-the repo's existing convention of being exercised via live Playwright rather than
-Node unit tests.
+**Adapters:** canvas binding over a fake `localStorage` + fake `document`; extension
+binding over a fake `chrome.storage` — gated off ⇒ pure pass-through to
+`ChromeStorageAdapter`; gated on ⇒ draft model engaged.
 
-**CLI/exporter:** unchanged behavior must still pass (`cli-wrap.test.js`,
-`exporter.test.js`); add an assertion that a wrapped canvas references
+**CLI/exporter:** unchanged behavior still passes; assert a wrapped canvas references
 `localStorageStateAdapter` in its inlined runtime.
 
 **Live (Playwright, localhost):** refresh restores comments; a content edit + reload
 starts clean and files the prior draft under history; a history comment opens the
 styled snapshot popup with the highlight; "Clear my comments" empties the current
-draft and keeps history. (Per CLAUDE.md: rebuild the canvas and cache-bust the URL
-after editing `src/runtime/*`.)
+draft and keeps history; (extension) the same on a `file://` page and the
+`localhost` opt-in toggling the behavior. (Per CLAUDE.md: rebuild the canvas and
+cache-bust the URL after editing `src/runtime/*`.)
 
 ---
 
 ## 9. Degradation matrix
 
-| Condition                                   | Behavior                                  |
-|---------------------------------------------|-------------------------------------------|
-| `localStorage` throws / unavailable (Safari `file://`, private mode) | Pure in-file behavior (today). No errors. |
-| Normalized content below `MIN_HASH_CHARS`   | No persistence / history for that doc.    |
-| Snapshot GC'd but metadata kept             | History shows quote + body; no popup.     |
-| `CompressionStream` + LZ both absent        | Store uncompressed; byte cap governs.     |
-| Old canvas wrapped before this feature      | Has the old runtime → behaves as before.  |
+| Condition | Behavior |
+|---|---|
+| `localStorage`/`chrome.storage` throws or unavailable | Inner adapter only (today). No errors. |
+| Normalized content below `MIN_HASH_CHARS` | No drafts/history for that doc. |
+| Extension gating off (dynamic/localhost not opted in) | URL-keyed `ChromeStorageAdapter` (today). |
+| Snapshot GC'd but metadata kept | History shows quote + body; no popup. |
+| `CompressionStream` + LZ both absent | Store uncompressed; byte cap governs. |
+| Old canvas wrapped before this feature | Old runtime → behaves as before. |
 
 ---
 
-## 10. Why extension mode is out of scope
+## 10. Mode interplay & boundaries
 
-Extension mode uses `ChromeStorageAdapter` (`chrome.storage.local`, keyed by page
-URL) and annotates arbitrary pages. It already persists across refresh, and it has
-no `wrap` step and no doc-root content boundary to anchor a draft model to cleanly.
-Per-draft history there would require a different identity signal (a content hash at
-load time over an arbitrary page) and a parallel implementation in the content
-script + chrome.storage GC — and is questionable for non-document pages. A wrapped
-canvas opened **with** the extension installed still gets this feature, because the
-embedded canvas wins the single-mount guard (CONTRACTS.md §3.7). Extension-native
-history is a possible follow-up, not part of this spec.
+- **Wrapped canvas opened with the extension installed:** the embedded canvas wins
+  the single-mount guard (CONTRACTS.md §3.7) and provides the feature via
+  `localStorage`; the extension stands down. No double history, no split state.
+- **Non-wrapped `file://` doc with the extension:** the extension provides the
+  feature via `chrome.storage`.
+- **Content roots differ by mode** (`#noteback-doc-root` vs `document.body`), as do
+  line-number semantics already (CLAUDE.md). A doc is reviewed in one mode at a time,
+  so hashes never need to agree across modes.
 
 ---
 
 ## 11. Files
 
 **New**
-- `src/adapters/localstorage-state-adapter.js` — decorator adapter + lineage/GC +
-  history/clear API (pure helpers dual-exported for tests).
+- `src/runtime/draft-history-core.js` — storage-agnostic core (dual-export; tested).
 - `src/runtime/snapshot.js` — section extraction + (de)compression (pure sub-helpers
   dual-exported).
-- `test/localstorage-adapter.test.js`, `test/snapshot.test.js`.
+- `src/adapters/localstorage-state-adapter.js` — canvas binding.
+- `src/adapters/chrome-history-adapter.js` — extension binding (gated).
+- `test/draft-history-core.test.js`, `test/snapshot.test.js`,
+  `test/history-adapters.test.js` (+ cases in `origin-policy.test.js`).
 
 **Modified**
-- `src/canvas/exporter.js` — `EMBEDDED_BOOT` composes the new adapter and passes
-  history/clear hooks.
-- `src/runtime/overlay.js` — "Earlier feedback" read-only section, history popup,
-  "Clear my comments" menu item.
-- **Inlined-runtime lists** — add the two new modules (embedded-mode position,
-  before `boot.js`) to each place that defines the inlined runtime:
-  `RUNTIME_FILES` in `bin/noteback.js`, `examples/build-canvas.js`, the service
-  worker's concatenation order, and `web_accessible_resources` in `manifest.json`.
-  This is the *only* `bin/noteback.js` / `manifest.json` change — no wrap-time logic,
-  no stamping.
-- `CONTRACTS.md` — new adapter, localStorage schema, content-hash identity, snapshot
-  model; runtime dependency-order/global-namespace tables gain the two modules.
+- `src/canvas/exporter.js` — `EMBEDDED_BOOT` composes the canvas binding + history
+  hooks.
+- `src/content/content-script.js` — choose gated chrome binding vs. plain
+  `ChromeStorageAdapter`; pass `root = document.body`; re-evaluate on settings change.
+- `src/content/origin-policy.js` — `draftModelActive(...)` predicate + settings
+  normalization for the opt-in list.
+- `src/runtime/overlay.js` — "Earlier feedback" section, history popup, "Clear my
+  comments" item (shared by both modes).
+- `src/popup/popup.{js,html,css}` — per-site draft-history opt-in toggle.
+- **Inlined/loaded-runtime lists** — add the new runtime modules
+  (`draft-history-core.js`, `snapshot.js`, both adapters) where each mode loads the
+  runtime: `RUNTIME_FILES` in `bin/noteback.js`, `examples/build-canvas.js`, the
+  service worker's concatenation order, and **both** `web_accessible_resources` and
+  `content_scripts` in `manifest.json` (the extension now runs these live, not just
+  inlined). Dependency order: core + snapshot before the adapters, all before
+  `boot.js`.
+- `CONTRACTS.md` — core + two new adapters, storage schema, content-hash identity,
+  gating predicate/settings, snapshot model; runtime dependency-order/namespace
+  tables.
 - `CLAUDE.md` — gotchas (hash from clean pre-paint DOM; `file://` shared bucket;
-  iframe `srcdoc` styling caveat).
+  iframe `srcdoc` styling caveat; gating to avoid dynamic-page churn).
 
 **Unchanged**
-- `src/canvas/canvas-template.html` (nothing is stamped into the file).
-- Extension *behavior*: `content-script.js`, `chrome-storage-adapter.js`, and the
-  live `content_scripts` mounting are untouched (the new modules are inlined-only).
+- `bin/noteback.js` wrap logic and `src/canvas/canvas-template.html` (nothing stamped;
+  the only `bin`/manifest edits are the runtime-list additions above).
+- `chrome-storage-adapter.js` core behavior (it becomes the extension binding's inner
+  adapter and its untouched fallback).
 
 ---
 
 ## 12. Open questions / future
 
 - "Bring forward" a history comment into the current draft (re-anchored where text
-  matches) — explicitly deferred.
-- Full-document snapshots (vs. section-only) — the data model already allows an
-  optional per-draft `fullSnapshot` field to be added later with no migration.
-- Tunable limits (§6.4) could later move to a small in-canvas settings affordance.
+  matches) — deferred.
+- Full-document snapshots vs. section-only — the model already allows an optional
+  per-draft `fullSnapshot` field later with no migration.
+- A heuristic to auto-detect "this localhost page is static" and offer the draft
+  model proactively, instead of manual opt-in.
+- Tunable limits (§6.4) could move to a small settings affordance.
