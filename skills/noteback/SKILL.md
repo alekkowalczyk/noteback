@@ -8,8 +8,8 @@ description: Use when you write an HTML document, plan, spec, design, report, or
 When you hand the user an HTML deliverable to review, give it to them **already
 annotatable**. Instead of plain HTML, emit a Noteback *feedback canvas*: the same
 document with a tiny runtime baked in, so the user can highlight any passage,
-attach a note (or add a note about the whole document), and click **Copy feedback
-as markdown** to paste back to you. No browser extension, no server, no install —
+attach a note (or add a note about the whole document), and click **Copy feedback**
+to paste the Markdown back to you. No browser extension, no server, no install —
 they just open the file.
 
 ## When this applies
@@ -80,8 +80,8 @@ Show a short, consistent message so the workflow is obvious:
 
 > 📝 I wrote this as a **Noteback canvas** — open **`plan.html`** in your browser.
 > Highlight any text to comment on it, or use the **🗨 Noteback** button (bottom-right)
-> to add a note about the whole document. When you're done, click **Copy feedback as
-> markdown** and paste it back here and I'll revise.
+> to add a note about the whole document. When you're done, click **Copy feedback**
+> and paste it back here and I'll revise.
 
 Adjust the filename, but keep the three beats: *open it · comment · copy the markdown
 back to me*.
