@@ -44,6 +44,7 @@
         "src/canvas/exporter.js",
         "src/runtime/boot.js",
         "src/adapters/chrome-storage-adapter.js",
+        "src/content/origin-policy.js",
         "src/content/content-script.js"
       ],
       "run_at": "document_idle"

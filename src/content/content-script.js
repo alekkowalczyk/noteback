@@ -116,23 +116,74 @@
 
   /* --- boot ---------------------------------------------------------------- */
 
+  /* --- activation lifecycle ----------------------------------------------- */
+
+  const policy = RT.originPolicy || null;
+  const SETTINGS_KEY = (policy && policy.SETTINGS_KEY) || 'nb:settings';
+  const originType = policy ? policy.classifyOrigin(location) : 'other';
+  const origin = policy ? policy.originOf(location) : location.origin;
+
   let controller = null;
-  const ready = RT.boot
-    .boot({
-      root: document.body || document.documentElement,
-      adapter: adapter,
-      exporter: exporter,
-      docId: docId,
-      docTitle: docTitle
-    })
-    .then(function (c) {
-      controller = c;
-      return c;
-    })
-    .catch(function () {
-      controller = null;
-      return null;
+  let active = false;
+  let ready = Promise.resolve(null); // always resolves to the current controller (or null)
+
+  function mount() {
+    if (active) return ready;
+    active = true;
+    ready = RT.boot
+      .boot({
+        root: document.body || document.documentElement,
+        adapter: adapter,
+        exporter: exporter,
+        docId: docId,
+        docTitle: docTitle
+      })
+      .then(function (c) { controller = c; return c; })
+      .catch(function () { controller = null; return null; });
+    return ready;
+  }
+
+  function unmount() {
+    if (!active) return;
+    active = false;
+    if (controller && typeof controller.destroy === 'function') {
+      try { controller.destroy(); } catch (e) { /* ignore */ }
+    }
+    controller = null;
+    ready = Promise.resolve(null);
+  }
+
+  function shouldActivate(settings) {
+    if (!policy) return true; // fail open if the module is somehow missing
+    return policy.isActive({ type: originType, origin: origin }, settings);
+  }
+
+  function applySettings(settings) {
+    if (shouldActivate(settings)) mount();
+    else unmount();
+  }
+
+  // Initial decision from stored settings.
+  readSettings().then(applySettings);
+
+  // React live to popup-driven changes (no page reload needed).
+  if (chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener(function (changes, area) {
+      if (area !== 'local' || !changes[SETTINGS_KEY]) return;
+      applySettings(changes[SETTINGS_KEY].newValue || null);
     });
+  }
+
+  function readSettings() {
+    return new Promise(function (resolve) {
+      try {
+        chrome.storage.local.get(SETTINGS_KEY, function (items) {
+          const err = chrome.runtime && chrome.runtime.lastError;
+          resolve((!err && items && items[SETTINGS_KEY]) || null);
+        });
+      } catch (e) { resolve(null); }
+    });
+  }
 
   /* --- message listener (popup / toolbar / service worker) ----------------- */
 
@@ -141,7 +192,15 @@
 
     switch (msg.type) {
       case 'NOTEBACK_PING':
-        sendResponse({ ok: true, booted: true, docId: docId, docTitle: docTitle });
+        sendResponse({
+          ok: true,
+          booted: active,
+          dormant: !active,
+          originType: originType,
+          origin: origin,
+          docId: docId,
+          docTitle: docTitle
+        });
         return false;
 
       case 'NOTEBACK_GET_STATE':
