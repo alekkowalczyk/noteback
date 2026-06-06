@@ -1,3 +1,26 @@
+/**
+ * Noteback runtime — snapshot-capture.js  (PURE-ISH; dual-export)
+ *
+ * Produces a clean document snapshot — no Noteback UI elements
+ * (`data-noteback-ui`), no highlight `<mark>` wrappers, no `#noteback-state`
+ * script block, and no inlined runtime scripts — suitable for history storage.
+ *
+ * Two capture paths:
+ *   `captureCleanDoc(doc?)` — DOM path used in production in BOTH extension
+ *       and embedded-canvas modes. Clones `documentElement`, removes nodes,
+ *       and serialises to HTML. Handles nested/same-name tags correctly.
+ *   `stripNotebackFromHtml(html)` — string-only regex path used exclusively
+ *       by Node unit tests (no DOM available). Good enough for flat/shallow
+ *       fixture HTML; does NOT handle all nesting edge cases.
+ *
+ * Also exports:
+ *   `identityCodec` — no-op Promise codec (compress/decompress return the
+ *       string unchanged) used as the gzip fallback when compression is
+ *       unavailable.
+ *
+ * Runs in the browser (`NotebackRuntime.snapshotCapture`) and under Node
+ * (`module.exports`). No DOM access outside `captureCleanDoc`; no chrome.*.
+ */
 (function (root, factory) {
   const api = factory();
   root.NotebackRuntime = root.NotebackRuntime || {};
@@ -51,8 +74,10 @@
   function stripNotebackFromHtml(html) {
     var out = String(html || '');
 
-    // Remove elements with data-noteback-ui (handles nested content via [\s\S]*?)
-    // Use a greedy-safe approach: match the opening tag to find the tag name, then match close
+    // Remove elements with data-noteback-ui. Backreference \1 closes on the
+    // same tag name, but [\s\S]*? is non-greedy and does NOT handle nested
+    // same-name tags — a stray closing tag may remain. This is the string-only
+    // test path; the DOM path (captureCleanDoc) removes nodes and is correct.
     out = out.replace(/<([a-z][a-z0-9]*)\b[^>]*\bdata-noteback-ui\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
 
     // Remove noteback-state script block (matched by id attribute)

@@ -20,3 +20,9 @@ test('stripNotebackFromHtml removes UI, marks, state block, runtime script', () 
   assert.ok(!clean.includes('NotebackRuntime'));
   assert.ok(clean.includes('Hello world!'), 'mark unwrapped, text preserved');
 });
+
+test('stripNotebackFromHtml preserves a legitimate non-Noteback inline script', () => {
+  const html = '<html><body><p>x</p><script>var analytics = 1;</script></body></html>';
+  const clean = cap.stripNotebackFromHtml(html);
+  assert.ok(clean.includes('var analytics = 1'), 'user script preserved');
+});
