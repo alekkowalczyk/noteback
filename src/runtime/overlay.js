@@ -1152,7 +1152,7 @@
       }
       setState(s);
       // The canvas captures per-draft history snapshots by reading the painted
-      // <mark> highlights (snapshot.extractSections). The committed highlights —
+      // <mark> highlights (snapshotCapture). The committed highlights —
       // including this brand-new comment's — must be in the DOM BEFORE persist()
       // runs its snapshot, or the snapshot misses the new comment and its later
       // history entry is never clickable. So drop the compose-time preview and

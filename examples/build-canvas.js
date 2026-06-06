@@ -17,8 +17,9 @@ const root = path.resolve(__dirname, '..');
 
 const { buildCanvasHtml } = require(path.join(root, 'src/canvas/exporter.js'));
 
-// Runtime files, in the dependency order declared in manifest web_accessible_resources
-// (content-script and chrome-storage-adapter are extension-only → excluded).
+// Runtime files, kept identical to bin/noteback.js RUNTIME_FILES (same files, same
+// order). content-script, chrome-storage-adapter and chrome-kv-store are
+// extension-only → excluded from the embedded canvas list.
 const RUNTIME_FILES = [
   'src/runtime/anchor.js',
   'src/runtime/state.js',
@@ -26,9 +27,9 @@ const RUNTIME_FILES = [
   'src/runtime/highlight.js',
   'src/runtime/overlay.js',
   'src/runtime/draft-history-core.js',
-  'src/runtime/snapshot.js',
+  'src/runtime/snapshot-capture.js',
   'src/adapters/infile-state-adapter.js',
-  'src/adapters/localstorage-state-adapter.js',
+  'src/adapters/history-state-adapter.js',
   'src/canvas/exporter.js',
   'src/runtime/boot.js'
 ];
