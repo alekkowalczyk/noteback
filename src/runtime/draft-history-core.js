@@ -94,12 +94,12 @@
       return store.get(verKey(versionKey)).then((ver) => {
         if (ver) {
           return ensureDoc(docId, versionKey, opts.docTitle).then(() => prune(docId, versionKey))
-            .then(() => ({ degraded: false, docId: docId, versionKey: versionKey, contentHash: hash, comments: (ver.comments || []).slice() }));
+            .then(() => ({ degraded: false, docId: docId, versionKey: versionKey, contentHash: hash, comments: (ver.comments || []).slice(), hasSnapshot: !!ver.snapshotHtml }));
         }
         ver = { schemaVersion: 1, versionKey: versionKey, docId: docId, contentHash: hash,
           comments: (opts.fallbackComments || []).slice(), snapshotHtml: '', createdAt: now(), lastEditedAt: now(), docTitle: String(opts.docTitle || '') };
         return store.set(verKey(versionKey), ver).then(() => ensureDoc(docId, versionKey, opts.docTitle)).then(() => prune(docId, versionKey))
-          .then(() => ({ degraded: false, docId: docId, versionKey: versionKey, contentHash: hash, comments: (opts.fallbackComments || []).slice() }));
+          .then(() => ({ degraded: false, docId: docId, versionKey: versionKey, contentHash: hash, comments: (opts.fallbackComments || []).slice(), hasSnapshot: false }));
       });
     }
 

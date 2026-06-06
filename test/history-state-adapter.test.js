@@ -48,3 +48,89 @@ test('degrades when docId is empty (no history, comments still flow via inner)',
   await a.save({ schemaVersion: 1, docId: '', docTitle: 'T', comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }] });
   assert.deepStrictEqual(await a.getHistory(), []);
 });
+
+test('a second comment does NOT recapture the snapshot (capture-once holds)', async () => {
+  const store = fakeStore();
+  let snapVal = '<html>SNAP-A</html>';
+  const a = mod.createHistoryStateAdapter({
+    doc: { title: 'T', getElementById: () => ({ textContent: LONG }) },
+    store, inner: fakeInner(), docId: 'D1',
+    contentText: () => LONG, captureSnapshot: () => snapVal,
+    draftHistory: core, codec: idCodec, now: () => '2026-06-05T00:00:00Z'
+  });
+  await a.load();
+  await a.save({ schemaVersion: 1, docId: 'D1', docTitle: 'T', comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }] });
+  snapVal = '<html>SNAP-B</html>'; // a different capture on the 2nd save must be ignored
+  await a.save({ schemaVersion: 1, docId: 'D1', docTitle: 'T', comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }, { id: 'c2', body: 'b2', anchor: null, createdAt: 'y', author: null }] });
+  // Re-open as a fresh draft (content changed) so the version above is history.
+  const b = mod.createHistoryStateAdapter({ doc: { title: 'T', getElementById: () => ({ textContent: LONG + ' changed.' }) }, store, inner: fakeInner(), docId: 'D1', contentText: () => LONG + ' changed.', captureSnapshot: () => '<html>OTHER</html>', draftHistory: core, codec: idCodec, now: () => '2026-06-05T00:00:01Z' });
+  await b.load();
+  const hist = await b.getHistory();
+  assert.strictEqual(hist.length, 1);
+  const v = await b.getVersion({ versionKey: hist[0].versionKey });
+  assert.strictEqual(v.html, '<html>SNAP-A</html>', 'the first snapshot is immutable across later saves');
+  assert.strictEqual(v.comments.length, 2, 'comments still update on the second save');
+});
+
+test('in-file fallback comments over an empty store: a snapshot IS still captured (regression)', async () => {
+  // The bug: a version pre-seeded with fallback comments but an EMPTY snapshot was
+  // treated as already-snapshotted, so save() never captured one and the version
+  // became permanently un-peekable. Here `inner` returns a pre-existing comment
+  // (the re-shared in-file canvas), the store starts empty, and save() with that
+  // comment present must capture the snapshot.
+  const store = fakeStore();
+  const seeded = { schemaVersion: 1, docId: 'D1', docTitle: 'T', comments: [{ id: 'c1', body: 'infile', anchor: null, createdAt: 'x', author: null }] };
+  const inner = { load: () => Promise.resolve(seeded), save: () => Promise.resolve() };
+  const a = mod.createHistoryStateAdapter({
+    doc: { title: 'T', getElementById: () => ({ textContent: LONG }) },
+    store, inner, docId: 'D1',
+    contentText: () => LONG, captureSnapshot: () => '<html>INFILE-SNAP</html>',
+    draftHistory: core, codec: idCodec, now: () => '2026-06-05T00:00:00Z'
+  });
+  const s0 = await a.load();
+  assert.strictEqual(s0.comments.length, 1, 'fallback comment surfaces on load');
+  await a.save({ schemaVersion: 1, docId: 'D1', docTitle: 'T', comments: s0.comments });
+  // Re-open as a fresh draft (content changed) so the seeded version is history.
+  const b = mod.createHistoryStateAdapter({ doc: { title: 'T', getElementById: () => ({ textContent: LONG + ' changed.' }) }, store, inner: fakeInner(), docId: 'D1', contentText: () => LONG + ' changed.', captureSnapshot: () => '<html>OTHER</html>', draftHistory: core, codec: idCodec, now: () => '2026-06-05T00:00:01Z' });
+  await b.load();
+  const hist = await b.getHistory();
+  assert.strictEqual(hist.length, 1);
+  assert.strictEqual(hist[0].hasSnapshot, true, 'the version is peekable (snapshot captured)');
+  const v = await b.getVersion({ versionKey: hist[0].versionKey });
+  assert.strictEqual(v.html, '<html>INFILE-SNAP</html>', 'the captured snapshot is the in-file one');
+});
+
+test('clearCurrent empties comments and resets the capture-once path', async () => {
+  const store = fakeStore();
+  let snapVal = '<html>SNAP-1</html>';
+  const a = mod.createHistoryStateAdapter({
+    doc: { title: 'T', getElementById: () => ({ textContent: LONG }) },
+    store, inner: fakeInner(), docId: 'D1',
+    contentText: () => LONG, captureSnapshot: () => snapVal,
+    draftHistory: core, codec: idCodec, now: () => '2026-06-05T00:00:00Z'
+  });
+  await a.load();
+  await a.save({ schemaVersion: 1, docId: 'D1', docTitle: 'T', comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }] });
+  await a.clearCurrent();
+  assert.deepStrictEqual((await a.load()).comments, [], 'comments wiped after clearCurrent');
+  // Save a comment again: a fresh snapshot must be re-captured (hasSnapshot reset).
+  snapVal = '<html>SNAP-2</html>';
+  await a.save({ schemaVersion: 1, docId: 'D1', docTitle: 'T', comments: [{ id: 'c2', body: 'b2', anchor: null, createdAt: 'y', author: null }] });
+  // Re-open as a fresh draft (content changed) so the post-clear version is history.
+  const b = mod.createHistoryStateAdapter({ doc: { title: 'T', getElementById: () => ({ textContent: LONG + ' changed.' }) }, store, inner: fakeInner(), docId: 'D1', contentText: () => LONG + ' changed.', captureSnapshot: () => '<html>OTHER</html>', draftHistory: core, codec: idCodec, now: () => '2026-06-05T00:00:01Z' });
+  await b.load();
+  const hist = await b.getHistory();
+  assert.strictEqual(hist.length, 1);
+  assert.strictEqual(hist[0].hasSnapshot, true, 'a snapshot is re-captured after clearCurrent');
+  const vv = await b.getVersion({ versionKey: hist[0].versionKey });
+  assert.strictEqual(vv.html, '<html>SNAP-2</html>', 're-captured snapshot reflects the post-clear save');
+});
+
+test('makeCodec gzip roundtrip (when CompressionStream is available)', async () => {
+  if (typeof CompressionStream === 'undefined') return; // Node without CompressionStream: skip
+  const c = mod.makeCodec();
+  const gz = await c.compress('<html>hi</html>');
+  assert.ok(gz.startsWith('gz:'), 'compressed payload is gz-tagged');
+  assert.strictEqual(await c.decompress(gz), '<html>hi</html>', 'roundtrips back to the original');
+  assert.strictEqual(await c.decompress('plain-not-gz'), 'plain-not-gz', 'a non-gz string passes through unchanged');
+});

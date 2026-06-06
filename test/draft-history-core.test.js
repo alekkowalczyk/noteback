@@ -40,6 +40,30 @@ test('a content change makes a new version in the same doc; history shows the ol
   assert.strictEqual(hist[0].hasSnapshot, true);
 });
 
+test('resolve reports hasSnapshot reflecting the version\'s stored snapshot state', async () => {
+  const dh = makeCore(fakeStore());
+  const r1 = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });
+  assert.strictEqual(r1.hasSnapshot, false, 'a brand-new version has no snapshot yet');
+  await dh.persist({ docId: 'D1', versionKey: r1.versionKey, comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }], snapshotHtml: '<html>SNAP</html>' });
+  const r2 = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });
+  assert.strictEqual(r2.versionKey, r1.versionKey, 'same content resolves the same version');
+  assert.strictEqual(r2.hasSnapshot, true, 'after a snapshot is persisted, resolve reports it');
+});
+
+test('resolve seeds a pre-existing version that has comments but NO snapshot as hasSnapshot:false', async () => {
+  const store = fakeStore();
+  const dh = makeCore(store);
+  // First resolve seeds a version with fallback comments but an empty snapshot
+  // (the embedded re-shared-canvas case): comments present, snapshotHtml ''.
+  const r1 = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [{ id: 'c1', body: 'b' }], docTitle: 'T' });
+  assert.deepStrictEqual(r1.comments, [{ id: 'c1', body: 'b' }]);
+  // Re-resolving the SAME content must NOT report hasSnapshot just because comments exist.
+  const r2 = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });
+  assert.strictEqual(r2.versionKey, r1.versionKey);
+  assert.deepStrictEqual(r2.comments, [{ id: 'c1', body: 'b' }], 'stored comments survive');
+  assert.strictEqual(r2.hasSnapshot, false, 'comments without a snapshot must not look snapshotted');
+});
+
 test('version() decompresses the stored full-doc snapshot + comments', async () => {
   const dh = makeCore(fakeStore());
   const r = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });

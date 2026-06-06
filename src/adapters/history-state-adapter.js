@@ -69,7 +69,7 @@
         const fallback = (innerState && innerState.comments) || [];
         if (!usable) { resolved = { degraded: true, comments: fallback.slice(), versionKey: null, hasSnapshot: true }; return resolved; }
         return dh.resolve({ docId: docId, contentText: cfg.contentText ? cfg.contentText() : '', fallbackComments: fallback, docTitle: docTitle() })
-          .then((r) => { resolved = { degraded: r.degraded, docId: r.docId, versionKey: r.versionKey, comments: r.comments, hasSnapshot: (r.comments && r.comments.length > 0) }; return resolved; });
+          .then((r) => { resolved = { degraded: r.degraded, docId: r.docId, versionKey: r.versionKey, comments: r.comments, hasSnapshot: !!r.hasSnapshot }; return resolved; });
       });
     }
 
