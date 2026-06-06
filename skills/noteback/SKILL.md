@@ -46,6 +46,41 @@ Keep using Markdown when it's genuinely the better fit:
 Rule of thumb: **a document the user will review and comment on → HTML canvas; a file
 that lives in version control or another tool → Markdown.**
 
+## Make it look designed, not like rendered Markdown
+
+You're handing the user a *document*, so treat it like one — give it real visual
+design, not a bare wall of `<h1>`/`<p>`/`<ul>` that reads like a Markdown preview.
+A generic stylesheet (centered column, system font, default headings) signals "auto-
+generated" and makes the content feel cheaper than it is. Invest in:
+
+- **Distinctive typography** — a characterful display face for headings paired with a
+  clean body face and a mono for code; avoid the generic defaults (Arial, system-ui,
+  Inter/Roboto everywhere). Establish a real type scale and hierarchy.
+- **A cohesive visual identity** — a deliberate palette with a dominant tone and a
+  sharp accent (CSS variables), not black-on-white with blue links. Match the theme to
+  the document's purpose (an editorial memo, a spec sheet, a report).
+- **Structure that aids reading** — styled section markers, callout/aside boxes for
+  decisions vs. risks vs. notes, proper tables, framed figures/diagrams, and generous
+  spacing. One tasteful staggered page-load reveal beats scattered micro-animations.
+
+Keep these hard constraints:
+- **Put your CSS in a `<style>` *inside `<body>`*, not in `<head>`.** This is the one
+  that bites hardest: `wrap` keeps only the body's inner markup and **discards `<head>`
+  entirely**, so a stylesheet in `<head>` (or a `<link rel="stylesheet">`) is silently
+  dropped and the canvas renders as raw, unstyled HTML. Inline the full stylesheet as a
+  `<style>` block at the top of `<body>`. (A `<title>` can stay in `<head>` — `wrap` reads
+  it for the doc title — but styling must live in the body.) Remote `@import` web fonts
+  need network when the file is opened, so always give solid local fallbacks.
+- **Real, selectable text in normal flow.** Don't put body content in `::before/::after`,
+  background images, or `<canvas>` — Noteback anchors comments to selectable text, so
+  decorative-only elements should be exactly that (decorative).
+- **Leave the bottom-right corner free** (Noteback's launcher) and don't globally style
+  the `<mark>` element — the runtime paints highlights as `mark.noteback-highlight`. Use
+  your own class for any highlighter-style effect.
+
+If you want a bolder, art-directed result, the `frontend-design` skill (when available)
+is a good companion for choosing the aesthetic direction before you write the HTML.
+
 ## How to wrap
 
 After writing the HTML file (e.g. `plan.html`), wrap it in place:
