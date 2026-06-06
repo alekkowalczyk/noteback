@@ -255,6 +255,23 @@
     '.nb-menu-item:hover .nb-mi-label,.nb-menu-item:focus-visible .nb-mi-label{color:var(--nb-accent-deep);}',
     '.nb-mi-sub{display:block;font:400 11.5px/1.3 var(--nb-ui);color:var(--nb-ink-soft);margin-top:2px;}',
     '.nb-menu-sep{height:1px;background:var(--nb-line);margin:4px 9px;}',
+    /* copy split-button — main keeps its action; the caret opens this menu */
+    '.nb-copy-wrap{position:relative;display:flex;}',
+    '.nb-copy-wrap .nb-copy{flex:1;border-top-right-radius:0;border-bottom-right-radius:0;}',
+    '.nb-copy-caret-btn{flex:none;padding:0 10px;border-left:none;border-top-left-radius:0;border-bottom-left-radius:0;}',
+    '.nb-copy-caret-btn .nb-caret{font-size:10px;line-height:1;opacity:.85;transition:transform .18s var(--dropdown-ease);}',
+    '.nb-copy-wrap.nb-menu-open .nb-copy-caret-btn .nb-caret{transform:rotate(180deg);}',
+
+    /* earlier-feedback history + snapshot popup */
+    '.nb-history{margin-top:10px;border-top:1px solid var(--nb-line);padding-top:8px;}',
+    '.nb-hist-draft{font-size:12px;color:var(--nb-ink-soft,#6b7280);margin:8px 0 4px;}',
+    '.nb-hist-item{display:block;width:100%;text-align:left;border:none;background:none;cursor:pointer;padding:6px 8px;border-radius:8px;font:inherit;color:inherit;}',
+    '.nb-hist-item:hover:not(:disabled){background:var(--nb-accent-wash);}',
+    '.nb-hist-item:disabled{opacity:.55;cursor:default;}',
+    '.nb-hist-backdrop{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;}',
+    '.nb-hist-panel{position:relative;width:min(820px,92vw);height:min(80vh,720px);background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35);}',
+    '.nb-hist-close{position:absolute;top:8px;right:8px;z-index:2;border:none;background:#0001;border-radius:50%;width:28px;height:28px;cursor:pointer;}',
+    '.nb-hist-frame{width:100%;height:100%;border:0;background:#fff;}',
 
     /* toast + success check (transitions.dev) */
     '.nb-toast{position:fixed;bottom:20px;right:20px;display:inline-flex;align-items:center;gap:9px;',
@@ -395,6 +412,7 @@
     const exporter = cfg.exporter || {};
     const getState = cfg.getState || (function () { return null; });
     const setState = cfg.setState || function () {};
+    const history = cfg.history || null;
     const onChange = cfg.onChange || function () {};
     // Prefer the runtime markdown module directly so we can hand it the document
     // markup for line references; fall back to the boot-supplied renderer.
@@ -472,7 +490,19 @@
       '</div>' +
       '<div class="nb-list"></div>' +
       '<div class="nb-foot">' +
-      '  <button type="button" class="nb-btn nb-secondary nb-copy">Copy feedback</button>' +
+      '  <div class="nb-copy-wrap">' +
+      '    <button type="button" class="nb-btn nb-secondary nb-copy">Copy feedback</button>' +
+      '    <button type="button" class="nb-btn nb-secondary nb-copy-caret-btn" aria-haspopup="menu" aria-expanded="false" aria-label="More copy options"><span class="nb-caret" aria-hidden="true">▾</span></button>' +
+      '    <div class="nb-copy-menu nb-menu" role="menu" aria-label="Copy options">' +
+      '      <button type="button" class="nb-menu-item nb-copy-canvas" role="menuitem">' +
+      '        <span class="nb-mi-label">Copy html (with feedback)</span>' +
+      '        <span class="nb-mi-sub">re-openable canvas</span></button>' +
+      '      <div class="nb-menu-sep" role="none"></div>' +
+      '      <button type="button" class="nb-menu-item nb-copy-clean" role="menuitem">' +
+      '        <span class="nb-mi-label">Copy html (clean)</span>' +
+      '        <span class="nb-mi-sub">the original, no Noteback</span></button>' +
+      '    </div>' +
+      '  </div>' +
       '  <div class="nb-save-wrap">' +
       '    <button type="button" class="nb-btn nb-save-btn" aria-haspopup="menu" aria-expanded="false">Save<span class="nb-caret" aria-hidden="true">▾</span></button>' +
       '    <div class="nb-menu" role="menu" aria-label="Save options">' +
@@ -487,6 +517,10 @@
       '      <button type="button" class="nb-menu-item nb-save-pdf" role="menuitem">' +
       '        <span class="nb-mi-label">PDF/Print</span>' +
       '        <span class="nb-mi-sub">print-ready, no comments</span></button>' +
+      '      <div class="nb-menu-sep" role="none"></div>' +
+      '      <button type="button" class="nb-menu-item nb-clear-comments" role="menuitem">' +
+      '        <span class="nb-mi-label">Clear my comments (this draft)</span>' +
+      '      </button>' +
       '    </div>' +
       '  </div>' +
       '</div>' +
@@ -509,13 +543,34 @@
     const elList = sidebar.querySelector('.nb-list');
     const saveWrap = sidebar.querySelector('.nb-save-wrap');
     const saveBtn = sidebar.querySelector('.nb-save-btn');
-    const saveMenu = sidebar.querySelector('.nb-menu');
+    const saveMenu = saveWrap.querySelector('.nb-menu');
+    const copyWrap = sidebar.querySelector('.nb-copy-wrap');
+    const copyCaretBtn = sidebar.querySelector('.nb-copy-caret-btn');
+    const copyMenu = sidebar.querySelector('.nb-copy-menu');
     sidebar.querySelector('.nb-x').addEventListener('click', closeSidebar);
     sidebar.querySelector('.nb-copy').addEventListener('click', copyMarkdown);
+    copyCaretBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleCopyMenu(); });
+    sidebar.querySelector('.nb-copy-canvas').addEventListener('click', function () { closeCopyMenu(); copyHtmlCanvas(); });
+    sidebar.querySelector('.nb-copy-clean').addEventListener('click', function () { closeCopyMenu(); copyHtmlClean(); });
     saveBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleSaveMenu(); });
     sidebar.querySelector('.nb-save-comments').addEventListener('click', function () { closeSaveMenu(); saveCanvas(); });
     sidebar.querySelector('.nb-save-clean').addEventListener('click', function () { closeSaveMenu(); saveClean(); });
     sidebar.querySelector('.nb-save-pdf').addEventListener('click', function () { closeSaveMenu(); savePdf(); });
+    const clearBtn = sidebar.querySelector('.nb-clear-comments');
+    if (!history) { clearBtn.style.display = 'none'; }
+    else {
+      clearBtn.addEventListener('click', function () {
+        closeSaveMenu();
+        Promise.resolve(history.clearCurrent()).then(function () {
+          const empty = { schemaVersion: 1, docId: (getState() || {}).docId || '', docTitle: (getState() || {}).docTitle || '', comments: [] };
+          setState(empty);
+          return persist(empty); // write through to the in-file block / re-share copy (parity with delete)
+        }).then(function () {
+          repaintHighlights();
+          renderSidebar();
+        });
+      });
+    }
 
     /* --- info dialog (install-as-a-skill) ------------------------------- */
     const infoBtn = sidebar.querySelector('.nb-info');
@@ -1066,6 +1121,14 @@
         s = stateApi.addComment(s, { anchor: anchor, body: text });
       }
       setState(s);
+      // The canvas captures per-draft history snapshots by reading the painted
+      // <mark> highlights (snapshot.extractSections). The committed highlights —
+      // including this brand-new comment's — must be in the DOM BEFORE persist()
+      // runs its snapshot, or the snapshot misses the new comment and its later
+      // history entry is never clickable. So drop the compose-time preview and
+      // paint the real highlights first, then persist.
+      clearAnchorPreview();
+      repaintHighlights();
       await persist(s);
       closePopover();
       clearSelection();
@@ -1130,6 +1193,7 @@
           '<strong>No notes yet</strong>' +
           'Select any text and click <b>Comment</b>, or add a note about the whole document above.';
         elList.appendChild(empty);
+        renderHistory();
         updateLauncher();
         return;
       }
@@ -1146,7 +1210,128 @@
         orphans.forEach(function (c) { elList.appendChild(renderItem(c, 'orphan')); });
       }
 
+      renderHistory();
       updateLauncher();
+    }
+
+    function renderHistory() {
+      if (!history) return;
+      const existing = elList.querySelector('.nb-history');
+      if (existing) existing.remove();
+      const wrap = doc.createElement('div');
+      wrap.className = 'nb-history';
+      wrap.setAttribute('data-noteback-ui', 'history');
+      elList.appendChild(wrap);
+      Promise.resolve(history.getHistory()).then(function (drafts) {
+        if (!drafts || drafts.length === 0) { wrap.remove(); return; }
+        const label = doc.createElement('div');
+        label.className = 'nb-group-label';
+        label.textContent = 'Earlier feedback (' + drafts.length + (drafts.length === 1 ? ' draft)' : ' drafts)');
+        wrap.appendChild(label);
+        drafts.forEach(function (d) {
+          const dl = doc.createElement('div');
+          dl.className = 'nb-hist-draft';
+          dl.textContent = 'Draft \u00B7 ' + formatWhen(d.lastEditedAt || d.firstSeenAt) + ' (' + d.comments.length + ')';
+          wrap.appendChild(dl);
+          d.comments.forEach(function (c) {
+            const item = doc.createElement('button');
+            item.type = 'button';
+            item.className = 'nb-hist-item';
+            const quote = (c.anchor && c.anchor.quote) ? condense(c.anchor.quote) : '(note on the whole document)';
+            item.textContent = '\u201C' + quote + '\u201D \u2014 ' + (c.body || '');
+            if (c.anchor && d.hasSnapshot && c.sectionId) {
+              item.addEventListener('click', function () { openHistoryPopup(d.contentHash, c); });
+            } else {
+              item.disabled = true;
+            }
+            wrap.appendChild(item);
+          });
+        });
+      });
+    }
+
+    function condense(q) {
+      if (markdownApi && markdownApi.condenseQuote) return markdownApi.condenseQuote(q);
+      return q.length > 80 ? q.slice(0, 77) + '\u2026' : q;
+    }
+    function formatWhen(iso) {
+      if (!iso) return 'earlier';
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return 'earlier';
+      return d.toLocaleString();
+    }
+
+    /**
+     * Highlighter injected into the snapshot iframe. Self-contained (no closure
+     * refs) — serialized via toString() and re-run in the iframe with the quote as
+     * its argument. Searches ACROSS text nodes (a multi-block selection's quote
+     * spans several) and tolerates whitespace differences, then wraps each touched
+     * slice in a <mark> (mirroring the main highlighter), so the whole selected
+     * passage is highlighted, not just a single-node match.
+     */
+    function nbHistHighlight(q) {
+      try {
+        if (!q) return;
+        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+        var nodes = [], starts = [], text = '', n;
+        while ((n = walker.nextNode())) {
+          var pn = n.parentNode;
+          if (pn && (pn.nodeName === 'SCRIPT' || pn.nodeName === 'STYLE')) continue;
+          starts.push(text.length); nodes.push(n); text += n.nodeValue;
+        }
+        var idx = text.indexOf(q), len = q.length;
+        if (idx < 0) {
+          // Whitespace-tolerant fallback: the stored quote keeps the inter-block
+          // whitespace the selection swept up, but the snapshot drops it (blocks end
+          // up adjacent), so each whitespace run becomes \s* (zero-or-more), not \s+.
+          var esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*');
+          var mt = new RegExp(esc).exec(text);
+          if (!mt) return;
+          idx = mt.index; len = mt[0].length;
+        }
+        var end = idx + len, segs = [];
+        for (var k = 0; k < nodes.length; k++) {
+          var s0 = starts[k], s1 = s0 + nodes[k].nodeValue.length;
+          if (s1 <= idx) continue;
+          if (s0 >= end) break;
+          var ls = Math.max(0, idx - s0), le = Math.min(s1, end) - s0;
+          if (le > ls) segs.push([nodes[k], ls, le]);
+        }
+        for (var s = segs.length - 1; s >= 0; s--) {
+          var nd = segs[s][0], a = segs[s][1], b = segs[s][2], full = nd.nodeValue;
+          if (b < full.length) nd.splitText(b);
+          if (a > 0) nd = nd.splitText(a);
+          var mk = document.createElement('mark');
+          mk.style.background = '#fde68a';
+          nd.parentNode.replaceChild(mk, nd);
+          mk.appendChild(nd);
+        }
+        var first = document.querySelector('mark');
+        if (first) first.scrollIntoView({ block: 'center' });
+      } catch (e) {}
+    }
+
+    function openHistoryPopup(contentHash, comment) {
+      Promise.resolve(history.getSection({ contentHash: contentHash, sectionId: comment.sectionId })).then(function (sec) {
+        const back = doc.createElement('div');
+        back.className = 'nb-hist-backdrop';
+        back.setAttribute('data-noteback-ui', 'history-popup');
+        const panel = doc.createElement('div');
+        panel.className = 'nb-hist-panel';
+        const close = doc.createElement('button');
+        close.type = 'button'; close.className = 'nb-hist-close'; close.textContent = '\u2715';
+        close.addEventListener('click', function () { back.remove(); });
+        back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
+        const frame = doc.createElement('iframe');
+        frame.className = 'nb-hist-frame';
+        const quote = (comment.anchor && comment.anchor.quote) || '';
+        const styles = (sec && sec.styles) || '';
+        const bodyHtml = (sec && sec.html) || '<p>(context no longer stored)</p>';
+        const script = '<scr' + 'ipt>(' + nbHistHighlight.toString() + ')(' + JSON.stringify(quote).replace(/<\//g, '<\\/') + ');</scr' + 'ipt>';
+        frame.srcdoc = '<!DOCTYPE html><html><head><base href="' + (typeof location !== 'undefined' ? location.href : '') + '"><style>' + styles + '</style></head><body>' + bodyHtml + script + '</body></html>';
+        panel.appendChild(close); panel.appendChild(frame);
+        back.appendChild(panel); uiRoot.appendChild(back);
+      });
     }
 
     function groupLabel(textValue) {
@@ -1332,6 +1517,29 @@
       else toast('Copy failed — select & copy manually');
     }
 
+    function copyHtmlCanvas() { return copyHtml(false); }
+    function copyHtmlClean() { return copyHtml(true); }
+
+    // "Copy html" — the same artifacts as the Save menu, to the clipboard.
+    // The hook returns the HTML string; we do the clipboard write here so both
+    // runtime modes share one path (incl. the file:// execCommand fallback).
+    async function copyHtml(clean) {
+      const s = getState();
+      if (exporter && typeof exporter.onCopyHtml === 'function') {
+        try {
+          const html = await exporter.onCopyHtml(s, { clean: clean });
+          const ok = await copyToClipboard(html);
+          if (ok) toast(clean ? 'Copied clean HTML' : 'Copied HTML with feedback', { success: true });
+          else toast('Copy failed — select & copy manually');
+        } catch (e) {
+          toast('Copy failed');
+        }
+        return;
+      }
+      toast(clean ? 'Clean HTML copy needs the extension or saved canvas.'
+                  : 'HTML copy needs the extension or saved canvas.');
+    }
+
     async function saveCanvas() {
       const s = getState();
       if (exporter && typeof exporter.onSaveCanvas === 'function') {
@@ -1473,6 +1681,7 @@
     }
     function closeSidebar() {
       closeSaveMenu();
+      closeCopyMenu();
       sidebar.classList.remove('nb-open');
       launcher.classList.remove('nb-hidden');
     }
@@ -1490,6 +1699,7 @@
 
     function openSaveMenu() {
       if (saveMenuOpen) return;
+      closeCopyMenu();           // the two footer menus are mutually exclusive
       saveMenuOpen = true;
       if (saveMenuCloseTimer) {
         (win && win.clearTimeout ? win.clearTimeout : clearTimeout)(saveMenuCloseTimer);
@@ -1518,6 +1728,42 @@
     function toggleSaveMenu() {
       if (saveMenuOpen) closeSaveMenu();
       else openSaveMenu();
+    }
+
+    let copyMenuOpen = false;
+    let copyMenuCloseTimer = null;
+
+    function openCopyMenu() {
+      if (copyMenuOpen) return;
+      closeSaveMenu();           // the two footer menus are mutually exclusive
+      copyMenuOpen = true;
+      if (copyMenuCloseTimer) {
+        (win && win.clearTimeout ? win.clearTimeout : clearTimeout)(copyMenuCloseTimer);
+        copyMenuCloseTimer = null;
+      }
+      copyMenu.classList.remove('is-closing');
+      copyWrap.classList.add('nb-menu-open');
+      copyCaretBtn.setAttribute('aria-expanded', 'true');
+      void copyMenu.offsetWidth; // reflow so the closed scale applies before growing
+      copyMenu.classList.add('is-open');
+    }
+
+    function closeCopyMenu() {
+      if (!copyMenuOpen) return;
+      copyMenuOpen = false;
+      copyWrap.classList.remove('nb-menu-open');
+      copyCaretBtn.setAttribute('aria-expanded', 'false');
+      copyMenu.classList.remove('is-open');
+      copyMenu.classList.add('is-closing');
+      const settle = function () { copyMenu.classList.remove('is-closing'); copyMenuCloseTimer = null; };
+      const ms = reduceMotion() ? 0 : POPOVER_CLOSE_MS;
+      if (ms && win && win.setTimeout) copyMenuCloseTimer = win.setTimeout(settle, ms);
+      else settle();
+    }
+
+    function toggleCopyMenu() {
+      if (copyMenuOpen) closeCopyMenu();
+      else openCopyMenu();
     }
 
     /* ------------------------------------------------------------------- *
@@ -1612,6 +1858,22 @@
         if (saveBtn && saveBtn.focus) saveBtn.focus();
       }
     };
+    // The copy menu closes on any click outside its wrapper; the caret stops
+    // propagation so its own toggle click never reaches here.
+    const onDocClickCopyMenu = function (e) {
+      if (!copyMenuOpen) return;
+      const path = (typeof e.composedPath === 'function') ? e.composedPath() : [];
+      if (path.indexOf(copyWrap) !== -1) return;
+      closeCopyMenu();
+    };
+    const onDocKeydownCopyMenu = function (e) {
+      if (e.key === 'Escape' && copyMenuOpen) {
+        closeCopyMenu();
+        if (copyCaretBtn && copyCaretBtn.focus) copyCaretBtn.focus();
+      }
+    };
+    doc.addEventListener('click', onDocClickCopyMenu);
+    doc.addEventListener('keydown', onDocKeydownCopyMenu);
     doc.addEventListener('click', onDocClickSaveMenu);
     doc.addEventListener('keydown', onDocKeydownSaveMenu);
 
@@ -1629,6 +1891,8 @@
       doc.removeEventListener('click', onDocClickOutside);
       doc.removeEventListener('click', onDocClickSaveMenu);
       doc.removeEventListener('keydown', onDocKeydownSaveMenu);
+      doc.removeEventListener('click', onDocClickCopyMenu);
+      doc.removeEventListener('keydown', onDocKeydownCopyMenu);
       doc.removeEventListener('keydown', onDocKeydownInfo);
       cancelFabTimer();
       closePopover();

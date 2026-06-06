@@ -128,6 +128,31 @@ toggles take effect without a page reload. `NOTEBACK_PING` reports
 settings" from "no file access". The embedded canvas is unaffected — it has no
 settings and always shows its UI.
 
+### 1.4 Click-to-activate on unsupported origins (extension mode only)
+
+Noteback auto-injects only on `file://`, `localhost`, and `127.0.0.1` (the
+manifest match list). On any **other** origin — e.g. a doc the user hosts over
+https — the content script never loads, so `classifyOrigin` returns `'other'`
+and `isActive` is `false` (§1.3). The popup offers a manual escape hatch:
+
+- On an `'other'` origin whose `NOTEBACK_PING` goes unanswered, the popup shows
+  an **"Annotate this page"** button instead of the disabled state.
+- Clicking it uses the existing **`activeTab`** grant (no host permission, no
+  install-time prompt) to `chrome.scripting.executeScript` two things into the
+  tab: first a function that sets **`window.__notebackForceActivate = true`**,
+  then the **same ordered file list the manifest would auto-inject**, read from
+  `chrome.runtime.getManifest().content_scripts[0].js` (single source of truth —
+  it must never be hard-copied, or it will drift).
+- `content-script.js` reads the flag and calls `mount()` **unconditionally**,
+  bypassing the `nb:settings` predicate — the click *is* the opt-in. Such pages
+  do not subscribe to `chrome.storage.onChanged` (settings don't govern them).
+
+Activation is **ephemeral**: a reload drops the injected runtime and the user
+re-clicks. Annotation **data** persists per-URL in `chrome.storage.local`
+(keyed `"noteback:" + docId`, §1.1), so highlights re-render on the next
+activation. The injected list is the extension runtime only; canvas-only files
+(`draft-history-core`, `snapshot`, `localstorage-state-adapter`) are excluded.
+
 ---
 
 ## 2. State schema (schemaVersion 1)
@@ -350,6 +375,7 @@ Each receives the current `State`.
 /**
  * @typedef {Object} ExporterHooks
  * @property {(state: State) => void|Promise<void>}   [onCopyMarkdown] Copy feedback as Markdown.
+ * @property {(state: State, opts: {clean?: boolean}) => Promise<string>} [onCopyHtml] Build HTML for the clipboard — the clean document (clean:true) or the full feedback canvas (clean:false). Returns the string; the overlay/popup writes it to the clipboard.
  * @property {(state: State) => void|Promise<void>}   [onSaveCanvas]   Save HTML *with* comments (re-shareable canvas).
  * @property {(state: State) => void|Promise<void>}   [onSaveClean]    Save HTML *without* Noteback (the original document).
  * @property {(state: State) => void}                 [onSavePdf]      Produce a PDF. Omit to use the overlay's default (`window.print()`).
@@ -358,10 +384,18 @@ Each receives the current `State`.
 
 Footer **Save…** menu → hooks: *HTML · with comments* → `onSaveCanvas`,
 *HTML · clean copy* → `onSaveClean`, *PDF/Print* → `onSavePdf` (default `window.print()`).
+
+Footer **Copy ▾** menu → `onCopyHtml`: *Copy html (with feedback)* →
+`onCopyHtml(state, {clean:false})` (same bytes as `onSaveCanvas`), *Copy html
+(clean)* → `onCopyHtml(state, {clean:true})` (same bytes as `onSaveClean`). The
+main "Copy feedback" button still uses `onCopyMarkdown`. In extension mode the
+with-feedback variant is assembled by the service worker (`NOTEBACK_BUILD_CANVAS`)
+and returned as a string; the page writes it to the clipboard.
+
 PDF cleanliness relies on the runtime's `@media print` rules (overlay `BUTTON_CSS`),
 which hide every `[data-noteback-ui]` node and strip highlight styling — so a PDF is
-the clean document without needing a hook. The embedded canvas supplies `onSaveCanvas`
-+ `onSaveClean`; both serialize the live document (clean copy additionally removes the
+the clean document without needing a hook. The embedded canvas supplies `onSaveCanvas`,
+`onSaveClean`, and `onCopyHtml`; the save hooks serialize the live document (clean copy additionally removes the
 state block, the inlined runtime `<script>`, the `#noteback-doc-root` wrapper, the
 guiding comment, and the title suffix) and persist via `saveCanvasInPlace`/`downloadCanvas`
 under the plain document filename.
@@ -421,13 +455,17 @@ Node tests require the file directly:
 | `src/runtime/markdown.js`                 | `markdown`              | yes                    | pure        |
 | `src/runtime/highlight.js`                | `highlight`             | no                     | DOM         |
 | `src/runtime/overlay.js`                  | `overlay`               | no                     | DOM         |
+| `src/runtime/draft-history-core.js`       | `draftHistory`          | yes                    | pure-ish    |
+| `src/runtime/snapshot.js`                 | `snapshot`              | yes                    | mixed       |
 | `src/runtime/boot.js`                     | `boot`                  | no                     | DOM         |
 | `src/adapters/chrome-storage-adapter.js`  | `chromeStorageAdapter`  | no                     | DOM (chrome)|
 | `src/adapters/infile-state-adapter.js`    | `infileStateAdapter`    | no                     | DOM         |
+| `src/adapters/localstorage-state-adapter.js` | `localStorageStateAdapter` | yes (tests)        | DOM         |
 | `src/canvas/exporter.js`                  | `exporter`              | yes (pure parts)       | mixed       |
 
-**Runtime dependency order** (the order in `content_scripts[].js`, the order the
-service worker concatenates for inlining, and the order in `web_accessible_resources`):
+**Runtime dependency order** (the order the service worker concatenates for
+inlining, the order in `web_accessible_resources`, and the order in
+`bin/noteback.js` / `examples/build-canvas.js`):
 
 ```
 src/runtime/anchor.js
@@ -435,7 +473,10 @@ src/runtime/state.js
 src/runtime/markdown.js
 src/runtime/highlight.js
 src/runtime/overlay.js
+src/runtime/draft-history-core.js
+src/runtime/snapshot.js
 src/adapters/infile-state-adapter.js
+src/adapters/localstorage-state-adapter.js
 src/canvas/exporter.js
 src/runtime/boot.js
 ```
@@ -443,6 +484,14 @@ src/runtime/boot.js
 (`chrome-storage-adapter.js` and `content-script.js` are loaded **only** in extension
 mode, appended after the shared runtime; they are NOT inlined into the canvas, which
 uses `InFileStateAdapter` instead.)
+
+The draft-history modules — `draft-history-core.js`, `snapshot.js`, and the
+canvas-only `localstorage-state-adapter.js` — are inlined into the canvas and listed
+in `web_accessible_resources`, but are **not** yet loaded by the extension
+`content_scripts[].js`: Plan 1 leaves the live extension unchanged. The extension
+binding (which adds `draft-history-core.js` + `snapshot.js` to `content_scripts`)
+lands in a later plan; `localstorage-state-adapter.js` stays canvas-only, mirroring
+how `chrome-storage-adapter.js` is extension-only.
 
 ---
 

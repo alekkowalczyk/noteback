@@ -116,6 +116,7 @@
       root: rootNode,
       adapter: adapter,
       exporter: cfg.exporter || {},
+      history: cfg.history || null,
       getState: getState,
       setState: setState,
       onChange: function () { repaint(); },

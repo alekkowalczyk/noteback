@@ -13,6 +13,9 @@
  *     blob, fetch the canvas template, call exporter.buildCanvasHtml, then
  *     trigger a download via the `downloads` API (data: URL — service workers
  *     have no DOM/Blob-URL).
+ *   - "Build canvas string" (NOTEBACK_BUILD_CANVAS): same assembly as the export
+ *     path, but returns the HTML to the caller (for clipboard) instead of
+ *     triggering a download.
  *   - Onboarding / file-URL check: detect whether "Allow access to file URLs"
  *     is enabled and surface guidance (spec §9), and open the extension's
  *     details page on request.
@@ -65,6 +68,20 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
         function (err) {
           sendResponse({ ok: false, error: String((err && err.message) || err) });
         }
+      );
+      return true; // async response
+
+    case 'NOTEBACK_BUILD_CANVAS':
+      // Like EXPORT_CANVAS but returns the assembled HTML string instead of
+      // downloading it — the content script writes it to the clipboard.
+      assembleCanvasHtml({
+        docId: msg.docId,
+        docTitle: msg.docTitle,
+        docHtml: msg.docHtml,
+        state: msg.state
+      }).then(
+        function (html) { sendResponse({ ok: true, html: html }); },
+        function (err) { sendResponse({ ok: false, error: String((err && err.message) || err) }); }
       );
       return true; // async response
 
@@ -146,28 +163,38 @@ function toggleSidebar(tabId) {
  * ----------------------------------------------------------------------- */
 
 /**
- * Assemble the self-contained feedback canvas for a document and download it.
+ * Assemble the self-contained feedback canvas HTML for a document (no download).
+ * Shared by the download path (exportCanvas) and the copy path
+ * (NOTEBACK_BUILD_CANVAS → clipboard in the page).
  * @param {{docId:string, docTitle:string, docHtml:string, state:Object}} input
- * @returns {Promise<number>} the downloads API download id.
+ * @returns {Promise<string>} the assembled canvas HTML.
  */
-function exportCanvas(input) {
+function assembleCanvasHtml(input) {
   input = input || {};
   const exporter = getExporter();
   if (!exporter || typeof exporter.buildCanvasHtml !== 'function') {
     return Promise.reject(new Error('exporter unavailable in service worker'));
   }
-
   return Promise.all([fetchInlinedRuntime(), fetchTemplate()]).then(function (parts) {
     const inlinedRuntime = parts[0];
     const templateHtml = parts[1];
-
-    const html = exporter.buildCanvasHtml({
+    return exporter.buildCanvasHtml({
       docHtml: input.docHtml || '',
       state: input.state || { schemaVersion: 1, docId: input.docId || '', docTitle: input.docTitle || 'document', comments: [] },
       templateHtml: templateHtml,
       inlinedRuntime: inlinedRuntime
     });
+  });
+}
 
+/**
+ * Assemble the canvas and download it.
+ * @param {{docId:string, docTitle:string, docHtml:string, state:Object}} input
+ * @returns {Promise<number>} the downloads API download id.
+ */
+function exportCanvas(input) {
+  input = input || {};
+  return assembleCanvasHtml(input).then(function (html) {
     const filename = suggestedFilename(input.docTitle, input.docId);
     return triggerDownload(html, filename);
   });

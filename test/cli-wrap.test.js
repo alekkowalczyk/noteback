@@ -177,6 +177,20 @@ test('planInstall picks the .agents hub + .claude symlink (or a plain --dir copy
   });
 });
 
+test('wrapHtml inlines the draft-history runtime modules', () => {
+  const html = cli.wrapHtml(DOC, { sourceName: 'plan.html' });
+  assert.match(html, /NotebackRuntime\.draftHistory/);
+  assert.match(html, /NotebackRuntime\.snapshot/);
+  assert.match(html, /NotebackRuntime\.localStorageStateAdapter/);
+});
+
+test('canvas guards localStorage access so a throwing/blocked store cannot break boot', () => {
+  const html = cli.wrapHtml(DOC, { sourceName: 'plan.html' });
+  // The boot script must capture localStorage inside a try/catch (not access window.localStorage raw in the adapter guard).
+  assert.match(html, /nbLocalStorage/);
+  assert.match(html, /try\s*\{\s*return\s*\(typeof window/);
+});
+
 test('install-skill writes the .agents hub + a .claude symlink (covers Codex/OpenCode/Claude)', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'noteback-home-'));
 

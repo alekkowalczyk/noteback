@@ -21,11 +21,13 @@
  *   { type: 'NOTEBACK_OPEN_SIDEBAR' }    -> { ok:true }
  *   { type: 'NOTEBACK_CLOSE_SIDEBAR' }   -> { ok:true }
  *   { type: 'NOTEBACK_COPY_MARKDOWN' }   -> { ok:true, markdown } (also copies)
+ *   { type: 'NOTEBACK_COPY_HTML', clean } -> { ok:true } (builds + copies HTML)
  *   { type: 'NOTEBACK_SAVE_CANVAS' }     -> { ok:true } (kicks off save flow)
  *   { type: 'NOTEBACK_GET_STATE' }       -> { ok:true, state }
  *   { type: 'NOTEBACK_GET_DOC_HTML' }    -> { ok:true, docHtml, docId, docTitle }
  * Outbound (to the service worker) for canvas assembly + download:
  *   { type: 'NOTEBACK_EXPORT_CANVAS', docId, docTitle, docHtml, state }
+ *   { type: 'NOTEBACK_BUILD_CANVAS', docId, docTitle, docHtml, state } -> { ok, html }
  */
 
 (function () {
@@ -108,8 +110,35 @@
     });
   }
 
+  /**
+   * Build the requested HTML for the clipboard (shared by the sidebar's
+   * onCopyHtml hook and the popup's NOTEBACK_COPY_HTML message). Clean HTML is
+   * built in-page; the with-feedback canvas is assembled by the service worker
+   * (only it can fetch the runtime files) and returned as a string. The caller
+   * writes the result to the clipboard.
+   * @param {Object} state
+   * @param {{clean?:boolean}} [opts]
+   * @returns {Promise<string>}
+   */
+  function onCopyHtml(state, opts) {
+    if (opts && opts.clean) {
+      return Promise.resolve('<!DOCTYPE html>\n' + docContentHtml());
+    }
+    return sendToWorker({
+      type: 'NOTEBACK_BUILD_CANVAS',
+      docId: docId,
+      docTitle: docTitle,
+      docHtml: collectDocHtml(),
+      state: state
+    }).then(function (resp) {
+      if (resp && resp.ok && typeof resp.html === 'string') return resp.html;
+      throw new Error((resp && resp.error) || 'canvas build failed');
+    });
+  }
+
   const exporter = {
     onCopyMarkdown: onCopyMarkdown,
+    onCopyHtml: onCopyHtml,
     onSaveCanvas: onSaveCanvas,
     onSaveClean: onSaveClean
   };
@@ -163,15 +192,24 @@
     else unmount();
   }
 
-  // Initial decision from stored settings.
-  readSettings().then(applySettings);
+  // Click-to-activate (unsupported origins). When the popup injects us on an
+  // 'other' origin via activeTab, it first sets window.__notebackForceActivate.
+  // The user's click IS the opt-in, so we mount unconditionally and do NOT
+  // consult nb:settings (the per-type/per-site predicate governs only
+  // file/localhost/127). Such pages also ignore live settings changes.
+  if (window.__notebackForceActivate) {
+    mount();
+  } else {
+    // Initial decision from stored settings.
+    readSettings().then(applySettings);
 
-  // React live to popup-driven changes (no page reload needed).
-  if (chrome.storage && chrome.storage.onChanged) {
-    chrome.storage.onChanged.addListener(function (changes, area) {
-      if (area !== 'local' || !changes[SETTINGS_KEY]) return;
-      applySettings(changes[SETTINGS_KEY].newValue || null);
-    });
+    // React live to popup-driven changes (no page reload needed).
+    if (chrome.storage && chrome.storage.onChanged) {
+      chrome.storage.onChanged.addListener(function (changes, area) {
+        if (area !== 'local' || !changes[SETTINGS_KEY]) return;
+        applySettings(changes[SETTINGS_KEY].newValue || null);
+      });
+    }
   }
 
   function readSettings() {
@@ -246,6 +284,19 @@
             function (md) { sendResponse({ ok: true, markdown: md }); },
             function (err) { sendResponse({ ok: false, error: String(err && err.message || err) }); }
           );
+        });
+        return true;
+
+      case 'NOTEBACK_COPY_HTML':
+        ready.then(function (c) {
+          if (!c) { sendResponse({ ok: false, error: 'not booted' }); return; }
+          onCopyHtml(c.getState(), { clean: !!msg.clean })
+            .then(function (html) { return copyToClipboard(html); })
+            .then(function (ok) {
+              if (!ok) throw new Error('clipboard write failed');
+              sendResponse({ ok: true });
+            })
+            .catch(function (err) { sendResponse({ ok: false, error: String((err && err.message) || err) }); });
         });
         return true;
 

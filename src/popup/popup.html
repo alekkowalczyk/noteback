@@ -29,9 +29,19 @@
     <button id="nb-toggle-sidebar" type="button" class="nb-btn">
       Toggle sidebar
     </button>
-    <button id="nb-copy-markdown" type="button" class="nb-btn">
-      Copy feedback
-    </button>
+    <div class="nb-copy-wrap">
+      <button id="nb-copy-markdown" type="button" class="nb-btn nb-copy-main">
+        Copy feedback
+      </button>
+      <button id="nb-copy-caret" type="button" class="nb-btn nb-copy-caret"
+              aria-haspopup="menu" aria-expanded="false" aria-label="More copy options">
+        <span class="nb-caret" aria-hidden="true">▾</span>
+      </button>
+      <div id="nb-copy-menu" class="nb-copy-menu" role="menu" aria-label="Copy options" hidden>
+        <button type="button" class="nb-menu-item" data-copy="canvas" role="menuitem">Copy html (with feedback)</button>
+        <button type="button" class="nb-menu-item" data-copy="clean" role="menuitem">Copy html (clean)</button>
+      </div>
+    </div>
     <div class="nb-save-wrap">
       <button id="nb-save-btn" type="button" class="nb-btn nb-save-btn"
               aria-haspopup="menu" aria-expanded="false">

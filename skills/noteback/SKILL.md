@@ -86,6 +86,14 @@ Show a short, consistent message so the workflow is obvious:
 Adjust the filename, but keep the three beats: *open it · comment · copy the markdown
 back to me*.
 
+**Offer to open it — don't make them hunt for the file.** After wrapping, ask
+whether you should open it in their browser right now rather than assuming they'll
+locate and open it, e.g. *"Want me to open it in your browser now?"* If they say
+yes, open it with the platform opener (`open <file>` on macOS, `xdg-open <file>` on
+Linux, `start "" <file>` on Windows). And in a line, remind them the loop is
+paste-based: they can click **Copy feedback** and paste it **straight back into
+this chat** — no need to save or send a file.
+
 ## Closing the loop
 
 When the user pastes the Markdown feedback back, treat each item as a change request

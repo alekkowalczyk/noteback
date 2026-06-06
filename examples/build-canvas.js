@@ -25,7 +25,10 @@ const RUNTIME_FILES = [
   'src/runtime/markdown.js',
   'src/runtime/highlight.js',
   'src/runtime/overlay.js',
+  'src/runtime/draft-history-core.js',
+  'src/runtime/snapshot.js',
   'src/adapters/infile-state-adapter.js',
+  'src/adapters/localstorage-state-adapter.js',
   'src/canvas/exporter.js',
   'src/runtime/boot.js'
 ];
