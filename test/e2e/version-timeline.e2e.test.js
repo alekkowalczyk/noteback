@@ -153,7 +153,9 @@ test('the Versions timeline renders an earlier version row with working open + c
     await row.locator('.nb-ver-line').first().click();
     await page.waitForTimeout(400);
     assert.strictEqual(await page.locator('.nb-hist-backdrop').count(), 1, 'clicking the row opens the snapshot peek');
-    const peekText = await page.evaluate(() => {
+    // The peek iframe shows the captured snapshot AND the LIVE painter ran on it,
+    // wrapping the commented quote in a <mark class="noteback-highlight">.
+    const peek = await page.evaluate(() => {
       function findFrame(node) {
         if (node.shadowRoot) {
           const f = node.shadowRoot.querySelector('iframe.nb-hist-frame');
@@ -165,9 +167,54 @@ test('the Versions timeline renders an earlier version row with working open + c
       }
       const f = findFrame(document.documentElement);
       if (!f) return null;
-      return (f.contentDocument.body.textContent || '').length;
+      const cd = f.contentDocument;
+      return {
+        textLen: (cd.body.textContent || '').length,
+        marks: cd.querySelectorAll('mark.noteback-highlight').length
+      };
     });
-    assert.ok(peekText && peekText > 0, 'the peek iframe shows the captured snapshot');
+    assert.ok(peek && peek.textLen > 0, 'the peek iframe shows the captured snapshot');
+    assert.ok(peek.marks >= 1, 'the live painter wrapped the commented quote in a <mark.noteback-highlight> (got ' + (peek && peek.marks) + ')');
+
+    // "Back to current" control: present in the panel, and closes the peek on click.
+    const backCtrl = page.locator('.nb-hist-back');
+    assert.strictEqual(await backCtrl.count(), 1, 'the "Back to current" control is present');
+    assert.ok(
+      /Back to current/.test((await backCtrl.first().textContent()) || ''),
+      'the control reads "Back to current"'
+    );
+    await backCtrl.first().click();
+    await page.waitForTimeout(150);
+    assert.strictEqual(await page.locator('.nb-hist-backdrop').count(), 0, '"Back to current" closes the peek');
+
+    // --- Checkout: "open" builds a real annotatable canvas of the version. ---
+    // window.open is unobservable headless, so capture the blob URL it's handed,
+    // fetch the blob text, and assert the built canvas carries the version's
+    // state block + comment body + the baked doc-id.
+    await page.evaluate(() => {
+      window.__nbOpened = [];
+      window.open = (url) => { window.__nbOpened.push(url); return null; };
+    });
+    await openBtn.click();
+    await page.waitForTimeout(300);
+    const checkoutHtml = await page.evaluate(async () => {
+      const url = (window.__nbOpened || [])[0];
+      if (!url) return null;
+      return await (await fetch(url)).text();
+    });
+    assert.ok(checkoutHtml, 'open() handed window.open a blob URL');
+    assert.ok(
+      checkoutHtml.indexOf('noteback-state') !== -1,
+      'the checkout canvas carries the #noteback-state block'
+    );
+    assert.ok(
+      checkoutHtml.indexOf('Draft-1 feedback note') !== -1,
+      'the checkout canvas embeds the version\'s comment body'
+    );
+    assert.ok(
+      checkoutHtml.indexOf('data-noteback-doc-id') !== -1,
+      'the checkout canvas keeps the baked doc-id (it is a real canvas)'
+    );
   } finally {
     await context.close();
   }

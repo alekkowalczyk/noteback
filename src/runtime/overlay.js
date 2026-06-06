@@ -295,8 +295,13 @@
     '.nb-disclose-label{font:700 10px/1 var(--nb-round);letter-spacing:.08em;text-transform:uppercase;color:var(--nb-ink-soft);}',
     '.nb-hist-backdrop{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;}',
     '.nb-hist-panel{position:relative;width:min(820px,92vw);height:min(80vh,720px);background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35);}',
-    '.nb-hist-close{position:absolute;top:8px;right:8px;z-index:2;border:none;background:#0001;border-radius:50%;width:28px;height:28px;cursor:pointer;}',
-    '.nb-hist-frame{width:100%;height:100%;border:0;background:#fff;}',
+    '.nb-hist-close{position:absolute;top:8px;right:8px;z-index:3;border:none;background:#0001;border-radius:50%;width:28px;height:28px;cursor:pointer;}',
+    '.nb-hist-back{position:absolute;top:0;left:0;right:0;z-index:2;display:flex;align-items:center;gap:6px;',
+    '  border:none;border-bottom:1px solid var(--nb-line);background:var(--nb-accent-wash);color:var(--nb-accent-deep);',
+    '  font:700 12px/1 var(--nb-round);letter-spacing:.01em;padding:11px 40px 11px 14px;cursor:pointer;text-align:left;',
+    '  transition:background .14s ease,color .14s ease;}',
+    '.nb-hist-back:hover{background:var(--nb-accent);color:#fffdf8;}',
+    '.nb-hist-frame{position:absolute;top:38px;left:0;right:0;bottom:0;width:100%;height:auto;border:0;background:#fff;}',
 
     /* toast + success check (transitions.dev) */
     '.nb-toast{position:fixed;bottom:20px;right:20px;display:inline-flex;align-items:center;gap:9px;',
@@ -1423,13 +1428,35 @@
     }
 
     /**
-     * Peek a past version: open its full clean-document snapshot in the existing
-     * snapshot modal (iframe srcdoc). Pruned snapshots (html === '') are a no-op.
-     * Task 11 upgrades this to the live painter + a "Back to current" banner.
+     * Peek a past version: parse its clean-document snapshot, run the LIVE
+     * highlight painter over it (so the commented passages are wrapped in the
+     * same `<mark class="noteback-highlight">` the live doc uses), and show the
+     * result in the snapshot modal (iframe srcdoc). A "\u2190 Back to current" banner
+     * at the top of the panel returns to the live document (same as the \u2715 /
+     * backdrop click). Pruned snapshots (html === '') are a no-op.
      */
     function openVersionPeek(versionKey) {
       Promise.resolve(history.getVersion({ versionKey: versionKey })).then(function (v) {
         if (!v || !v.html) return; // pruned \u2014 nothing to peek
+
+        // Parse the snapshot and paint REAL highlights into it via the live
+        // painter. paintHighlights creates each <mark> with the parsed doc's own
+        // ownerDocument (wrapRange uses nodes[0].ownerDocument), so the marks land
+        // inside `parsed` and survive serialization below. A pruned/odd snapshot
+        // must not break the peek, hence the guard.
+        let painted = '<!DOCTYPE html>' + v.html;
+        try {
+          const parsed = new DOMParser().parseFromString(v.html, 'text/html');
+          try {
+            highlightApi.paintHighlights(parsed.body, { schemaVersion: 1, comments: v.comments || [] }, {});
+          } catch (e) { /* keep the un-highlighted snapshot */ }
+          // Scroll the first highlight into view once the iframe loads.
+          const scrollScript =
+            '<scr' + 'ipt>(function(){var m=document.querySelector("mark.noteback-highlight");' +
+            'if(m)m.scrollIntoView({block:"center"});})();</scr' + 'ipt>';
+          painted = '<!DOCTYPE html>' + parsed.documentElement.outerHTML + scrollScript;
+        } catch (e) { /* DOMParser unavailable \u2014 fall back to the raw snapshot */ }
+
         const back = doc.createElement('div');
         back.className = 'nb-hist-backdrop';
         back.setAttribute(UI_ATTR, 'version-peek');
@@ -1439,24 +1466,121 @@
         close.type = 'button'; close.className = 'nb-hist-close'; close.textContent = '\u2715';
         close.addEventListener('click', function () { back.remove(); });
         back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
+        // "\u2190 Back to current" banner \u2014 an obvious clickable control that closes the
+        // peek and returns to the live document. (Locked wording: "Back to current".)
+        const backBar = doc.createElement('button');
+        backBar.type = 'button';
+        backBar.className = 'nb-hist-back';
+        backBar.setAttribute(UI_ATTR, 'version-peek-back');
+        backBar.textContent = '\u2190 Back to current';
+        backBar.addEventListener('click', function () { back.remove(); });
         const frame = doc.createElement('iframe');
         frame.className = 'nb-hist-frame';
-        frame.srcdoc = v.html; // the full clean-document snapshot
-        panel.appendChild(close); panel.appendChild(frame);
+        frame.srcdoc = painted; // the snapshot with live highlights painted in
+        panel.appendChild(close);
+        panel.appendChild(backBar);
+        panel.appendChild(frame);
         back.appendChild(panel); uiRoot.appendChild(back);
       });
     }
 
     /**
-     * Open a past version as a standalone document in a new tab. Pruned snapshots
-     * (html === '') are a no-op. Task 11 makes this a real annotatable canvas
-     * checkout; a blob-URL open of the snapshot is enough for now.
+     * Build a REAL annotatable canvas of a past version, as an HTML string.
+     *
+     * Factored out of openVersionTab so the e2e can assert on the produced HTML
+     * without driving window.open. Primary path (the current page is itself a
+     * canvas \u2014 embedded mode, or the extension running on a canvas): clone the
+     * CURRENT live document (keeping its inlined runtime + styles + template),
+     * strip Noteback's own UI + any live highlights, swap in the snapshot's
+     * doc-content, and re-seed the #noteback-state block with the version's
+     * comments. Opening the result boots a working canvas of that version.
+     *
+     * @param {Object} v        getVersion() result: { html, comments, docTitle, contentHash }
+     * @param {string} docId    the current page's baked doc-id
+     * @param {string} docTitle title for the version's state block
+     * @returns {string} a full canvas HTML document
+     */
+    function buildVersionCanvasHtml(v, docId, docTitle) {
+      // Snapshot's doc-content inner HTML (its #noteback-doc-root if present, else body).
+      const parsed = new DOMParser().parseFromString(v.html, 'text/html');
+      const snapRoot = parsed.querySelector('#noteback-doc-root') || parsed.body;
+      const snapInner = snapRoot ? snapRoot.innerHTML : '';
+
+      // Clone the CURRENT live document \u2014 it carries the inlined runtime, the
+      // canvas template wrapper, and the page styles, which is what makes the
+      // opened tab a working annotatable canvas.
+      const clone = document.documentElement.cloneNode(true);
+
+      // Strip Noteback's own UI from the clone (sidebar host, launcher, fab, our
+      // injected <style>, any open peek modal). The inlined runtime <script> is
+      // NOT a [data-noteback-ui] node, so it survives \u2014 that's deliberate.
+      const ui = clone.querySelectorAll('[' + UI_ATTR + ']');
+      for (let i = 0; i < ui.length; i++) {
+        if (ui[i].parentNode) ui[i].parentNode.removeChild(ui[i]);
+      }
+      // Unwrap any live highlight <mark>s left in the clone so we start clean
+      // (the snapshot content we inject below replaces the doc-root anyway, but
+      // be defensive in case the clone's root is reused).
+      const liveMarks = clone.querySelectorAll('mark.' + (highlightApi && highlightApi.HIGHLIGHT_CLASS || 'noteback-highlight'));
+      for (let i = 0; i < liveMarks.length; i++) {
+        const m = liveMarks[i];
+        const p = m.parentNode;
+        if (!p) continue;
+        while (m.firstChild) p.insertBefore(m.firstChild, m);
+        p.removeChild(m);
+      }
+
+      // Swap in the snapshot's doc-content.
+      const cloneRoot = clone.querySelector('#noteback-doc-root');
+      if (cloneRoot) cloneRoot.innerHTML = snapInner;
+
+      // Re-seed the machine-readable state block with the version's comments.
+      const stateEl = clone.querySelector('#noteback-state');
+      if (stateEl) {
+        stateEl.textContent = JSON.stringify({
+          schemaVersion: 1,
+          docId: docId || '',
+          docTitle: docTitle || '',
+          comments: v.comments || []
+        });
+      }
+
+      return '<!DOCTYPE html>\n' + clone.outerHTML;
+    }
+
+    /**
+     * Checkout: open a past version as a real, live, annotatable canvas tab.
+     * Pruned snapshots (html === '') are a no-op.
+     *
+     * Primary path: the clone-based builder above (works when the current page is
+     * a canvas with the inlined runtime \u2014 embedded mode and the extension on a
+     * canvas). Falls back to opening the bare clean snapshot when the build fails
+     * or the current page isn't a canvas (see the fidelity note below).
      */
     function openVersionTab(versionKey) {
       Promise.resolve(history.getVersion({ versionKey: versionKey })).then(function (v) {
         if (!v || !v.html) return; // pruned \u2014 nothing to open
+        let html = null;
+        // Build a working canvas only when the current page IS a canvas (it has a
+        // baked doc-root + the inlined runtime). Otherwise we can't clone a runtime.
+        const rootEl = document.getElementById('noteback-doc-root');
+        const stateEl = document.getElementById('noteback-state');
+        const isCanvas = !!(rootEl && stateEl);
+        if (isCanvas) {
+          try {
+            const docId = (rootEl.getAttribute && rootEl.getAttribute('data-noteback-doc-id')) || '';
+            const docTitle = v.docTitle || document.title || '';
+            html = buildVersionCanvasHtml(v, docId, docTitle);
+          } catch (e) { html = null; }
+        }
+        // Extension non-canvas fallback (a page Noteback didn't author \u2014 no inlined
+        // runtime in this document). Best-effort: open the bare clean snapshot, a
+        // readable but NON-annotatable view. The design's Risk \u00a7Fidelity accepts
+        // this. (A full canvas build here would need the runtime + template via
+        // chrome.runtime.getURL + exporter.buildCanvasHtml; deferred \u2014 TODO.)
+        if (html == null) html = '<!DOCTYPE html>\n' + v.html;
         try {
-          const blob = new Blob([v.html], { type: 'text/html' });
+          const blob = new Blob([html], { type: 'text/html' });
           const url = URL.createObjectURL(blob);
           if (win && typeof win.open === 'function') win.open(url, '_blank');
         } catch (e) { toast('Could not open version'); }
@@ -1468,56 +1592,6 @@
       const d = new Date(iso);
       if (isNaN(d.getTime())) return 'earlier';
       return d.toLocaleString();
-    }
-
-    /**
-     * Highlighter injected into the snapshot iframe. Self-contained (no closure
-     * refs) — serialized via toString() and re-run in the iframe with the quote as
-     * its argument. Searches ACROSS text nodes (a multi-block selection's quote
-     * spans several) and tolerates whitespace differences, then wraps each touched
-     * slice in a <mark> (mirroring the main highlighter), so the whole selected
-     * passage is highlighted, not just a single-node match.
-     */
-    function nbHistHighlight(q) {
-      try {
-        if (!q) return;
-        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-        var nodes = [], starts = [], text = '', n;
-        while ((n = walker.nextNode())) {
-          var pn = n.parentNode;
-          if (pn && (pn.nodeName === 'SCRIPT' || pn.nodeName === 'STYLE')) continue;
-          starts.push(text.length); nodes.push(n); text += n.nodeValue;
-        }
-        var idx = text.indexOf(q), len = q.length;
-        if (idx < 0) {
-          // Whitespace-tolerant fallback: the stored quote keeps the inter-block
-          // whitespace the selection swept up, but the snapshot drops it (blocks end
-          // up adjacent), so each whitespace run becomes \s* (zero-or-more), not \s+.
-          var esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*');
-          var mt = new RegExp(esc).exec(text);
-          if (!mt) return;
-          idx = mt.index; len = mt[0].length;
-        }
-        var end = idx + len, segs = [];
-        for (var k = 0; k < nodes.length; k++) {
-          var s0 = starts[k], s1 = s0 + nodes[k].nodeValue.length;
-          if (s1 <= idx) continue;
-          if (s0 >= end) break;
-          var ls = Math.max(0, idx - s0), le = Math.min(s1, end) - s0;
-          if (le > ls) segs.push([nodes[k], ls, le]);
-        }
-        for (var s = segs.length - 1; s >= 0; s--) {
-          var nd = segs[s][0], a = segs[s][1], b = segs[s][2], full = nd.nodeValue;
-          if (b < full.length) nd.splitText(b);
-          if (a > 0) nd = nd.splitText(a);
-          var mk = document.createElement('mark');
-          mk.style.background = '#fde68a';
-          nd.parentNode.replaceChild(mk, nd);
-          mk.appendChild(nd);
-        }
-        var first = document.querySelector('mark');
-        if (first) first.scrollIntoView({ block: 'center' });
-      } catch (e) {}
     }
 
     function groupLabel(textValue) {
