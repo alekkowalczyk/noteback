@@ -62,6 +62,24 @@ function readInlinedRuntime() {
 }
 
 /**
+ * Mint a fresh, unique document id.
+ * @returns {string}
+ */
+function mintDocId() {
+  return 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 6);
+}
+
+/**
+ * Read a baked-in doc-id from a canvas HTML string, or return null.
+ * @param {string} html
+ * @returns {string|null}
+ */
+function readBakedDocId(html) {
+  const m = /id\s*=\s*["']noteback-doc-root["'][^>]*\bdata-noteback-doc-id\s*=\s*["']([^"']+)["']/i.exec(String(html || ''));
+  return m ? m[1] : null;
+}
+
+/**
  * Derive a human document title: the input's <title>, else the file name.
  * Strips a trailing " — Noteback feedback canvas" so re-wrapping is idempotent.
  * @param {string} html
@@ -92,7 +110,7 @@ function wrapHtml(docHtml, opts) {
   const sourceName = o.sourceName || 'document';
   const state = {
     schemaVersion: 1,
-    docId: o.docId != null ? String(o.docId) : sourceName,
+    docId: o.docId != null && String(o.docId) !== '' ? String(o.docId) : mintDocId(),
     docTitle: deriveTitle(String(docHtml == null ? '' : docHtml), sourceName),
     comments: []
   };
@@ -106,12 +124,16 @@ function wrapHtml(docHtml, opts) {
 
 /**
  * Read `inputPath`, wrap it, and write to `outputPath` (defaults to in place).
+ * Precedence for doc-id: explicitId → baked id in the existing -o file → baked id in the input itself → mint.
  * @returns {{out: string, bytes: number, title: string}}
  */
-function wrapFile(inputPath, outputPath) {
+function wrapFile(inputPath, outputPath, explicitId) {
   const out = outputPath || inputPath;
   const docHtml = fs.readFileSync(inputPath, 'utf8');
-  const html = wrapHtml(docHtml, { sourceName: path.basename(inputPath) });
+  var docId = explicitId || null;
+  if (!docId && fs.existsSync(out)) docId = readBakedDocId(fs.readFileSync(out, 'utf8'));
+  if (!docId) docId = readBakedDocId(docHtml);
+  const html = wrapHtml(docHtml, { sourceName: path.basename(inputPath), docId: docId || undefined });
   fs.writeFileSync(out, html);
   return { out: out, bytes: html.length, title: deriveTitle(docHtml, path.basename(inputPath)) };
 }
@@ -235,12 +257,13 @@ const USAGE = [
 ].join('\n');
 
 function parseArgs(argv) {
-  const args = { cmd: null, input: null, out: null, dir: null, project: false, help: false };
+  const args = { cmd: null, input: null, out: null, dir: null, project: false, help: false, id: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '-h' || a === '--help') args.help = true;
     else if (a === '-o' || a === '--out') args.out = argv[++i];
     else if (a === '--dir') args.dir = argv[++i];
+    else if (a === '--id') args.id = argv[++i];
     else if (a === '--project') args.project = true;
     else if (a[0] === '-') { /* unknown flag — ignore */ }
     else if (!args.cmd) args.cmd = a;       // first bare token is the command
@@ -273,7 +296,7 @@ function main(argv) {
   }
 
   try {
-    const r = wrapFile(args.input, args.out);
+    const r = wrapFile(args.input, args.out, args.id);
     process.stdout.write(
       'Wrapped "' + r.title + '" → ' + r.out + ' (' + r.bytes + ' bytes).\n' +
       'Open it in a browser to comment, then "Copy feedback as markdown".\n'
@@ -289,4 +312,4 @@ if (require.main === module) {
   process.exit(main(process.argv.slice(2)));
 }
 
-module.exports = { wrapHtml, wrapFile, deriveTitle, main, installSkill, planInstall, RUNTIME_FILES, SKILL_NAME };
+module.exports = { wrapHtml, wrapFile, deriveTitle, mintDocId, readBakedDocId, main, installSkill, planInstall, RUNTIME_FILES, SKILL_NAME };

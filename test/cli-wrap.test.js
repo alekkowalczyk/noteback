@@ -191,6 +191,26 @@ test('canvas guards localStorage access so a throwing/blocked store cannot break
   assert.match(html, /try\s*\{\s*return\s*\(typeof window/);
 });
 
+test('wrapHtml mints a doc-id when none is given', () => {
+  const html = cli.wrapHtml('<html><body><p>some adequately long document body text here</p></body></html>', { sourceName: 'a.html' });
+  const m = /data-noteback-doc-id="([^"]+)"/.exec(html);
+  assert.ok(m && m[1] && m[1] !== 'a.html', 'a real minted id, not the basename');
+});
+
+test('wrapHtml honors an explicit docId', () => {
+  const html = cli.wrapHtml('<html><body><p>body text that is long enough</p></body></html>', { sourceName: 'a.html', docId: 'FIXED1' });
+  assert.ok(html.includes('data-noteback-doc-id="FIXED1"'));
+});
+
+test('re-wrap reuses the doc-id already in the -o target', () => {
+  const tmp = path.join(os.tmpdir(), 'nb-id-' + process.pid + '.canvas.html');
+  fs.writeFileSync(tmp, cli.wrapHtml('<html><body><p>first body long enough to hash</p></body></html>', { sourceName: 'a.html', docId: 'KEEPME' }));
+  const r = cli.wrapFile(path.join(__dirname, 'fixtures', 'plain.html'), tmp);
+  const out = fs.readFileSync(tmp, 'utf8');
+  fs.unlinkSync(tmp);
+  assert.ok(out.includes('data-noteback-doc-id="KEEPME"'), 'id preserved across re-wrap');
+});
+
 test('install-skill writes the .agents hub + a .claude symlink (covers Codex/OpenCode/Claude)', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'noteback-home-'));
 
