@@ -262,7 +262,7 @@ document.addEventListener('DOMContentLoaded', function () {
       .then(function () {
         return chrome.scripting.executeScript({ target: { tabId: activeTab.id }, files: files });
       })
-      .then(function () { hideOnboarding(); return refreshState(activeTab); })
+      .then(function () { hideOnboarding(); refreshState(activeTab); })
       .catch(function () { setStatus("Can't annotate this page."); });
   }
 
