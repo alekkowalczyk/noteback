@@ -60,12 +60,22 @@ Rules:
 - Adapters are **stateless wrappers** over their backing store; identity is the
   `docId` inside the State, not adapter instance.
 
-Implementations (both satisfy the contract; see §12 adapter tests):
+**History-mode extension.** When the adapter is the **snapshot-history adapter**
+(`createHistoryStateAdapter`, §8) it additionally exposes
+`getHistory() -> Promise<Version[]>`, `getVersion({versionKey}) -> Promise<{html, comments, docTitle, contentHash}|null>`,
+and `clearCurrent() -> Promise<void>`. The overlay feature-detects these (via the
+`history` config passed to `boot`, §3.7) to drive the version timeline; the
+comments-only `ChromeStorageAdapter`/`InFileStateAdapter` don't have them and the
+timeline stays hidden. There is no per-comment "section" lookup — history operates on
+whole-document version snapshots, not extracted fragments.
+
+Implementations (all satisfy the `load`/`save` core; see §12 adapter tests):
 
 | Implementation        | File                                      | Backing store |
 |-----------------------|-------------------------------------------|---------------|
-| `ChromeStorageAdapter`| `src/adapters/chrome-storage-adapter.js`  | `chrome.storage.local`, keyed by `docId` |
+| `ChromeStorageAdapter`| `src/adapters/chrome-storage-adapter.js`  | `chrome.storage.local`, keyed by `docId` (comments-only) |
 | `InFileStateAdapter`  | `src/adapters/infile-state-adapter.js`    | the in-file `<script id="noteback-state">` JSON block |
+| `createHistoryStateAdapter` | `src/adapters/history-state-adapter.js` | a kv store (chrome- or localStorage-backed) + the history core, wrapping an inner adapter (§8) |
 
 ### 1.1 ChromeStorageAdapter
 
@@ -105,20 +115,26 @@ from per-document state, which is keyed `"noteback:" + docId`, §1.1). Shape:
 {
   "version": 1,
   "origins": { "file": true, "localhost": true, "127.0.0.1": true },
-  "disabledSites": []   // canonical origins, e.g. "http://localhost:3000"; "file://" for file pages
+  "disabledSites": [],  // canonical origins, e.g. "http://localhost:3000"; "file://" for file pages
+  "historySites": []    // canonical origins opted IN to snapshot history (§8); other origins are comments-only
 }
 ```
 
-A missing/partial object reads as **all-on, nothing disabled** (current behavior;
-zero migration). `src/content/origin-policy.js` is the single source of truth and
-is shared by the content script (gating) and the popup (rendering toggles):
+A missing/partial object reads as **all-on, nothing disabled, history opt-in empty**
+(current behavior; zero migration). `src/content/origin-policy.js` is the single
+source of truth and is shared by the content script (gating) and the popup
+(rendering toggles):
 
 - `classifyOrigin(loc) -> 'file' | 'localhost' | '127.0.0.1' | 'other'`
 - `originOf(loc) -> canonical origin` (`"file://"` for file pages)
-- `normalizeSettings(s) -> { origins, disabledSites }` (defaults filled)
+- `normalizeSettings(s) -> { origins, disabledSites, historySites }` (defaults filled)
 - `isActive({type, origin}, settings)` — **active** iff `origins[type] !== false`
   **and** `origin ∉ disabledSites`. Per-type is the master gate; per-site only
   subtracts a single origin. `'other'` is never active.
+- `historyAllowed({type, origin}, settings)` — gates the **snapshot-history engine**
+  (§8). Default-**on** for `file`/`localhost`/`127.0.0.1`; for any other origin it is
+  opt-in via `origin ∈ historySites`. When false the content script keeps the
+  comments-only `ChromeStorageAdapter` (no version timeline). Decided at first mount.
 
 **Active** → the content script mounts the overlay. **Dormant** → injected but
 mounts nothing (no chip, launcher, or listeners); stored comments are untouched.
@@ -150,8 +166,8 @@ and `isActive` is `false` (§1.3). The popup offers a manual escape hatch:
 Activation is **ephemeral**: a reload drops the injected runtime and the user
 re-clicks. Annotation **data** persists per-URL in `chrome.storage.local`
 (keyed `"noteback:" + docId`, §1.1), so highlights re-render on the next
-activation. The injected list is the extension runtime only; canvas-only files
-(`draft-history-core`, `snapshot`, `localstorage-state-adapter`) are excluded.
+activation. The injected list is **exactly** `content_scripts[0].js` from the
+manifest (the same files the browser would auto-inject), so it never drifts.
 
 ---
 
@@ -186,7 +202,11 @@ by `markdown.js`.
 Field rules:
 - `schemaVersion` — integer, currently `1`.
 - `docId` — string; the document identity key. Re-opening the same file restores
-  its comments.
+  its comments. In **comments-only** modes this is the file path / URL
+  (`location.href`). The **snapshot-history** engine (§8) uses a separate, explicit
+  doc-id — the value baked into `#noteback-doc-root[data-noteback-doc-id]` (§5), or a
+  per-URL minted id for extension pages Noteback didn't author. Its version records
+  (`nb:doc:` / `nb:ver:`) live in §8, not in this State block.
 - `docTitle` — string; human label (usually the file name).
 - `comments` — array, possibly empty, order = creation order.
 - `comment.id` — string, format `"c_" + <stable unique id>`.
@@ -456,16 +476,17 @@ Node tests require the file directly:
 | `src/runtime/highlight.js`                | `highlight`             | no                     | DOM         |
 | `src/runtime/overlay.js`                  | `overlay`               | no                     | DOM         |
 | `src/runtime/draft-history-core.js`       | `draftHistory`          | yes                    | pure-ish    |
-| `src/runtime/snapshot.js`                 | `snapshot`              | yes                    | mixed       |
+| `src/runtime/snapshot-capture.js`         | `snapshotCapture`       | yes                    | pure-ish    |
 | `src/runtime/boot.js`                     | `boot`                  | no                     | DOM         |
 | `src/adapters/chrome-storage-adapter.js`  | `chromeStorageAdapter`  | no                     | DOM (chrome)|
+| `src/adapters/chrome-kv-store.js`         | `chromeKvStore`         | yes (tests)            | DOM (chrome)|
 | `src/adapters/infile-state-adapter.js`    | `infileStateAdapter`    | no                     | DOM         |
-| `src/adapters/localstorage-state-adapter.js` | `localStorageStateAdapter` | yes (tests)        | DOM         |
+| `src/adapters/history-state-adapter.js`   | `historyStateAdapter`   | yes (tests)            | mixed       |
 | `src/canvas/exporter.js`                  | `exporter`              | yes (pure parts)       | mixed       |
 
-**Runtime dependency order** (the order the service worker concatenates for
-inlining, the order in `web_accessible_resources`, and the order in
-`bin/noteback.js` / `examples/build-canvas.js`):
+**Runtime dependency order** — the order the service worker concatenates for
+inlining and the order in `bin/noteback.js`'s `RUNTIME_FILES` (the `wrap` CLI) /
+`examples/build-canvas.js`:
 
 ```
 src/runtime/anchor.js
@@ -474,24 +495,25 @@ src/runtime/markdown.js
 src/runtime/highlight.js
 src/runtime/overlay.js
 src/runtime/draft-history-core.js
-src/runtime/snapshot.js
+src/runtime/snapshot-capture.js
 src/adapters/infile-state-adapter.js
-src/adapters/localstorage-state-adapter.js
+src/adapters/history-state-adapter.js
 src/canvas/exporter.js
 src/runtime/boot.js
 ```
 
-(`chrome-storage-adapter.js` and `content-script.js` are loaded **only** in extension
-mode, appended after the shared runtime; they are NOT inlined into the canvas, which
-uses `InFileStateAdapter` instead.)
+The **canvas inline** runtime (above) uses `InFileStateAdapter` as the inner adapter
+and a **localStorage-backed** kv store built inline in the embedded boot (§8); it does
+NOT inline `chrome-kv-store.js`, `chrome-storage-adapter.js`, or `content-script.js`.
 
-The draft-history modules — `draft-history-core.js`, `snapshot.js`, and the
-canvas-only `localstorage-state-adapter.js` — are inlined into the canvas and listed
-in `web_accessible_resources`, but are **not** yet loaded by the extension
-`content_scripts[].js`: Plan 1 leaves the live extension unchanged. The extension
-binding (which adds `draft-history-core.js` + `snapshot.js` to `content_scripts`)
-lands in a later plan; `localstorage-state-adapter.js` stays canvas-only, mirroring
-how `chrome-storage-adapter.js` is extension-only.
+The **extension** loads the full snapshot-history engine: `manifest.json`
+`content_scripts[0].js` lists the same shared runtime **plus** `chrome-kv-store.js`
+(extension kv backend), `chrome-storage-adapter.js` (the comments-only fallback),
+`origin-policy.js`, and `content-script.js` (extension boot). The extension content
+script gates the history adapter behind `historyAllowed` (§1.3); otherwise it falls
+back to the comments-only `ChromeStorageAdapter`. The `content_scripts[0].js` order is
+the single source of truth for click-to-activate injection (§1.4) and is also
+mirrored in `web_accessible_resources` (so the modules can be `fetch`ed for inlining).
 
 ---
 
@@ -512,6 +534,14 @@ exporter both depend on them.
 - Content is `JSON.stringify(state)` (whitespace-insensitive; parsers must tolerate
   both pretty and minified JSON).
 - There is **exactly one** such element per canvas.
+
+**Baked doc-id.** The canvas body wraps the document in
+`<div id="noteback-doc-root" data-noteback-doc-id="…">` (`canvas-template.html`,
+filled by the exporter's `{{DOC_ID}}` token). That attribute is the stable identity
+the snapshot-history engine (§8) keys on — it persists across re-exports, so a
+re-shared/re-wrapped canvas keeps the same version history. `wrap`
+(`bin/noteback.js`) mints one when absent and preserves it on re-export
+(`mintDocId` / `readBakedDocId`); see §8 for the precedence.
 
 ---
 
@@ -544,3 +574,116 @@ exact string is the contract (the exporter writes it; tests may assert it):
 
 The produced file must, with **no extension installed**, render the doc, paint the
 highlights, show the sidebar, and allow add/edit/delete + re-serialize.
+
+---
+
+## 8. Snapshot history
+
+**One** storage-agnostic history engine runs identically in both modes (embedded
+canvas over `localStorage`, extension over `chrome.storage.local`). It keeps a
+per-document timeline of **versions** and snapshots the **whole clean document once**,
+at a version's first comment, so the user can peek/open/copy-feedback on a past draft.
+
+### 8.1 Identity — the doc-id
+
+Identity is an **explicit doc-id**, not derived at runtime:
+
+- **Canvas:** baked into `#noteback-doc-root[data-noteback-doc-id]` (§5).
+- **`wrap` CLI** (`bin/noteback.js`): precedence is explicit `--id <id>` → the id
+  already baked in the `-o` target → the id baked in the input HTML → otherwise
+  **mint** a fresh one. Helpers: `mintDocId`, `readBakedDocId`. Re-export preserves the
+  existing id, so a re-wrapped canvas keeps its history.
+- **Extension on a page it didn't author** (no baked id): a per-URL minted id stored
+  under `nb:url:<normalizedHref>` (fragment stripped) in `chrome.storage.local`. A
+  baked id always wins. This is distinct from the comments-only `docId`
+  (`location.href`) that still keys `ChromeStorageAdapter` / the export identity.
+
+### 8.2 The engine — `draft-history-core.js`
+
+`createDraftHistory({store, now, codec, limits})` → `{resolve, persist, history,
+version, clearCurrent}`. It is **pure** — no DOM, no `localStorage`, no `chrome.*` —
+talking only to an injected **async kv store** (`get/set/remove/keys`) and a `codec`
+(`compress`/`decompress`, gzip with an identity fallback). Per doc-id it owns an
+ordered list of versions; each version is keyed by a **content hash** over the
+normalized visible text (`cyrb53`-based), or **`'h0:' + docId`** when the text is too
+short to hash (`< MIN_HASH_CHARS`, 32). `resolve` initialises/looks up the current
+version and returns `{degraded, docId, versionKey, contentHash, comments, hasSnapshot}`;
+`persist` writes the comments and captures the snapshot **once** (only if none stored
+yet); `history` returns past versions (newest-first, non-empty only); `version`
+decompresses one version's snapshot; `clearCurrent` wipes a version's comments +
+snapshot. Retention runs on every `resolve`/`persist`: a snapshot window (~5), a
+metadata window (~15), a 90-day TTL, and a coarse ~3 MB global byte cap (internal
+`prune` / `enforceByteCap`; the doc's newest version and the active version are always
+protected).
+
+### 8.3 kv namespaces / record shapes
+
+- `nb:doc:<docId>` → `{ schemaVersion:1, docId, docTitle, versions:[versionKey,…] }`
+  (oldest→newest).
+- `nb:ver:<versionKey>` → `{ schemaVersion:1, versionKey, docId, contentHash,
+  comments:[], snapshotHtml:<gzip str|''>, createdAt, lastEditedAt, docTitle }`.
+  `versionKey = contentHash || ('h0:' + docId)`.
+- `nb:url:<normalizedHref>` → minted per-URL doc-id (**extension only**, §8.1).
+
+This is a **clean break** from the old key namespaces — old data is simply ignored.
+The embedded canvas still loads its *current* comments from the in-file `#noteback-state`
+block (§5); history is the extra layer on top.
+
+### 8.4 Two kv backends, one engine
+
+- **Extension:** `src/adapters/chrome-kv-store.js` — `createChromeKvStore(chromeApi?)`
+  → async `{get,set,remove,keys}` over `chrome.storage.local` (supports both the
+  callback and promise MV3 forms). It **throws eagerly** if `chrome.storage.local` is
+  unavailable, so callers wrap construction in `try/catch` and degrade.
+- **Embedded canvas:** an equivalent `localStorage`-backed kv store built **inline** in
+  the exporter's `EMBEDDED_BOOT` (`lsStore`). Its `try/catch` is load-bearing —
+  `window.localStorage` can *throw* on `file://`; on failure `lsStore` is `null` and
+  the adapter degrades to the in-file `InFileStateAdapter`.
+
+### 8.5 The adapter — `history-state-adapter.js`
+
+`createHistoryStateAdapter({doc, store, inner, docId, contentText, captureSnapshot, …})`
+is the **mode-agnostic** StorageAdapter (it replaced the old localStorage adapter).
+It wraps an **inner** adapter (embedded: `InFileStateAdapter`; extension: `null`) + the
+kv `store` + the core. `load`/`save` flow comments through both `inner` and the core;
+on the **first** comment it captures the snapshot via `captureSnapshot()` and stores it
+gzipped. It also exposes `getHistory`/`getVersion`/`clearCurrent` (§1) and `makeCodec`
+(gzip via `CompressionStream`/`Response`, identity fallback). `hasSnapshot` is seeded
+from the version's **real stored snapshot state**, never the comment count. If the store
+or core is unusable (or doc-id is empty) it **degrades**: comments still flow through
+`inner`; the history methods return `[]`/`null`/no-op.
+
+### 8.6 Snapshot capture — `snapshot-capture.js`
+
+`captureCleanDoc(doc)` clones `documentElement`, removes `[data-noteback-ui]`, **unwraps**
+every `<mark class="noteback-highlight">`, removes `#noteback-state` and the inline
+runtime `<script>`, and returns the clean full-document HTML. Because marks are
+stripped, the snapshot is **paint-independent** — it does not matter whether highlights
+are painted when `save` runs. `stripNotebackFromHtml(html)` is the string-only Node-test
+equivalent (no DOM); `identityCodec` is the no-op gzip fallback.
+
+### 8.7 Overlay — version timeline + peek + checkout
+
+The overlay renders a **version timeline** (`renderVersions`) instead of the old
+history popup. Collapse rule: **0** earlier versions → hidden; **1** → inline; **2+** →
+newest inline + a "+N older versions" disclosure. Each row has **open** and **copy
+feedback** actions and a whole-row **peek**:
+
+- **Peek** (`openVersionPeek`) parses the stored snapshot and re-renders it by running
+  the **live** highlight painter (`highlightApi.paintHighlights`) over the parsed doc —
+  no cross-node re-highlighter — inside an `<iframe srcdoc>`, with a fixed
+  **"← Back to current"** banner (exact wording).
+- **Checkout** (`openVersionTab` → `buildVersionCanvasHtml`) opens a version as a real,
+  annotatable canvas: it clones the live page shell (keeping the inlined runtime +
+  styles), strips Noteback UI/marks, swaps in the snapshot's `#noteback-doc-root`
+  content, and **re-seeds** `#noteback-state` with the version's comments — escaping
+  `</script>` via the same `.replace(/<\/(script)/gi, '<\\/$1')` the exporter uses, so a
+  comment body containing `</script>` can't break out of the JSON block.
+
+### 8.8 Per-site opt-in
+
+The extension content script gates the engine on `historyAllowed(info, settings)`
+(§1.3): default-on for `file`/`localhost`/`127.0.0.1`, opt-in via `historySites` for
+other origins. When not allowed it keeps the comments-only `ChromeStorageAdapter`. The
+embedded canvas has no settings and always runs history (subject to `lsStore`
+availability, §8.4).
