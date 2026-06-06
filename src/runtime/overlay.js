@@ -255,6 +255,12 @@
     '.nb-menu-item:hover .nb-mi-label,.nb-menu-item:focus-visible .nb-mi-label{color:var(--nb-accent-deep);}',
     '.nb-mi-sub{display:block;font:400 11.5px/1.3 var(--nb-ui);color:var(--nb-ink-soft);margin-top:2px;}',
     '.nb-menu-sep{height:1px;background:var(--nb-line);margin:4px 9px;}',
+    /* copy split-button — main keeps its action; the caret opens this menu */
+    '.nb-copy-wrap{position:relative;display:flex;}',
+    '.nb-copy-wrap .nb-copy{flex:1;border-top-right-radius:0;border-bottom-right-radius:0;}',
+    '.nb-copy-caret-btn{flex:none;padding:0 10px;border-left:none;border-top-left-radius:0;border-bottom-left-radius:0;}',
+    '.nb-copy-caret-btn .nb-caret{font-size:10px;line-height:1;opacity:.85;transition:transform .18s var(--dropdown-ease);}',
+    '.nb-copy-wrap.nb-menu-open .nb-copy-caret-btn .nb-caret{transform:rotate(180deg);}',
 
     /* earlier-feedback history + snapshot popup */
     '.nb-history{margin-top:10px;border-top:1px solid var(--nb-line);padding-top:8px;}',
@@ -484,7 +490,19 @@
       '</div>' +
       '<div class="nb-list"></div>' +
       '<div class="nb-foot">' +
-      '  <button type="button" class="nb-btn nb-secondary nb-copy">Copy feedback</button>' +
+      '  <div class="nb-copy-wrap">' +
+      '    <button type="button" class="nb-btn nb-secondary nb-copy">Copy feedback</button>' +
+      '    <button type="button" class="nb-btn nb-secondary nb-copy-caret-btn" aria-haspopup="menu" aria-expanded="false" aria-label="More copy options"><span class="nb-caret" aria-hidden="true">▾</span></button>' +
+      '    <div class="nb-copy-menu nb-menu" role="menu" aria-label="Copy options">' +
+      '      <button type="button" class="nb-menu-item nb-copy-canvas" role="menuitem">' +
+      '        <span class="nb-mi-label">Copy html (with feedback)</span>' +
+      '        <span class="nb-mi-sub">re-openable canvas</span></button>' +
+      '      <div class="nb-menu-sep" role="none"></div>' +
+      '      <button type="button" class="nb-menu-item nb-copy-clean" role="menuitem">' +
+      '        <span class="nb-mi-label">Copy html (clean)</span>' +
+      '        <span class="nb-mi-sub">the original, no Noteback</span></button>' +
+      '    </div>' +
+      '  </div>' +
       '  <div class="nb-save-wrap">' +
       '    <button type="button" class="nb-btn nb-save-btn" aria-haspopup="menu" aria-expanded="false">Save<span class="nb-caret" aria-hidden="true">▾</span></button>' +
       '    <div class="nb-menu" role="menu" aria-label="Save options">' +
@@ -526,8 +544,14 @@
     const saveWrap = sidebar.querySelector('.nb-save-wrap');
     const saveBtn = sidebar.querySelector('.nb-save-btn');
     const saveMenu = sidebar.querySelector('.nb-menu');
+    const copyWrap = sidebar.querySelector('.nb-copy-wrap');
+    const copyCaretBtn = sidebar.querySelector('.nb-copy-caret-btn');
+    const copyMenu = sidebar.querySelector('.nb-copy-menu');
     sidebar.querySelector('.nb-x').addEventListener('click', closeSidebar);
     sidebar.querySelector('.nb-copy').addEventListener('click', copyMarkdown);
+    copyCaretBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleCopyMenu(); });
+    sidebar.querySelector('.nb-copy-canvas').addEventListener('click', function () { closeCopyMenu(); copyHtmlCanvas(); });
+    sidebar.querySelector('.nb-copy-clean').addEventListener('click', function () { closeCopyMenu(); copyHtmlClean(); });
     saveBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleSaveMenu(); });
     sidebar.querySelector('.nb-save-comments').addEventListener('click', function () { closeSaveMenu(); saveCanvas(); });
     sidebar.querySelector('.nb-save-clean').addEventListener('click', function () { closeSaveMenu(); saveClean(); });
@@ -1493,6 +1517,29 @@
       else toast('Copy failed — select & copy manually');
     }
 
+    function copyHtmlCanvas() { return copyHtml(false); }
+    function copyHtmlClean() { return copyHtml(true); }
+
+    // "Copy html" — the same artifacts as the Save menu, to the clipboard.
+    // The hook returns the HTML string; we do the clipboard write here so both
+    // runtime modes share one path (incl. the file:// execCommand fallback).
+    async function copyHtml(clean) {
+      const s = getState();
+      if (exporter && typeof exporter.onCopyHtml === 'function') {
+        try {
+          const html = await exporter.onCopyHtml(s, { clean: clean });
+          const ok = await copyToClipboard(html);
+          if (ok) toast(clean ? 'Copied clean HTML' : 'Copied HTML with feedback', { success: true });
+          else toast('Copy failed — select & copy manually');
+        } catch (e) {
+          toast('Copy failed');
+        }
+        return;
+      }
+      toast(clean ? 'Clean HTML copy needs the extension or saved canvas.'
+                  : 'HTML copy needs the extension or saved canvas.');
+    }
+
     async function saveCanvas() {
       const s = getState();
       if (exporter && typeof exporter.onSaveCanvas === 'function') {
@@ -1634,6 +1681,7 @@
     }
     function closeSidebar() {
       closeSaveMenu();
+      closeCopyMenu();
       sidebar.classList.remove('nb-open');
       launcher.classList.remove('nb-hidden');
     }
@@ -1651,6 +1699,7 @@
 
     function openSaveMenu() {
       if (saveMenuOpen) return;
+      closeCopyMenu();           // the two footer menus are mutually exclusive
       saveMenuOpen = true;
       if (saveMenuCloseTimer) {
         (win && win.clearTimeout ? win.clearTimeout : clearTimeout)(saveMenuCloseTimer);
@@ -1679,6 +1728,42 @@
     function toggleSaveMenu() {
       if (saveMenuOpen) closeSaveMenu();
       else openSaveMenu();
+    }
+
+    let copyMenuOpen = false;
+    let copyMenuCloseTimer = null;
+
+    function openCopyMenu() {
+      if (copyMenuOpen) return;
+      closeSaveMenu();           // the two footer menus are mutually exclusive
+      copyMenuOpen = true;
+      if (copyMenuCloseTimer) {
+        (win && win.clearTimeout ? win.clearTimeout : clearTimeout)(copyMenuCloseTimer);
+        copyMenuCloseTimer = null;
+      }
+      copyMenu.classList.remove('is-closing');
+      copyWrap.classList.add('nb-menu-open');
+      copyCaretBtn.setAttribute('aria-expanded', 'true');
+      void copyMenu.offsetWidth; // reflow so the closed scale applies before growing
+      copyMenu.classList.add('is-open');
+    }
+
+    function closeCopyMenu() {
+      if (!copyMenuOpen) return;
+      copyMenuOpen = false;
+      copyWrap.classList.remove('nb-menu-open');
+      copyCaretBtn.setAttribute('aria-expanded', 'false');
+      copyMenu.classList.remove('is-open');
+      copyMenu.classList.add('is-closing');
+      const settle = function () { copyMenu.classList.remove('is-closing'); copyMenuCloseTimer = null; };
+      const ms = reduceMotion() ? 0 : POPOVER_CLOSE_MS;
+      if (ms && win && win.setTimeout) copyMenuCloseTimer = win.setTimeout(settle, ms);
+      else settle();
+    }
+
+    function toggleCopyMenu() {
+      if (copyMenuOpen) closeCopyMenu();
+      else openCopyMenu();
     }
 
     /* ------------------------------------------------------------------- *
@@ -1773,6 +1858,22 @@
         if (saveBtn && saveBtn.focus) saveBtn.focus();
       }
     };
+    // The copy menu closes on any click outside its wrapper; the caret stops
+    // propagation so its own toggle click never reaches here.
+    const onDocClickCopyMenu = function (e) {
+      if (!copyMenuOpen) return;
+      const path = (typeof e.composedPath === 'function') ? e.composedPath() : [];
+      if (path.indexOf(copyWrap) !== -1) return;
+      closeCopyMenu();
+    };
+    const onDocKeydownCopyMenu = function (e) {
+      if (e.key === 'Escape' && copyMenuOpen) {
+        closeCopyMenu();
+        if (copyCaretBtn && copyCaretBtn.focus) copyCaretBtn.focus();
+      }
+    };
+    doc.addEventListener('click', onDocClickCopyMenu);
+    doc.addEventListener('keydown', onDocKeydownCopyMenu);
     doc.addEventListener('click', onDocClickSaveMenu);
     doc.addEventListener('keydown', onDocKeydownSaveMenu);
 
@@ -1790,6 +1891,8 @@
       doc.removeEventListener('click', onDocClickOutside);
       doc.removeEventListener('click', onDocClickSaveMenu);
       doc.removeEventListener('keydown', onDocKeydownSaveMenu);
+      doc.removeEventListener('click', onDocClickCopyMenu);
+      doc.removeEventListener('keydown', onDocKeydownCopyMenu);
       doc.removeEventListener('keydown', onDocKeydownInfo);
       cancelFabTimer();
       closePopover();
