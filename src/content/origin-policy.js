@@ -8,8 +8,9 @@
  *
  *   classifyOrigin(loc)      -> 'file' | 'localhost' | '127.0.0.1' | 'other'
  *   originOf(loc)            -> canonical origin string ('file://' for file pages)
- *   normalizeSettings(s)     -> { origins:{file,localhost,'127.0.0.1'}, disabledSites:[] }
+ *   normalizeSettings(s)     -> { origins:{file,localhost,'127.0.0.1'}, disabledSites:[], historySites:[] }
  *   isActive({type,origin},s)-> boolean   (per-type master gate, per-site subtract)
+ *   historyAllowed({type,origin},s) -> boolean (default-on file/localhost/127.0.0.1; opt-in via historySites)
  */
 (function (root, factory) {
   const api = factory();
@@ -63,7 +64,7 @@
 
   function historyAllowed(info, settings) {
     info = info || {};
-    if (info.type === 'file' || info.type === 'localhost' || info.type === '127.0.0.1') return true;
+    if (TYPES.indexOf(info.type) !== -1) return true;
     const norm = normalizeSettings(settings);
     return !!(info.origin && norm.historySites.indexOf(info.origin) !== -1);
   }
