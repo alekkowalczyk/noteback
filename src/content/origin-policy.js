@@ -56,8 +56,16 @@
         localhost: o.localhost !== false,
         '127.0.0.1': o['127.0.0.1'] !== false
       },
-      disabledSites: Array.isArray(s.disabledSites) ? s.disabledSites.slice() : []
+      disabledSites: Array.isArray(s.disabledSites) ? s.disabledSites.slice() : [],
+      historySites: Array.isArray(s.historySites) ? s.historySites.slice() : []
     };
+  }
+
+  function historyAllowed(info, settings) {
+    info = info || {};
+    if (info.type === 'file' || info.type === 'localhost' || info.type === '127.0.0.1') return true;
+    const norm = normalizeSettings(settings);
+    return !!(info.origin && norm.historySites.indexOf(info.origin) !== -1);
   }
 
   function isActive(info, settings) {
@@ -75,6 +83,7 @@
     classifyOrigin: classifyOrigin,
     originOf: originOf,
     normalizeSettings: normalizeSettings,
-    isActive: isActive
+    isActive: isActive,
+    historyAllowed: historyAllowed
   };
 });

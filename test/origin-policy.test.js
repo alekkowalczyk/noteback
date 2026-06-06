@@ -63,3 +63,15 @@ test('normalizeSettings fills defaults and is shape-stable', () => {
   assert.deepStrictEqual(n.origins, { file: true, localhost: true, '127.0.0.1': true });
   assert.deepStrictEqual(n.disabledSites, []);
 });
+
+test('historyAllowed: on by default for file/localhost/127, off for other', () => {
+  assert.strictEqual(policy.historyAllowed({ type: 'file', origin: 'file://' }, null), true);
+  assert.strictEqual(policy.historyAllowed({ type: 'localhost', origin: 'http://localhost:3000' }, null), true);
+  assert.strictEqual(policy.historyAllowed({ type: 'other', origin: 'https://example.com' }, null), false);
+});
+
+test('historyAllowed: an other-origin opts in via historySites', () => {
+  const s = { historySites: ['https://example.com'] };
+  assert.strictEqual(policy.historyAllowed({ type: 'other', origin: 'https://example.com' }, s), true);
+  assert.strictEqual(policy.historyAllowed({ type: 'other', origin: 'https://evil.com' }, s), false);
+});
