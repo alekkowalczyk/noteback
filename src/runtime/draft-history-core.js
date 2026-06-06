@@ -1,8 +1,16 @@
 /**
  * Noteback runtime — draft-history-core.js  (PURE-ISH; dual-export)
  *
- * Storage-agnostic core for content-hash draft identity, lineage grouping, and
- * GC. Talks to an injected async key-value `store` + `codec`; never touches the
+ * Storage-agnostic, pure history engine keyed by an explicit doc-id. Each
+ * document owns an ordered list of versions; a version is keyed by content hash
+ * (`cyrb53`-based), or `h0:<docId>` when the content is too short to hash
+ * reliably. The whole clean document is snapshotted once (via `codec.compress`)
+ * at a version's first comment; subsequent `persist` calls update comments only.
+ * `resolve` initialises or looks up a version; `history` returns past versions
+ * newest-first; `version` decompresses a snapshot; `clearCurrent` wipes a
+ * version's comments and snapshot. Retention is enforced on every `resolve`/
+ * `persist`: snapshot window, metadata window, TTL, and a global byte cap.
+ * Talks to an injected async key-value `store` + `codec`; never touches the
  * DOM, localStorage, or chrome.*. Runs in the browser
  * (`NotebackRuntime.draftHistory`) and under Node tests (`module.exports`).
  */
