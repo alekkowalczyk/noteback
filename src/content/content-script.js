@@ -63,7 +63,8 @@
   }
 
   // History doc-id: a baked attribute (the page is itself a wrapped canvas) wins;
-  // else a per-URL minted id, persisted in chrome.storage under `nb:url:<href>`,
+  // else a per-URL minted id, persisted in chrome.storage under
+  // `nb:url:<normalizedHref>` (fragment stripped, so #hash routes share a bucket),
   // so the same page maps to a stable history bucket across reloads. Distinct
   // from `docId` (location.href) above, which keys the comments-only
   // ChromeStorageAdapter and the export identity — those are unchanged.
@@ -71,7 +72,9 @@
     const rootEl = document.getElementById('noteback-doc-root');
     const baked = rootEl && rootEl.getAttribute && rootEl.getAttribute('data-noteback-doc-id');
     if (baked) return Promise.resolve(baked);
-    const urlKey = 'nb:url:' + location.href;
+    // fragment-independent: same doc across #hash routes
+    const normHref = (location.href || '').split('#')[0];
+    const urlKey = 'nb:url:' + normHref;
     return new Promise(function (resolve) {
       try {
         chrome.storage.local.get(urlKey, function (items) {
@@ -218,7 +221,8 @@
         inner: null,
         docId: historyDocId,
         contentText: function () {
-          return (document.getElementById('noteback-doc-root') || document.body).textContent || '';
+          try { return (document.getElementById('noteback-doc-root') || document.body).textContent || ''; }
+          catch (e) { return ''; }
         },
         captureSnapshot: function () { return RT.snapshotCapture.captureCleanDoc(document); }
       });
@@ -268,6 +272,9 @@
   }
 
   function applySettings(settings) {
+    // The history-vs-comments gate is decided at FIRST mount (mount() early-returns
+    // when already active); only the activate/deactivate transition is live, so a
+    // per-site history opt-in change takes effect on reload, not immediately.
     if (shouldActivate(settings)) mount(settings);
     else unmount();
   }
