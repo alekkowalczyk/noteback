@@ -179,16 +179,23 @@ test('planInstall picks the .agents hub + .claude symlink (or a plain --dir copy
 
 test('wrapHtml inlines the draft-history runtime modules', () => {
   const html = cli.wrapHtml(DOC, { sourceName: 'plan.html' });
+  // The unified history engine: pure core + clean-doc snapshot + history adapter.
   assert.match(html, /NotebackRuntime\.draftHistory/);
-  assert.match(html, /NotebackRuntime\.snapshot/);
-  assert.match(html, /NotebackRuntime\.localStorageStateAdapter/);
+  assert.match(html, /NotebackRuntime\.snapshotCapture/);
+  assert.match(html, /NotebackRuntime\.historyStateAdapter/);
+  // The superseded modules must NOT be inlined any more (Task 8). `\b` after
+  // "snapshot" excludes the new ".snapshotCapture" marker.
+  assert.doesNotMatch(html, /NotebackRuntime\.snapshot\b/);
+  assert.doesNotMatch(html, /localStorageStateAdapter/);
 });
 
 test('canvas guards localStorage access so a throwing/blocked store cannot break boot', () => {
   const html = cli.wrapHtml(DOC, { sourceName: 'plan.html' });
-  // The boot script must capture localStorage inside a try/catch (not access window.localStorage raw in the adapter guard).
-  assert.match(html, /nbLocalStorage/);
-  assert.match(html, /try\s*\{\s*return\s*\(typeof window/);
+  // The boot builds the kv store inside a try/catch that captures window.localStorage
+  // (file:// can THROW, not just be absent) and falls back to null → the in-file
+  // adapter. Never access window.localStorage raw in the adapter guard.
+  assert.match(html, /var lsStore = \(function \(\) \{ try \{ var ls = window\.localStorage;/);
+  assert.match(html, /RT\.historyStateAdapter && lsStore && docId/);
 });
 
 test('wrapHtml mints a doc-id when none is given', () => {
