@@ -163,15 +163,24 @@
     else unmount();
   }
 
-  // Initial decision from stored settings.
-  readSettings().then(applySettings);
+  // Click-to-activate (unsupported origins). When the popup injects us on an
+  // 'other' origin via activeTab, it first sets window.__notebackForceActivate.
+  // The user's click IS the opt-in, so we mount unconditionally and do NOT
+  // consult nb:settings (the per-type/per-site predicate governs only
+  // file/localhost/127). Such pages also ignore live settings changes.
+  if (window.__notebackForceActivate) {
+    mount();
+  } else {
+    // Initial decision from stored settings.
+    readSettings().then(applySettings);
 
-  // React live to popup-driven changes (no page reload needed).
-  if (chrome.storage && chrome.storage.onChanged) {
-    chrome.storage.onChanged.addListener(function (changes, area) {
-      if (area !== 'local' || !changes[SETTINGS_KEY]) return;
-      applySettings(changes[SETTINGS_KEY].newValue || null);
-    });
+    // React live to popup-driven changes (no page reload needed).
+    if (chrome.storage && chrome.storage.onChanged) {
+      chrome.storage.onChanged.addListener(function (changes, area) {
+        if (area !== 'local' || !changes[SETTINGS_KEY]) return;
+        applySettings(changes[SETTINGS_KEY].newValue || null);
+      });
+    }
   }
 
   function readSettings() {
