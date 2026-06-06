@@ -13,6 +13,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
   const btnToggle = byId('nb-toggle-sidebar');
   const btnCopy = byId('nb-copy-markdown');
+  const copyCaret = byId('nb-copy-caret');
+  const copyMenu = byId('nb-copy-menu');
   const saveBtn = byId('nb-save-btn');
   const saveMenu = byId('nb-save-menu');
   const onboardingEl = byId('nb-onboarding');
@@ -102,13 +104,37 @@ document.addEventListener('DOMContentLoaded', function () {
       closeSaveMenu();
       doSave(item.getAttribute('data-save'));
     });
-    document.addEventListener('click', function () { closeSaveMenu(); });
+
+    copyCaret.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (copyMenu.hasAttribute('hidden')) openCopyMenu(); else closeCopyMenu();
+    });
+    copyMenu.addEventListener('click', function (e) {
+      const item = e.target.closest('[data-copy]');
+      if (!item) return;
+      closeCopyMenu();
+      doCopyHtml(item.getAttribute('data-copy'));
+    });
+    document.addEventListener('click', function () { closeSaveMenu(); closeCopyMenu(); });
   }
 
   /* --- save dropdown ----------------------------------------------------- */
 
-  function openSaveMenu() { saveMenu.removeAttribute('hidden'); saveBtn.setAttribute('aria-expanded', 'true'); }
+  function openSaveMenu() { closeCopyMenu(); saveMenu.removeAttribute('hidden'); saveBtn.setAttribute('aria-expanded', 'true'); }
   function closeSaveMenu() { saveMenu.setAttribute('hidden', ''); saveBtn.setAttribute('aria-expanded', 'false'); }
+
+  function openCopyMenu() { closeSaveMenu(); copyMenu.removeAttribute('hidden'); copyCaret.setAttribute('aria-expanded', 'true'); }
+  function closeCopyMenu() { copyMenu.setAttribute('hidden', ''); copyCaret.setAttribute('aria-expanded', 'false'); }
+
+  function doCopyHtml(kind) {
+    if (!activeTab || activeTab.id == null) { setStatus('No active document.'); return; }
+    const clean = (kind === 'clean');
+    setStatus(clean ? 'Copying clean HTML…' : 'Copying HTML with feedback…');
+    sendToTab(activeTab.id, { type: 'NOTEBACK_COPY_HTML', clean: clean }).then(
+      function (resp) { setStatus(resp && resp.ok ? (clean ? 'Copied clean HTML.' : 'Copied HTML with feedback.') : 'Copy failed.'); },
+      function () { setStatus('Could not reach the page. Reload and try again.'); }
+    );
+  }
 
   function doSave(kind) {
     const map = {
@@ -186,8 +212,8 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function disableActions(disabled) {
-    [btnToggle, btnCopy, saveBtn].forEach(function (b) { if (b) b.disabled = !!disabled; });
-    if (disabled) closeSaveMenu();
+    [btnToggle, btnCopy, copyCaret, saveBtn].forEach(function (b) { if (b) b.disabled = !!disabled; });
+    if (disabled) { closeSaveMenu(); closeCopyMenu(); }
   }
 
   /* --- onboarding card --------------------------------------------------- */
