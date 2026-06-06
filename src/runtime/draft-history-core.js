@@ -46,279 +46,154 @@
     return cyrb53(norm, 0).toString(36) + '-' + cyrb53(norm, 0x9e3779b9).toString(36);
   }
 
-  const GEN = 'nb:gen:';
-  const LIN = 'nb:lin:';
-  const ATTACH = 'nb:attach';
+  const DOC = 'nb:doc:';
+  const VER = 'nb:ver:';
 
   function defaultLimits(l) {
     l = l || {};
-    return {
-      snapshotDrafts: l.snapshotDrafts || 5,
-      metaDrafts: l.metaDrafts || 15,
-      ttlDays: l.ttlDays || 90,
-      maxBytes: l.maxBytes || 3000000
-    };
+    return { snapshotDrafts: l.snapshotDrafts || 5, metaDrafts: l.metaDrafts || 15, ttlDays: l.ttlDays || 90, maxBytes: l.maxBytes || 3000000 };
   }
 
   /**
    * @param {Object} cfg
    * @param {Object} cfg.store    async kv: get/set/remove/keys
    * @param {() => string} cfg.now  ISO timestamp
-   * @param {() => string} cfg.mintId  unique lineage id
    * @param {Object} cfg.codec    { compress(str)->Promise<str>, decompress(str)->Promise<str> }
    * @param {Object} [cfg.limits]
    */
   function createDraftHistory(cfg) {
     const store = cfg.store;
-    const now = cfg.now || (function () { return new Date().toISOString(); });
-    const mintId = cfg.mintId || (function () {
-      return 'lin_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    });
-    const codec = cfg.codec || { compress: function (s) { return Promise.resolve(s); }, decompress: function (s) { return Promise.resolve(s); } };
-    const limits = defaultLimits(cfg.limits); // used by pruneLineage (Task 3)
+    const now = cfg.now || (() => new Date().toISOString());
+    const codec = cfg.codec || { compress: (s) => Promise.resolve(s), decompress: (s) => Promise.resolve(s) };
+    const limits = defaultLimits(cfg.limits);
 
-    function genKey(h) { return GEN + h; }
-    function linKey(id) { return LIN + id; }
+    const docKey = (id) => DOC + id;
+    const verKey = (k) => VER + k;
 
-    function loadAttach() { return store.get(ATTACH).then(function (m) { return m || {}; }); }
+    function ensureDoc(docId, versionKey, docTitle) {
+      return store.get(docKey(docId)).then((d) => {
+        d = { schemaVersion: 1, docId: docId, docTitle: (d && d.docTitle) || String(docTitle || ''), versions: (d && d.versions ? d.versions.slice() : []) };
+        if (d.versions.indexOf(versionKey) === -1) d.versions.push(versionKey);
+        return store.set(docKey(docId), d);
+      });
+    }
 
-    /**
-     * Boot entry: resolve the current draft, seed/attach lineage, return comments.
-     * @returns {Promise<{degraded:boolean, contentHash:?string, lineageId:?string, comments:Array}>}
-     */
     function resolve(opts) {
+      const docId = String(opts.docId == null ? '' : opts.docId);
+      if (!docId) return Promise.resolve({ degraded: true, docId: null, versionKey: null, contentHash: null, comments: opts.fallbackComments || [] });
       const hash = contentHash(opts.contentText);
-      if (hash == null) {
-        return Promise.resolve({ degraded: true, contentHash: null, lineageId: null, comments: opts.fallbackComments || [] });
-      }
-      const attachKey = String(opts.attachKey || '');
-      let gen, lineageId;
-      return store.get(genKey(hash)).then(function (existing) {
-        gen = existing;
-        if (gen) {
-          lineageId = gen.lineageId;
-          return ensureLineage(lineageId, hash, attachKey);
+      const versionKey = hash || ('h0:' + docId);
+      return store.get(verKey(versionKey)).then((ver) => {
+        if (ver) {
+          return ensureDoc(docId, versionKey, opts.docTitle).then(() => prune(docId, versionKey))
+            .then(() => ({ degraded: false, docId: docId, versionKey: versionKey, contentHash: hash, comments: (ver.comments || []).slice() }));
         }
-        // New draft: attach to an existing lineage by attach key, else mint one.
-        return loadAttach().then(function (map) {
-          lineageId = map[attachKey];
-          if (!lineageId) lineageId = mintId();
-          gen = {
-            schemaVersion: 1, contentHash: hash, lineageId: lineageId,
-            docTitle: String(opts.docTitle || ''),
-            firstSeenAt: now(), lastEditedAt: now(),
-            comments: (opts.fallbackComments || []).slice(), sections: [], styles: ''
-          };
-          return store.set(genKey(hash), gen).then(function () {
-            return ensureLineage(lineageId, hash, attachKey);
-          });
-        });
-      }).then(function () {
-        return pruneLineage(lineageId, hash).then(function () {
-          return { degraded: false, contentHash: hash, lineageId: lineageId, comments: (gen.comments || []).slice() };
-        });
+        ver = { schemaVersion: 1, versionKey: versionKey, docId: docId, contentHash: hash,
+          comments: (opts.fallbackComments || []).slice(), snapshotHtml: '', createdAt: now(), lastEditedAt: now(), docTitle: String(opts.docTitle || '') };
+        return store.set(verKey(versionKey), ver).then(() => ensureDoc(docId, versionKey, opts.docTitle)).then(() => prune(docId, versionKey))
+          .then(() => ({ degraded: false, docId: docId, versionKey: versionKey, contentHash: hash, comments: (opts.fallbackComments || []).slice() }));
       });
     }
 
-    /** Ensure the lineage record exists and records this hash + attach key. */
-    function ensureLineage(lineageId, hash, attachKey) {
-      return store.get(linKey(lineageId)).then(function (lin) {
-        lin = lin || { schemaVersion: 1, lineageId: lineageId, attachKeys: [], generations: [] };
-        lin = { schemaVersion: lin.schemaVersion || 1, lineageId: lin.lineageId || lineageId, attachKeys: (lin.attachKeys || []).slice(), generations: (lin.generations || []).slice() };
-        if (lin.generations.indexOf(hash) === -1) lin.generations.push(hash);
-        if (attachKey && lin.attachKeys.indexOf(attachKey) === -1) lin.attachKeys.push(attachKey);
-        return store.set(linKey(lineageId), lin);
-      }).then(function () {
-        if (!attachKey) return;
-        return loadAttach().then(function (map) {
-          if (map[attachKey] === lineageId) return;
-          map[attachKey] = lineageId;
-          return store.set(ATTACH, map);
-        });
-      });
-    }
-
-    /**
-     * Write the current draft's comments + snapshot.
-     * Callers pass ALREADY-compressed sections/styles; compression is the adapter's
-     * job. section() decompresses on read.
-     */
     function persist(p) {
-      return store.get(genKey(p.contentHash)).then(function (gen) {
-        if (!gen) return; // resolve() must run first
-        gen = Object.assign({}, gen);
-        gen.comments = (p.comments || []).slice();
-        gen.sections = p.sections || gen.sections || [];
-        gen.styles = (p.styles != null) ? p.styles : (gen.styles || '');
-        gen.sectionByCommentId = p.sectionByCommentId || gen.sectionByCommentId || {};
-        gen.lastEditedAt = now();
-        return store.set(genKey(p.contentHash), gen).then(function () {
-          return pruneLineage(gen.lineageId, p.contentHash);
-        });
+      return store.get(verKey(p.versionKey)).then((ver) => {
+        if (!ver) return; // resolve() must run first
+        ver = Object.assign({}, ver);
+        ver.comments = (p.comments || []).slice();
+        if (p.snapshotHtml != null && p.snapshotHtml !== '' && !ver.snapshotHtml) ver.snapshotHtml = p.snapshotHtml; // capture once
+        ver.lastEditedAt = now();
+        return store.set(verKey(p.versionKey), ver).then(() => prune(ver.docId || p.docId, p.versionKey));
       });
     }
 
-    /** Other drafts in the lineage with >=1 comment, newest first. */
     function history(q) {
-      return store.get(linKey(q.lineageId)).then(function (lin) {
-        if (!lin) return [];
-        const hashes = lin.generations.slice().reverse(); // generations are stored oldest->newest; reverse to walk newest-first
+      return store.get(docKey(q.docId)).then((doc) => {
+        if (!doc) return [];
+        const keys = doc.versions.slice().reverse(); // newest first
         const out = [];
-        return hashes.reduce(function (chain, h) {
-          return chain.then(function () {
-            if (h === q.exceptHash) return;
-            return store.get(genKey(h)).then(function (gen) {
-              if (gen && gen.comments && gen.comments.length > 0) {
-                const map = gen.sectionByCommentId || {};
-                out.push({
-                  contentHash: h, lineageId: gen.lineageId, docTitle: gen.docTitle,
-                  firstSeenAt: gen.firstSeenAt, lastEditedAt: gen.lastEditedAt,
-                  hasSnapshot: !!(gen.sections && gen.sections.length),
-                  comments: gen.comments.map(function (c) {
-                    const cc = Object.assign({}, c);
-                    cc.sectionId = map[c.id] || null; return cc;
-                  })
-                });
-              }
-            });
-          });
-        }, Promise.resolve()).then(function () { return out; });
-      });
-    }
-
-    /** Decompress one history comment's section snapshot for the popup. */
-    function section(q) {
-      return store.get(genKey(q.contentHash)).then(function (gen) {
-        if (!gen || !gen.sections) return null;
-        const sec = gen.sections.filter(function (s) { return s.id === q.sectionId; })[0];
-        if (!sec) return null;
-        return Promise.all([codec.decompress(sec.html), codec.decompress(gen.styles || '')])
-          .then(function (parts) { return { html: parts[0], styles: parts[1] }; });
-      });
-    }
-
-    /** Empty the current draft's comments + snapshot (history kept). */
-    function clearCurrent(q) {
-      return store.get(genKey(q.contentHash)).then(function (gen) {
-        if (!gen) return;
-        gen = Object.assign({}, gen);
-        gen.comments = [];
-        gen.sections = [];
-        gen.lastEditedAt = now();
-        return store.set(genKey(q.contentHash), gen);
-      });
-    }
-
-    /**
-     * Enforce retention for a lineage: snapshot window, metadata window, TTL,
-     * and a coarse byte cap. `lin.generations` is oldest→newest.
-     * @param {string} lineageId
-     * @param {string} protectedHash  The current draft's hash — never remove or
-     *   strip this gen, regardless of TTL / metaDrafts rules. The lineage's
-     *   newest gen is likewise never removed or stripped (parity with
-     *   enforceByteCap, which already protects newest-per-lineage).
-     */
-    function pruneLineage(lineageId, protectedHash) {
-      return store.get(linKey(lineageId)).then(function (lin) {
-        if (!lin) return;
-        const gens = lin.generations.slice(); // oldest -> newest
-        const newestHash = gens[gens.length - 1]; // newest of this lineage — never prune it
-        const ttlCutoff = Date.parse(now()) - limits.ttlDays * 86400000;
-
-        return gens.reduce(function (chain, h, idx) {
-          return chain.then(function () {
-            return store.get(genKey(h)).then(function (gen) {
-              if (!gen) return;
-              // Fix A: never remove or strip the protected (current) draft or the lineage's newest.
-              if (h === protectedHash || h === newestHash) return;
-              const ageFromNewest = gens.length - 1 - idx; // 0 = newest
-              const tooOld = isFinite(ttlCutoff) && Date.parse(gen.lastEditedAt) < ttlCutoff;
-              const beyondMeta = ageFromNewest >= limits.metaDrafts;
-              const beyondSnapshot = ageFromNewest >= limits.snapshotDrafts;
-              if (beyondMeta || tooOld) {
-                return store.remove(genKey(h));
-              }
-              if (beyondSnapshot && (gen.sections.length || gen.styles)) {
-                gen = Object.assign({}, gen);
-                gen.sections = [];
-                gen.styles = '';
-                return store.set(genKey(h), gen);
-              }
-            });
-          });
-        }, Promise.resolve()).then(function () {
-          // Re-read survivors to rebuild the lineage list in order.
-          const kept = [];
-          return gens.reduce(function (chain, h) {
-            return chain.then(function () {
-              return store.get(genKey(h)).then(function (gen) { if (gen) kept.push(h); });
-            });
-          }, Promise.resolve()).then(function () {
-            // Clone lin before mutating (match ensureLineage's pattern).
-            lin = { schemaVersion: lin.schemaVersion || 1, lineageId: lin.lineageId, attachKeys: (lin.attachKeys || []).slice(), generations: kept };
-            return store.set(linKey(lineageId), lin);
-          });
-        }).then(function () { return enforceByteCap(protectedHash); });
-      });
-    }
-
-    /** Coarse global byte cap: evict oldest drafts' snapshots, then drafts.
-     *  Never evicts the newest gen of any lineage, and never evicts protectedHash. */
-    function enforceByteCap(protectedHash) {
-      return store.keys().then(function (keys) {
-        const genKeys = keys.filter(function (k) { return k.indexOf(GEN) === 0; });
-        return Promise.all(genKeys.map(function (k) {
-          return store.get(k).then(function (g) { return { key: k, gen: g }; });
-        })).then(function (all) {
-          const entries = all.filter(function (e) { return e.gen; });
-          // Build protected key set: newest gen of each lineage + protectedHash.
-          const newestKeyByLineage = {};
-          entries.forEach(function (e) {
-            const lid = e.gen.lineageId;
-            const t = Date.parse(e.gen.lastEditedAt) || 0;
-            if (!newestKeyByLineage[lid] || t >= newestKeyByLineage[lid].t) {
-              newestKeyByLineage[lid] = { t: t, key: e.key };
+        return keys.reduce((chain, k) => chain.then(() => {
+          if (k === q.exceptVersionKey) return;
+          return store.get(verKey(k)).then((ver) => {
+            if (ver && ver.comments && ver.comments.length > 0) {
+              out.push({ versionKey: k, docId: ver.docId, docTitle: ver.docTitle, createdAt: ver.createdAt, lastEditedAt: ver.lastEditedAt, hasSnapshot: !!ver.snapshotHtml, comments: ver.comments.slice() });
             }
           });
-          const protectedKeys = {};
-          Object.keys(newestKeyByLineage).forEach(function (lid) { protectedKeys[newestKeyByLineage[lid].key] = true; });
-          if (protectedHash) protectedKeys[GEN + protectedHash] = true;
+        }), Promise.resolve()).then(() => out);
+      });
+    }
 
-          function total() {
-            return entries.reduce(function (s, e) { return s + (e.gen ? JSON.stringify(e.gen).length : 0); }, 0);
+    function version(q) {
+      return store.get(verKey(q.versionKey)).then((ver) => {
+        if (!ver) return null;
+        return codec.decompress(ver.snapshotHtml || '').then((html) => ({ html: html, comments: (ver.comments || []).slice(), docTitle: ver.docTitle, contentHash: ver.contentHash }));
+      });
+    }
+
+    function clearCurrent(q) {
+      return store.get(verKey(q.versionKey)).then((ver) => {
+        if (!ver) return;
+        ver = Object.assign({}, ver, { comments: [], snapshotHtml: '', lastEditedAt: now() });
+        return store.set(verKey(q.versionKey), ver);
+      });
+    }
+
+    // Retention: snapshot window, metadata window, TTL, then a coarse global byte cap.
+    function prune(docId, protectedKey) {
+      return store.get(docKey(docId)).then((doc) => {
+        if (!doc) return;
+        const vers = doc.versions.slice(); // oldest→newest
+        const newest = vers[vers.length - 1];
+        const ttlCutoff = Date.parse(now()) - limits.ttlDays * 86400000;
+        return vers.reduce((chain, k, idx) => chain.then(() => store.get(verKey(k)).then((ver) => {
+          if (!ver) return;
+          if (k === protectedKey || k === newest) return;
+          const ageFromNewest = vers.length - 1 - idx;
+          const tooOld = isFinite(ttlCutoff) && Date.parse(ver.lastEditedAt) < ttlCutoff;
+          if (ageFromNewest >= limits.metaDrafts || tooOld) return store.remove(verKey(k));
+          if (ageFromNewest >= limits.snapshotDrafts && ver.snapshotHtml) {
+            ver = Object.assign({}, ver, { snapshotHtml: '' });
+            return store.set(verKey(k), ver);
           }
-          entries.sort(function (a, b) {
-            return (Date.parse(a.gen.lastEditedAt) || 0) - (Date.parse(b.gen.lastEditedAt) || 0);
-          });
+        })), Promise.resolve()).then(() => {
+          const kept = [];
+          return vers.reduce((chain, k) => chain.then(() => store.get(verKey(k)).then((ver) => { if (ver) kept.push(k); })), Promise.resolve())
+            .then(() => store.set(docKey(docId), { schemaVersion: 1, docId: doc.docId, docTitle: doc.docTitle, versions: kept }));
+        }).then(() => enforceByteCap(protectedKey));
+      });
+    }
 
+    function enforceByteCap(protectedKey) {
+      return store.keys().then((allKeys) => {
+        const vKeys = allKeys.filter((k) => k.indexOf(VER) === 0);
+        return Promise.all(vKeys.map((k) => store.get(k).then((g) => ({ key: k, ver: g })))).then((all) => {
+          const entries = all.filter((e) => e.ver);
+          const newestByDoc = {};
+          entries.forEach((e) => { const t = Date.parse(e.ver.lastEditedAt) || 0; const d = e.ver.docId;
+            if (!newestByDoc[d] || t >= newestByDoc[d].t) newestByDoc[d] = { t: t, key: e.key }; });
+          const protectedKeys = {};
+          Object.keys(newestByDoc).forEach((d) => { protectedKeys[newestByDoc[d].key] = true; });
+          if (protectedKey) protectedKeys[VER + protectedKey] = true;
+          const total = () => entries.reduce((s, e) => s + (e.ver ? JSON.stringify(e.ver).length : 0), 0);
+          entries.sort((a, b) => (Date.parse(a.ver.lastEditedAt) || 0) - (Date.parse(b.ver.lastEditedAt) || 0));
           const setOps = [], removeKeys = {};
-          // Pass 1: strip snapshots from oldest entries while over cap.
           for (let i = 0; i < entries.length && total() > limits.maxBytes; i++) {
             const e = entries[i];
-            if (protectedHash && e.key === GEN + protectedHash) continue;
-            if (e.gen && (e.gen.sections.length || e.gen.styles)) {
-              e.gen = Object.assign({}, e.gen);
-              e.gen.sections = [];
-              e.gen.styles = '';
-              setOps.push(e);
-            }
+            if (e.key === VER + protectedKey) continue;
+            if (e.ver && e.ver.snapshotHtml) { e.ver = Object.assign({}, e.ver, { snapshotHtml: '' }); setOps.push(e); }
           }
-          // Pass 2: remove unprotected entries while still over cap.
           for (let j = 0; j < entries.length && total() > limits.maxBytes; j++) {
             const e = entries[j];
-            if (!e.gen || protectedKeys[e.key]) continue;
-            removeKeys[e.key] = true;
-            e.gen = null;
+            if (!e.ver || protectedKeys[e.key]) continue;
+            removeKeys[e.key] = true; e.ver = null;
           }
-          // Execute: SET first, then REMOVE; skip SET for any key that is also removed.
-          const sets = setOps.filter(function (e) { return !removeKeys[e.key]; });
-          return Promise.all(sets.map(function (e) { return store.set(e.key, e.gen); }))
-            .then(function () { return Promise.all(Object.keys(removeKeys).map(function (k) { return store.remove(k); })); });
+          const sets = setOps.filter((e) => !removeKeys[e.key]);
+          return Promise.all(sets.map((e) => store.set(e.key, e.ver)))
+            .then(() => Promise.all(Object.keys(removeKeys).map((k) => store.remove(k))));
         });
       });
     }
 
-    return { resolve: resolve, persist: persist, history: history, section: section, clearCurrent: clearCurrent };
+    return { resolve, persist, history, version, clearCurrent };
   }
 
   return { MIN_HASH_CHARS, normalizeText, contentHash, cyrb53, createDraftHistory };
