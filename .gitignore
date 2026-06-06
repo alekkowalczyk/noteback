@@ -3,3 +3,6 @@ node_modules/
 
 # generated demo canvases (regenerate via examples/build-canvas.js)
 examples/*.canvas*.html
+
+# generated review canvases at repo root (regenerate via `noteback wrap`)
+/*.canvas.html
