@@ -248,6 +248,8 @@ const USAGE = [
   '',
   'Options:',
   '  -o, --out <path>   (wrap) write the canvas to <path> instead of rewriting in place',
+  '  --id <id>          (wrap) set/override the document id baked into the canvas (normally inferred',
+  '                     from the -o target; use this to chain version history across re-wraps)',
   '  --project          (install-skill) install into ./ (this repo) instead of your home dir',
   '  --dir <path>       (install-skill) plain-copy into a specific skills directory (no symlink)',
   '  -h, --help         show this help',
