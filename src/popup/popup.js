@@ -128,29 +128,26 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function refreshState(tab) {
     if (!tab) return Promise.resolve();
-    if (!tabInfo || tabInfo.type === 'other') {
-      hideSiteRow();
-      setStatus('Noteback works on local file:// and localhost documents.');
-      disableActions(true);
-      return Promise.resolve();
-    }
     return ping(tab.id).then(function (pong) {
       // Content script is injected (PING answered).
       hideOnboarding();
       if (pong && pong.booted) {
         disableActions(false);
-        showSiteRow(true);
+        showSiteRow(true);              // no-ops for 'other' origins
         setStatus(countLabel(pong));
       } else {
-        // Injected but dormant by settings.
+        // Injected but dormant by settings (file/localhost/127 only).
         disableActions(true);
         showSiteRow(false);
         setStatus('Noteback is off on this site.');
       }
     }).catch(function () {
-      // Not injected at all (file access off, or page still loading).
+      // Not injected. Unsupported ('other') origins can be click-activated;
+      // supported origins that didn't boot keep the existing path (file access
+      // off, or page still loading).
       hideSiteRow();
-      return handleNotBooted(tabInfo.type === 'file');
+      if (tabInfo && tabInfo.type === 'other') return showAnnotatePrompt();
+      return handleNotBooted(tabInfo && tabInfo.type === 'file');
     });
   }
 
@@ -225,6 +222,52 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function hideOnboarding() { onboardingEl.hidden = true; onboardingEl.innerHTML = ''; }
+
+  /* --- annotate-this-page (unsupported origins) -------------------------- */
+
+  /**
+   * On an origin Noteback doesn't auto-inject (anything that isn't file://,
+   * localhost, or 127.0.0.1), offer one-click activation. activeTab grants us
+   * access to this tab the moment the user opened the popup, so we inject the
+   * runtime on demand — no host permission, no prompt.
+   */
+  function showAnnotatePrompt() {
+    disableActions(true);
+    setStatus('');
+    onboardingEl.hidden = false;
+    onboardingEl.innerHTML =
+      '<div class="nb-annotate">' +
+      '  <p class="nb-annotate__lead">Annotate any document you open — highlight text and leave comments, then copy the feedback as Markdown.</p>' +
+      '  <button id="nb-annotate-btn" type="button" class="nb-btn nb-btn--primary">Annotate this page</button>' +
+      '  <p class="nb-annotate__note">Stays on until you reload. Comments are saved for this page.</p>' +
+      '</div>';
+    const btn = document.getElementById('nb-annotate-btn');
+    if (btn) btn.addEventListener('click', annotateThisPage);
+    return Promise.resolve();
+  }
+
+  /**
+   * Inject the extension runtime into the active tab on the user's click. We set
+   * window.__notebackForceActivate (read by content-script.js to mount
+   * unconditionally), then inject the SAME ordered file list the manifest would
+   * auto-inject — sourced from getManifest() so it can never drift.
+   */
+  function annotateThisPage() {
+    if (!activeTab || activeTab.id == null) { setStatus('No active document.'); return; }
+    const cs = (chrome.runtime.getManifest().content_scripts || [])[0] || {};
+    const files = cs.js || [];
+    if (!files.length) { setStatus('Could not load Noteback.'); return; }
+    setStatus('Activating Noteback…');
+    chrome.scripting.executeScript({ target: { tabId: activeTab.id }, func: setForceActivate })
+      .then(function () {
+        return chrome.scripting.executeScript({ target: { tabId: activeTab.id }, files: files });
+      })
+      .then(function () { hideOnboarding(); return refreshState(activeTab); })
+      .catch(function () { setStatus("Can't annotate this page."); });
+  }
+
+  /** Injected into the page's isolated world before the runtime files. */
+  function setForceActivate() { window.__notebackForceActivate = true; }
 
   /* --- messaging --------------------------------------------------------- */
 
