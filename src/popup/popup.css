@@ -138,6 +138,10 @@ body {
   margin-top: 2px;
 }
 
+/* --- annotate-this-page prompt (unsupported origins) -------------------- */
+.nb-annotate__lead { margin: 0 0 10px; color: #3f3f46; }
+.nb-annotate__note { margin: 8px 0 0; color: #6b7280; font-size: 11px; }
+
 .nb-popup__footer {
   padding: 8px 12px;
   border-top: 1px solid var(--nb-border);
