@@ -8,7 +8,13 @@
 
 **Tech Stack:** Vanilla JS, MV3 Chrome extension (`activeTab` + `chrome.scripting`), Node built-in test runner. Zero dependencies, no build step (per `CLAUDE.md` hard constraints).
 
-**Testing reality (read first):** This feature is `chrome.*` glue across `popup.js` and `content-script.js` — neither has Node-testable seams, and both have **zero** unit tests today (the repo's pattern: pure modules like `origin-policy` are unit-tested; popup/content-script are verified live). `origin-policy.js` is **intentionally unchanged**, so there is no new pure logic to TDD. Verification is therefore: `npm test` as a **regression guard** (proves the shared/pure modules still pass) + the structured **live verification** in Task 5. Do not invent fake unit tests for the chrome glue.
+**Testing reality (read first):** This feature is `chrome.*` glue across `popup.js` and `content-script.js` — neither has Node-testable seams, and both have **zero** unit tests today (the repo's pattern: pure modules like `origin-policy` are unit-tested; popup/content-script are verified live). `origin-policy.js` is **intentionally unchanged**, so there is no new pure logic to TDD. Verification is therefore: **`npm run test:unit`** as a **regression guard** (proves the shared/pure modules still pass) + the structured **live verification** in Task 5. Do not invent fake unit tests for the chrome glue.
+
+> **Branch note (test command changed):** the branch advanced — plain `npm test`
+> now also runs a Playwright browser e2e (`test/e2e/`) that needs the chromium
+> binary and is about the *unrelated* history feature. Use **`npm run test:unit`**
+> (`node --test "test/*.test.js"`, top-level only) as the regression guard for
+> this work; it requires no Playwright and currently passes **149** tests.
 
 **Spec:** `docs/2026-06-05-extension-click-to-activate-any-site.md`
 
@@ -90,10 +96,10 @@ Replace it with:
 Run: `node --check src/content/content-script.js`
 Expected: no output, exit 0. (`--check` parses without executing; `chrome.*` is never touched.)
 
-- [ ] **Step 3: Regression — full suite still green**
+- [ ] **Step 3: Regression — unit suite still green**
 
-Run: `npm test`
-Expected: all tests pass (this change touches no pure module; `origin-policy.test.js` and the rest are unaffected).
+Run: `npm run test:unit`
+Expected: 149 tests pass (this change touches no pure module; `origin-policy.test.js` and the rest are unaffected).
 
 - [ ] **Step 4: Commit**
 
@@ -241,10 +247,10 @@ Immediately after the `hideOnboarding` function (`function hideOnboarding() { ..
 Run: `node --check src/popup/popup.js`
 Expected: no output, exit 0.
 
-- [ ] **Step 4: Regression — full suite still green**
+- [ ] **Step 4: Regression — unit suite still green**
 
-Run: `npm test`
-Expected: all tests pass.
+Run: `npm run test:unit`
+Expected: 149 tests pass.
 
 - [ ] **Step 5: Commit**
 
@@ -427,8 +433,11 @@ confirm it still copies.
 
 - [ ] **Step 9: Final regression suite**
 
-Run: `npm test`
-Expected: all tests pass.
+Run: `npm run test:unit`
+Expected: 149 tests pass.
+
+(Optional full suite incl. the unrelated history e2e: `npx playwright install
+chromium` once, then `npm test`.)
 
 ---
 
@@ -439,8 +448,8 @@ Expected: all tests pass.
   change is needed. This is a simplification from the spec's anticipated file
   list, in the reducing direction.
 - **No new unit tests** — deliberate and consistent with the repo (chrome glue,
-  `origin-policy` unchanged). `npm test` is the regression guard; Task 5 is the
-  behavioral proof.
+  `origin-policy` unchanged). `npm run test:unit` is the regression guard; Task 5
+  is the behavioral proof.
 - **Type/name consistency** — `window.__notebackForceActivate` (set by
   `setForceActivate` in Task 2, read in Task 1), `annotateThisPage`,
   `showAnnotatePrompt`, and the `getManifest().content_scripts[0].js` source are
