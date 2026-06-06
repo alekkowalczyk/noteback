@@ -262,7 +262,7 @@
     '.nb-copy-caret-btn .nb-caret{font-size:10px;line-height:1;opacity:.85;transition:transform .18s var(--dropdown-ease);}',
     '.nb-copy-wrap.nb-menu-open .nb-copy-caret-btn .nb-caret{transform:rotate(180deg);}',
 
-    /* version timeline (snapshot-history-design §3) + snapshot peek popup */
+    /* version timeline (docs/design.md §14.4) + snapshot peek popup */
     '.nb-versions{margin-top:14px;border-top:1px solid var(--nb-line);}',
     '.nb-versions .nb-group-label{margin:13px 4px 4px;}',
     '.nb-ver-rest[hidden]{display:none;}',
@@ -1247,7 +1247,7 @@
     }
 
     /**
-     * The "Versions" timeline group (snapshot-history-design.html \u00A73). It shows the
+     * The "Versions" timeline group (docs/design.md \u00A714.4). It shows the
      * document's version history when there is earlier feedback:
      *   - 0 earlier versions  \u2192 render nothing (the group is hidden entirely).
      *   - exactly 1 earlier   \u2192 show it inline.

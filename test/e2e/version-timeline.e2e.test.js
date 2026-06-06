@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Browser e2e for the canvas version-timeline UI (snapshot-history-design §3).
+ * Browser e2e for the canvas version-timeline UI (docs/design.md §14.4).
  *
  * The history ENGINE is unit-tested (Node); this guards the OVERLAY DOM that the
  * Node suite has no equivalent for: the "Versions" group, its rows, and the
