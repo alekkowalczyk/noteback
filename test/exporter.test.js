@@ -171,7 +171,7 @@ test('buildCanvasHtml strips injected UI, highlight marks, stale state + runtime
   });
 
   // Inner doc-root markup only (between the doc-root div and the state comment).
-  const docRoot = /<div id="noteback-doc-root">([\s\S]*?)<\/div>\s*<!-- Machine-readable/.exec(html);
+  const docRoot = /<div id="noteback-doc-root"[^>]*>([\s\S]*?)<\/div>\s*<!-- Machine-readable/.exec(html);
   assert.ok(docRoot, 'doc root region found');
   const inner = docRoot[1];
 
@@ -309,4 +309,15 @@ test('sanitizeFilename keeps ordinary names and forces an .html suffix', () => {
   assert.strictEqual(exporter.sanitizeFilename(''), 'noteback.html');
   assert.strictEqual(exporter.sanitizeFilename('a/b\\c.htm'), 'a_b_c.htm');
   assert.match(exporter.sanitizeFilename('My Doc'), /^My_Doc\.html$/);
+});
+
+test('buildCanvasHtml bakes data-noteback-doc-id onto #noteback-doc-root', () => {
+  const html = exporter.buildCanvasHtml({
+    docHtml: '<html><body><p>hello world this is the body</p></body></html>',
+    state: { schemaVersion: 1, docId: 'D7a', docTitle: 'x', comments: [] },
+    templateHtml: '<div id="noteback-doc-root" data-noteback-doc-id="{{DOC_ID}}">{{DOC_BODY}}</div>',
+    inlinedRuntime: ''
+  });
+  assert.ok(html.includes('data-noteback-doc-id="D7a"'), 'baked id present');
+  assert.ok(!html.includes('{{DOC_ID}}'), 'token consumed');
 });

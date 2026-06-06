@@ -229,6 +229,7 @@
     // string (a function avoids `$`-pattern interpretation in String.replace).
     let out = template;
     out = replaceToken(out, 'DOC_TITLE', escapeHtml(docTitle));
+    out = replaceToken(out, 'DOC_ID', escapeHtml(String(state.docId == null ? '' : state.docId)));
     out = replaceToken(out, 'GUIDING_COMMENT', GUIDING_COMMENT);
     out = replaceToken(out, 'DOC_BODY', docBody);
     out = replaceToken(out, 'STATE_JSON', escapeForJsonScript(stateJson));
