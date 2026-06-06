@@ -62,9 +62,35 @@
     return last || location.href;
   }
 
+  // History doc-id: a baked attribute (the page is itself a wrapped canvas) wins;
+  // else a per-URL minted id, persisted in chrome.storage under `nb:url:<href>`,
+  // so the same page maps to a stable history bucket across reloads. Distinct
+  // from `docId` (location.href) above, which keys the comments-only
+  // ChromeStorageAdapter and the export identity — those are unchanged.
+  function resolveDocId() {
+    const rootEl = document.getElementById('noteback-doc-root');
+    const baked = rootEl && rootEl.getAttribute && rootEl.getAttribute('data-noteback-doc-id');
+    if (baked) return Promise.resolve(baked);
+    const urlKey = 'nb:url:' + location.href;
+    return new Promise(function (resolve) {
+      try {
+        chrome.storage.local.get(urlKey, function (items) {
+          let id = items && items[urlKey];
+          if (id) return resolve(id);
+          id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+          const bag = {};
+          bag[urlKey] = id;
+          chrome.storage.local.set(bag, function () { resolve(id); });
+        });
+      } catch (e) { resolve(''); }
+    });
+  }
+
   /* --- adapter ------------------------------------------------------------- */
 
-  const adapter = RT.chromeStorageAdapter.createChromeStorageAdapter(docId);
+  // The StorageAdapter is built per-mount (async), gated by the origin's history
+  // opt-in: see buildAdapter() / mount(). The comments-only ChromeStorageAdapter
+  // is the fallback when history is not allowed (or the kv store is unavailable).
 
   /* --- export hooks (wired into the overlay via boot) ---------------------- */
 
@@ -156,16 +182,70 @@
   let active = false;
   let ready = Promise.resolve(null); // always resolves to the current controller (or null)
 
-  function mount() {
+  /**
+   * Build the StorageAdapter (and optional history wiring) for this mount.
+   * When history is allowed for the page's origin and the chrome-backed kv store
+   * + a resolved history doc-id are both available, run the unified history
+   * engine over chrome.storage. Otherwise fall back to the comments-only
+   * ChromeStorageAdapter (today's behavior — unchanged). chrome.* lives only here
+   * and in the kv/chrome-storage adapters.
+   * @param {Object|null} settings  per-origin policy settings (null on force-activate).
+   * @returns {Promise<{adapter:Object, history:Object|null}>}
+   */
+  function buildAdapter(settings) {
+    const historyOk = !!(policy && policy.historyAllowed &&
+      policy.historyAllowed({ type: originType, origin: origin }, settings));
+    if (!historyOk || !RT.historyStateAdapter || !RT.chromeKvStore || !RT.snapshotCapture) {
+      return Promise.resolve({
+        adapter: RT.chromeStorageAdapter.createChromeStorageAdapter(docId),
+        history: null
+      });
+    }
+    return resolveDocId().then(function (historyDocId) {
+      // createChromeKvStore THROWS eagerly if chrome.storage.local is missing —
+      // catch (don't .catch()) and degrade to the comments-only path.
+      let kv = null;
+      try { kv = RT.chromeKvStore.createChromeKvStore(chrome); } catch (e) { kv = null; }
+      if (!kv || !historyDocId) {
+        return {
+          adapter: RT.chromeStorageAdapter.createChromeStorageAdapter(docId),
+          history: null
+        };
+      }
+      const adapter = RT.historyStateAdapter.createHistoryStateAdapter({
+        doc: document,
+        store: kv,
+        inner: null,
+        docId: historyDocId,
+        contentText: function () {
+          return (document.getElementById('noteback-doc-root') || document.body).textContent || '';
+        },
+        captureSnapshot: function () { return RT.snapshotCapture.captureCleanDoc(document); }
+      });
+      return {
+        adapter: adapter,
+        history: (adapter.getHistory ? {
+          getHistory: function () { return adapter.getHistory(); },
+          getVersion: function (ref) { return adapter.getVersion(ref); },
+          clearCurrent: function () { return adapter.clearCurrent(); }
+        } : null)
+      };
+    });
+  }
+
+  function mount(settings) {
     if (active) return ready;
     active = true;
-    ready = RT.boot
-      .boot({
-        root: document.body || document.documentElement,
-        adapter: adapter,
-        exporter: exporter,
-        docId: docId,
-        docTitle: docTitle
+    ready = buildAdapter(settings)
+      .then(function (built) {
+        return RT.boot.boot({
+          root: document.body || document.documentElement,
+          adapter: built.adapter,
+          exporter: exporter,
+          history: built.history,
+          docId: docId,
+          docTitle: docTitle
+        });
       })
       .then(function (c) { controller = c; return c; })
       .catch(function () { controller = null; return null; });
@@ -188,7 +268,7 @@
   }
 
   function applySettings(settings) {
-    if (shouldActivate(settings)) mount();
+    if (shouldActivate(settings)) mount(settings);
     else unmount();
   }
 
