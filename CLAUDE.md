@@ -110,6 +110,12 @@ the code, that have already bitten us once.
   new draft → click the entry → assert the popup opens); that test fails on the
   pre-fix ordering. The Node tests cover the seams around it (`extractSections`
   with/without a painted mark; `history()` reporting `hasSnapshot`/`sectionId`).
+- **The click-to-activate injection list is sourced from the manifest, never
+  copied.** `popup.js` activates unsupported-origin pages by reading
+  `chrome.runtime.getManifest().content_scripts[0].js` and `executeScript`-ing
+  that exact list. Don't hard-code the file list in the popup — it would silently
+  drift the next time a runtime file is added to the manifest, and the injected
+  page would boot an incomplete runtime.
 
 ## Live verification (Playwright)
 

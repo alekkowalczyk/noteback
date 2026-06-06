@@ -128,6 +128,31 @@ toggles take effect without a page reload. `NOTEBACK_PING` reports
 settings" from "no file access". The embedded canvas is unaffected — it has no
 settings and always shows its UI.
 
+### 1.4 Click-to-activate on unsupported origins (extension mode only)
+
+Noteback auto-injects only on `file://`, `localhost`, and `127.0.0.1` (the
+manifest match list). On any **other** origin — e.g. a doc the user hosts over
+https — the content script never loads, so `classifyOrigin` returns `'other'`
+and `isActive` is `false` (§1.3). The popup offers a manual escape hatch:
+
+- On an `'other'` origin whose `NOTEBACK_PING` goes unanswered, the popup shows
+  an **"Annotate this page"** button instead of the disabled state.
+- Clicking it uses the existing **`activeTab`** grant (no host permission, no
+  install-time prompt) to `chrome.scripting.executeScript` two things into the
+  tab: first a function that sets **`window.__notebackForceActivate = true`**,
+  then the **same ordered file list the manifest would auto-inject**, read from
+  `chrome.runtime.getManifest().content_scripts[0].js` (single source of truth —
+  it must never be hard-copied, or it will drift).
+- `content-script.js` reads the flag and calls `mount()` **unconditionally**,
+  bypassing the `nb:settings` predicate — the click *is* the opt-in. Such pages
+  do not subscribe to `chrome.storage.onChanged` (settings don't govern them).
+
+Activation is **ephemeral**: a reload drops the injected runtime and the user
+re-clicks. Annotation **data** persists per-URL in `chrome.storage.local`
+(keyed `"noteback:" + docId`, §1.1), so highlights re-render on the next
+activation. The injected list is the extension runtime only; canvas-only files
+(`draft-history-core`, `snapshot`, `localstorage-state-adapter`) are excluded.
+
 ---
 
 ## 2. State schema (schemaVersion 1)
