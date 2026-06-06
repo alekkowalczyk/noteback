@@ -277,7 +277,7 @@
     '.nb-ver-meta{font:400 11.5px/1.2 var(--nb-ui);color:var(--nb-ink-soft);}',
     '.nb-ver-spacer{flex:1;}',
     '.nb-ver-here{font:700 9.5px/1 var(--nb-round);letter-spacing:.08em;text-transform:uppercase;color:var(--nb-accent-deep);}',
-    '.nb-ver-count{font:600 11px/1 var(--nb-mono,ui-monospace,SFMono-Regular,Menlo,monospace);background:#efe7d6;',
+    '.nb-ver-count{font:600 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;background:#efe7d6;',
     '  border:1px solid var(--nb-line);border-radius:999px;padding:2px 9px;color:var(--nb-ink-soft);}',
     '.nb-ver-row.active .nb-ver-count{background:#fff;}',
     '.nb-ver-actions{display:flex;gap:7px;margin:8px 0 0 19px;}',
@@ -1272,7 +1272,7 @@
 
         const total = versions.length; // earlier versions, newest-first
         // The most-recent earlier version always stays inline.
-        wrap.appendChild(renderVersionRow(versions[0], total - 0, total));
+        wrap.appendChild(renderVersionRow(versions[0], total));
 
         if (total >= 2) {
           // 2+ earlier versions \u2192 collapse indices 1..end under a disclosure.
@@ -1281,7 +1281,7 @@
           rest.setAttribute(UI_ATTR, 'versions-rest');
           rest.hidden = true;
           for (let i = 1; i < total; i++) {
-            rest.appendChild(renderVersionRow(versions[i], total - i, total));
+            rest.appendChild(renderVersionRow(versions[i], total - i));
           }
           const disclose = doc.createElement('button');
           disclose.type = 'button';
@@ -1293,14 +1293,17 @@
           const dlabel = doc.createElement('span');
           dlabel.className = 'nb-disclose-label';
           const remaining = total - 1;
-          dlabel.textContent = '+' + remaining + ' older version' + (remaining === 1 ? '' : 's');
+          const moreLabel = '+' + remaining + ' older version' + (remaining === 1 ? '' : 's');
+          dlabel.textContent = moreLabel;
           disclose.appendChild(chev);
           disclose.appendChild(dlabel);
+          // Toggle: reveal/hide the collapsed rows and flip the chevron (CSS
+          // rotates it on .nb-open). The button stays visible in both states.
           disclose.addEventListener('click', function () {
-            const open = rest.hidden;
+            const open = rest.hidden; // about to open if currently hidden
             rest.hidden = !open;
             disclose.classList.toggle('nb-open', open);
-            disclose.style.display = open ? 'none' : '';
+            dlabel.textContent = open ? 'Fewer versions' : moreLabel;
           });
           wrap.appendChild(disclose);
           wrap.appendChild(rest);
@@ -1341,13 +1344,13 @@
 
     /**
      * One earlier-version row: dot, v-label, time, count, and open + copy-feedback
-     * actions. The row BODY peeks the snapshot; the buttons stopPropagation so a
-     * button click doesn't also peek.
+     * actions. Clicking ANYWHERE on the row (line or the actions strip's empty
+     * space) peeks the snapshot; the open / copy-feedback buttons stopPropagation
+     * so a button click runs only its own action and doesn't also peek.
      * @param {Object} d      a getHistory() entry
      * @param {number} ordinal the v-number (oldest = 1)
-     * @param {number} total  total earlier versions (for a11y labels)
      */
-    function renderVersionRow(d, ordinal, total) {
+    function renderVersionRow(d, ordinal) {
       const row = doc.createElement('div');
       row.className = 'nb-ver-row';
       row.setAttribute(UI_ATTR, 'version');
@@ -1373,8 +1376,6 @@
       line.appendChild(meta);
       line.appendChild(spacer);
       line.appendChild(cnt);
-      // Clicking the row body = peek the snapshot in context.
-      line.addEventListener('click', function () { openVersionPeek(d.versionKey); });
       row.appendChild(line);
 
       const acts = doc.createElement('div');
@@ -1399,6 +1400,10 @@
       acts.appendChild(open);
       acts.appendChild(copy);
       row.appendChild(acts);
+      // Peek lives on the whole row, so clicking the line OR the actions strip's
+      // empty space opens the snapshot; the buttons' stopPropagation keeps a
+      // button click from also peeking.
+      row.addEventListener('click', function () { openVersionPeek(d.versionKey); });
       return row;
     }
 
@@ -1458,10 +1463,6 @@
       });
     }
 
-    function condense(q) {
-      if (markdownApi && markdownApi.condenseQuote) return markdownApi.condenseQuote(q);
-      return q.length > 80 ? q.slice(0, 77) + '\u2026' : q;
-    }
     function formatWhen(iso) {
       if (!iso) return 'earlier';
       const d = new Date(iso);
