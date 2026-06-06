@@ -69,7 +69,9 @@ comments-only `ChromeStorageAdapter`/`InFileStateAdapter` don't have them and th
 timeline stays hidden. There is no per-comment "section" lookup — history operates on
 whole-document version snapshots, not extracted fragments.
 
-Implementations (all satisfy the `load`/`save` core; see §12 adapter tests):
+Implementations (all satisfy the `load`/`save` core; covered by the adapter tests
+under `test/` — `history-state-adapter.test.js`, `chrome-kv-store.test.js`,
+`draft-history-core.test.js`):
 
 | Implementation        | File                                      | Backing store |
 |-----------------------|-------------------------------------------|---------------|
@@ -340,6 +342,7 @@ Mode-agnostic UI: floating "💬 Comment" button, comment popover, sidebar.
  * @param {Node} cfg.root                 Document root to annotate.
  * @param {StorageAdapter} cfg.adapter    Persistence (see §1).
  * @param {Object} cfg.exporter           Export hooks (see §3.6); may be partial in embedded mode.
+ * @param {Object} [cfg.history]          Snapshot-history adapter (see §1, §8); null/absent → timeline hidden.
  * @returns {{ destroy: () => void, refresh: () => Promise<void> }}
  */
 function mountOverlay(cfg) { ... }
@@ -430,6 +433,7 @@ Single entry point used by **both** modes.
  * @param {Node} [cfg.root=document.body]
  * @param {StorageAdapter} cfg.adapter
  * @param {Object} [cfg.exporter]
+ * @param {Object} [cfg.history]   Snapshot-history adapter (see §1, §8); forwarded to the overlay.
  * @returns {Promise<{ destroy: () => void }>}
  */
 async function boot(cfg) { ... }
