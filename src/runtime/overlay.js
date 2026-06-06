@@ -1151,12 +1151,14 @@
         s = stateApi.addComment(s, { anchor: anchor, body: text });
       }
       setState(s);
-      // The canvas captures per-draft history snapshots by reading the painted
-      // <mark> highlights (snapshotCapture). The committed highlights —
-      // including this brand-new comment's — must be in the DOM BEFORE persist()
-      // runs its snapshot, or the snapshot misses the new comment and its later
-      // history entry is never clickable. So drop the compose-time preview and
-      // paint the real highlights first, then persist.
+      // Comments persist as DATA from state.comments (set above, before persist),
+      // and the per-draft history snapshot is captured CLEAN via
+      // snapshotCapture.captureCleanDoc — it clones the doc and strips every
+      // <mark> wrapper, so the capture is paint-independent. The peek re-paints
+      // highlights from the stored comment data at view time. This repaint is
+      // therefore just the visual refresh — drop the compose-time preview and
+      // show the committed highlight — and its position relative to persist()
+      // carries no correctness requirement.
       clearAnchorPreview();
       repaintHighlights();
       await persist(s);
