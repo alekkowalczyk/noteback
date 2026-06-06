@@ -157,9 +157,11 @@ test('history snapshot is captured on create and the "Earlier feedback" entry op
     assert.strictEqual(inner.hasMark, true, 'popup highlights the commented quote');
     // Whole-section context: the full Overview section (heading + 3 paragraphs)...
     assert.ok(inner.blockCount >= 4, 'popup shows the whole multi-block section (got ' + inner.blockCount + ' blocks)');
-    assert.deepStrictEqual(inner.headings, ['Overview'], 'only the section heading — capture stops at the next heading');
-    // ...but NOT the following section.
-    assert.ok(!/Architecture/.test(inner.text), 'the next section is excluded');
+    assert.ok(inner.headings.includes('Overview'), 'the commented section is present');
+    // ...plus a few blocks of context on each side (the "a few blocks each side"
+    // request): the document title above and the next section below.
+    assert.ok(/Technical Spec/.test(inner.text), 'context above the section (the title) is pulled in');
+    assert.ok(/Architecture/.test(inner.text), 'context below the section (the next heading) is pulled in');
   } finally {
     await context.close();
   }

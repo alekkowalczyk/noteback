@@ -81,6 +81,19 @@ the code, that have already bitten us once.
   the selection touches (via `querySelectorAll`, not `querySelector` — using only the
   first mark captured just the start, a bug we shipped once). See its block-collection
   loop and the per-section dedupe.
+- **The history peek pads the captured union with ~`CONTEXT_PAD_BLOCKS` (3) context
+  blocks above the first touched section and below the last** (`snapshot.padContext`),
+  so the popup shows what surrounds the selection — the capture otherwise consumes
+  whole sections and leaves no in-section context. The padding crosses section
+  boundaries (it pulls in the neighbouring heading + a paragraph or two) and skips the
+  inter-block whitespace `<mark>`s a cross-block selection leaves behind. Under the
+  char cap, `trimToCap` protects the **touched blocks** (`blocks[0]..blocks[last]`, the
+  actual selection) and grows outward — section remainder, then padding — so context is
+  sacrificed before the selection. Do **not** reinstate `trimToCap`'s old
+  "prepend `nodes[0]` if it's a heading" shortcut: with padding `nodes[0]` is a context
+  block, not the section heading, so it would wrongly re-add dropped padding. The
+  section heading rides along inside the protected/grown window instead. `contextPad: 0`
+  in the cfg disables padding (used by the union unit test to isolate that logic).
 - **History snapshots are read from the PAINTED highlights — paint before persist.**
   `snapshot.extractSections` locates a comment's section by querying
   `mark.noteback-highlight[data-noteback-id="<id>"]` in the live doc. So

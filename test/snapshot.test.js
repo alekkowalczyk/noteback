@@ -208,15 +208,66 @@ test('extractSections skips whole-document notes (anchor == null)', () => {
 
 test('extractSections unions every section a multi-block selection spans (not just the start)', () => {
   const { doc, root } = multiSectionDom();
-  const ex = snap.extractSections({ root: root, doc: doc, comments: [{ id: 'c1', body: 'spanning note', anchor: { quote: 'a2 ... b1' } }] });
+  // contextPad:0 isolates the union logic from the context padding (tested below).
+  const ex = snap.extractSections({ root: root, doc: doc, contextPad: 0, comments: [{ id: 'c1', body: 'spanning note', anchor: { quote: 'a2 ... b1' } }] });
   assert.strictEqual(ex.sections.length, 1);
   const html = ex.sections[0].html;
   // Whole of section A and section B (both ends of the selection) are present...
   ['Sec A', 'a1', 'a2', 'Sec B', 'b1', 'b2'].forEach(function (t) {
     assert.ok(html.indexOf(t) !== -1, 'expected "' + t + '" in the snapshot');
   });
-  // ...but the untouched section C is not.
+  // ...but the untouched section C is not (no padding requested).
   assert.ok(html.indexOf('Sec C') === -1 && html.indexOf('c1') === -1, 'section C must be excluded');
+});
+
+/**
+ * A linear run of single-paragraph sections Z/A/B/C/D/E. The selection touches A
+ * and B; padding should pull in the neighbouring blocks above the first touched
+ * section and below the last — but stay bounded (the far section E is out of reach).
+ */
+function padDom() {
+  const mkWrap = function () { const kids = []; return { appendChild: function (c) { kids.push(c); }, get innerHTML() { return kids.map(function (k) { return k._html || ''; }).join(''); } }; };
+  const doc = { createElement: function (t) { return t === 'div' ? mkWrap() : fakeEl(t); }, querySelectorAll: function () { return []; } };
+  const root = { tagName: 'DIV', nodeType: 1, parentElement: null };
+  const nodes = [
+    fakeEl('H2', 'Sec Z'), fakeEl('P', 'z1'),
+    fakeEl('H2', 'Sec A'), fakeEl('P', 'a1'),
+    fakeEl('H2', 'Sec B'), fakeEl('P', 'b1'),
+    fakeEl('H2', 'Sec C'), fakeEl('P', 'c1'),
+    fakeEl('H2', 'Sec D'), fakeEl('P', 'd1'),
+    fakeEl('H2', 'Sec E'), fakeEl('P', 'e1')
+  ];
+  nodes.forEach(function (n, i) { n.parentElement = root; n.previousElementSibling = nodes[i - 1] || null; n.nextElementSibling = nodes[i + 1] || null; });
+  function markIn(block) { return { tagName: 'MARK', nodeType: 1, parentElement: block, getAttribute: function () { return null; }, querySelectorAll: function () { return []; }, cloneNode: function () { return { querySelectorAll: function () { return []; }, _html: '' }; } }; }
+  const marks = [markIn(nodes[3]), markIn(nodes[5])]; // selection a1 -> b1
+  root.querySelector = function () { return marks[0]; };
+  root.querySelectorAll = function (sel) { return /data-noteback-id="c1"/.test(sel) ? marks : []; };
+  return { doc: doc, root: root };
+}
+
+test('extractSections pads the touched sections with a few context blocks above and below', () => {
+  const { doc, root } = padDom();
+  const ex = snap.extractSections({ root: root, doc: doc, comments: [{ id: 'c1', body: 'note', anchor: { quote: 'a1 ... b1' } }] });
+  assert.strictEqual(ex.sections.length, 1);
+  const html = ex.sections[0].html;
+  // The touched core (A + B) plus a section of context on each side (Z above, C below).
+  ['Sec Z', 'z1', 'Sec A', 'a1', 'Sec B', 'b1', 'Sec C', 'c1'].forEach(function (t) {
+    assert.ok(html.indexOf(t) !== -1, 'expected "' + t + '" in the padded snapshot');
+  });
+  // ...but the padding is bounded (~3 blocks each side) — the far section E is excluded.
+  assert.ok(html.indexOf('Sec E') === -1 && html.indexOf('e1') === -1, 'padding stays bounded: far section excluded');
+});
+
+test('extractSections context padding is sacrificed before the touched core under the char cap', () => {
+  const { doc, root } = padDom();
+  // A cap large enough for the core (A+B) but not the padding: padding drops, core stays.
+  const ex = snap.extractSections({ root: root, doc: doc, maxSectionChars: 60, comments: [{ id: 'c1', body: 'note', anchor: { quote: 'a1 ... b1' } }] });
+  assert.strictEqual(ex.sections.length, 1);
+  const html = ex.sections[0].html;
+  ['Sec A', 'a1', 'Sec B', 'b1'].forEach(function (t) {
+    assert.ok(html.indexOf(t) !== -1, 'the touched core "' + t + '" is always kept');
+  });
+  assert.ok(html.indexOf('Sec Z') === -1, 'padding above is dropped first under the cap');
 });
 
 test('extractSections drops inter-block whitespace marks a cross-block selection sweeps up', () => {

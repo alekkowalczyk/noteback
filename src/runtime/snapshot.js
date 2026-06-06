@@ -59,6 +59,7 @@
   }
 
   const CONTEXT_FALLBACK_BLOCKS = 3; // sibling window each side when no heading bounds the section
+  const CONTEXT_PAD_BLOCKS = 3;      // context blocks padded above/below the captured selection
 
   /** A bounded window of sibling blocks around `block` (used when there's no heading). */
   function windowAround(block, before, after) {
@@ -169,18 +170,42 @@
   }
 
   /**
-   * When the captured section(s) exceed the char budget, keep the nearest heading
-   * plus the protected core (the blocks the selection actually touches, indices
-   * protectLo..protectHi) and grow a window outward until the next block would blow
-   * the cap. The protected core is never dropped, so the whole selection stays in.
+   * Pad a captured node list with up to `pad` context blocks above the first node
+   * and below the last, so the peek shows what surrounds the selection. The section
+   * capture consumes whole sections, so without this a selection that fills a section
+   * leaves no in-section context; this pulls in the neighbouring heading + a paragraph
+   * or two for orientation. Inter-block whitespace <mark>s a cross-block selection
+   * left behind don't count toward the pad budget (they carry no content). Returns a
+   * new array in document order; `core` is unchanged.
+   */
+  function padContext(core, pad) {
+    if (!pad || !core.length) return core.slice();
+    const before = [];
+    let p = core[0].previousElementSibling, c = 0;
+    while (p && c < pad) {
+      if (!isHighlightMark(p)) { before.push(p); c++; }
+      p = p.previousElementSibling;
+    }
+    before.reverse();
+    const after = [];
+    let q = core[core.length - 1].nextElementSibling, d = 0;
+    while (q && d < pad) {
+      if (!isHighlightMark(q)) { after.push(q); d++; }
+      q = q.nextElementSibling;
+    }
+    return before.concat(core, after);
+  }
+
+  /**
+   * When the captured nodes exceed the char budget, keep the protected core (the
+   * blocks the selection actually touches, indices protectLo..protectHi) and grow a
+   * window outward — into the section remainder, then the context padding — until the
+   * next block would blow the cap. The protected core is never dropped, so the whole
+   * selection always stays in (the surrounding context is what gets sacrificed).
    */
   function trimToCap(nodes, protectLo, protectHi, maxChars, doc) {
-    const heading = isHeading(nodes[0]) ? nodes[0] : null;
     let lo = protectLo, hi = protectHi;
-    function current() {
-      const win = nodes.slice(lo, hi + 1);
-      return (heading && lo > 0) ? [heading].concat(win) : win;
-    }
+    function current() { return nodes.slice(lo, hi + 1); }
     let grew = true;
     while (grew) {
       grew = false;
@@ -195,16 +220,18 @@
    * blocks paints one <mark> per text slice (all sharing the comment id), so a
    * comment can touch several blocks — even several sections. Each comment maps to
    * the UNION of every section its selection touches (first slice's section through
-   * the last's), so the popup shows the whole selected passage with context, not
-   * just the start. Single-section spans that fit the cap are shared between
-   * comments; oversized captures trim context around the touched blocks while always
-   * keeping the full selection. Doc-level notes (anchor==null) and comments whose
-   * highlight isn't painted are skipped.
+   * the last's), so the popup shows the whole selected passage, not just the start.
+   * That union is then padded with a few context blocks above and below (see
+   * padContext) so the peek shows what surrounds the selection. Single-section spans
+   * that fit the cap are shared between comments; oversized captures trim the padding
+   * around the touched core while always keeping the full selection. Doc-level notes
+   * (anchor==null) and comments whose highlight isn't painted are skipped.
    * @param {Object} cfg
    * @param {Node} cfg.root        the painted content root (#noteback-doc-root)
    * @param {Document} cfg.doc
    * @param {Array} cfg.comments   current State.comments
    * @param {number} [cfg.maxSectionChars=16000]
+   * @param {number} [cfg.contextPad=3]  context blocks padded above/below the selection
    * @returns {{ sections: Array<{id,html}>, styles: string, sectionByCommentId: Object }}
    */
   function extractSections(cfg) {
@@ -241,21 +268,24 @@
         }
       });
 
-      let html = assembleHtml(nodes, doc);
-      let key;
-      if (html.length <= maxChars) {
-        // A single-section span can be shared between comments; a multi-section span
-        // is per-comment (its exact extent varies).
-        key = heads.length === 1 ? nodes[0] : c.id;
-      } else {
-        key = c.id;
-        let lo = indexOfContaining(nodes, blocks[0]);
-        let hi = indexOfContaining(nodes, blocks[blocks.length - 1]);
-        if (lo < 0) lo = 0;
-        if (hi < 0) hi = nodes.length - 1;
-        if (lo > hi) { const t = lo; lo = hi; hi = t; }
-        html = assembleHtml(trimToCap(nodes, lo, hi, maxChars, doc), doc);
-      }
+      // Pad with a few context blocks above/below the touched section(s) for
+      // orientation. The selection (the touched blocks) is the protected part; under
+      // the char cap the surrounding context — section remainder, then padding — is
+      // sacrificed outward-in first, the selection never.
+      const pad = (cfg.contextPad == null) ? CONTEXT_PAD_BLOCKS : cfg.contextPad;
+      const all = padContext(nodes, pad);
+      let lo = indexOfContaining(all, blocks[0]);
+      let hi = indexOfContaining(all, blocks[blocks.length - 1]);
+      if (lo < 0) lo = 0;
+      if (hi < 0) hi = all.length - 1;
+      if (lo > hi) { const t = lo; lo = hi; hi = t; }
+
+      let html = assembleHtml(all, doc);
+      if (html.length > maxChars) html = assembleHtml(trimToCap(all, lo, hi, maxChars, doc), doc);
+      // A single-section span has deterministic content per section (same core + same
+      // neighbouring pad), so it can be shared between comments; a multi-section span
+      // is per-comment (its exact extent varies).
+      const key = heads.length === 1 ? nodes[0] : c.id;
       let existingId = null;
       for (let i = 0; i < keyed.length; i++) { if (keyed[i].key === key) { existingId = keyed[i].id; break; } }
       if (existingId) { sectionByCommentId[c.id] = existingId; return; }
