@@ -289,14 +289,14 @@
 
       case 'NOTEBACK_COPY_HTML':
         ready.then(function (c) {
-          const state = c ? c.getState() : null;
-          onCopyHtml(state, { clean: !!msg.clean })
+          if (!c) { sendResponse({ ok: false, error: 'not booted' }); return; }
+          onCopyHtml(c.getState(), { clean: !!msg.clean })
             .then(function (html) { return copyToClipboard(html); })
             .then(function (ok) {
               if (!ok) throw new Error('clipboard write failed');
               sendResponse({ ok: true });
             })
-            .catch(function (err) { sendResponse({ ok: false, error: String(err && err.message || err) }); });
+            .catch(function (err) { sendResponse({ ok: false, error: String((err && err.message) || err) }); });
         });
         return true;
 
