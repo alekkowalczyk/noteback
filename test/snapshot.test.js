@@ -219,6 +219,27 @@ test('extractSections unions every section a multi-block selection spans (not ju
   assert.ok(html.indexOf('Sec C') === -1 && html.indexOf('c1') === -1, 'section C must be excluded');
 });
 
+test('extractSections drops inter-block whitespace marks a cross-block selection sweeps up', () => {
+  const mkWrap = function () { const kids = []; return { appendChild: function (c) { kids.push(c); }, get innerHTML() { return kids.map(function (k) { return k._html || ''; }).join(''); } }; };
+  const doc = { createElement: function (t) { return t === 'div' ? mkWrap() : fakeEl(t); }, querySelectorAll: function () { return []; } };
+  const root = { tagName: 'DIV', nodeType: 1, parentElement: null };
+  // A bare highlight <mark> sitting at section level (it wraps the whitespace
+  // between </p> and <h2> that the selection swept up).
+  const ws = { tagName: 'MARK', nodeType: 1, className: 'noteback-highlight', _html: '<mark class="noteback-highlight"> </mark>', getAttribute: function () { return null; }, querySelectorAll: function () { return []; }, cloneNode: function () { return { querySelectorAll: function () { return []; }, _html: '<mark class="noteback-highlight"> </mark>' }; } };
+  const nodes = [fakeEl('H2', 'A-head'), fakeEl('P', 'a1'), ws, fakeEl('H2', 'B-head'), fakeEl('P', 'b1')];
+  nodes.forEach(function (n, i) { n.parentElement = root; n.previousElementSibling = nodes[i - 1] || null; n.nextElementSibling = nodes[i + 1] || null; });
+  function markIn(block) { return { tagName: 'MARK', nodeType: 1, parentElement: block, getAttribute: function () { return null; }, querySelectorAll: function () { return []; }, cloneNode: function () { return { querySelectorAll: function () { return []; }, _html: '' }; } }; }
+  const marks = [markIn(nodes[1]), ws, markIn(nodes[4])]; // selection a1 ... (ws) ... b1
+  root.querySelector = function () { return marks[0]; };
+  root.querySelectorAll = function (sel) { return /data-noteback-id="c1"/.test(sel) ? marks : []; };
+
+  const ex = snap.extractSections({ root: root, doc: doc, comments: [{ id: 'c1', body: 'x', anchor: { quote: 'a1 ... b1' } }] });
+  assert.strictEqual(ex.sections.length, 1);
+  const html = ex.sections[0].html;
+  ['A-head', 'a1', 'B-head', 'b1'].forEach(function (t) { assert.ok(html.indexOf(t) !== -1, 'has ' + t); });
+  assert.ok(html.indexOf('noteback-highlight') === -1, 'no stray whitespace highlight mark leaked into the snapshot');
+});
+
 test('extractSections trims an oversized section but still captures the commented block', () => {
   const { doc, root } = sceneDom(true);
   // A tiny cap forces the trim path; the section is still produced (windowed).

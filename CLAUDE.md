@@ -70,6 +70,17 @@ the code, that have already bitten us once.
   reproduction. The highlighted quote is interpolated into an injected `<script>`,
   so it is escaped with `.replace(/<\//g, '<\\/')` to prevent a `</script>` in the
   quote from breaking out (a real quote from an HTML/security doc can contain it).
+  The popup re-highlights the quote with a CROSS-NODE matcher (`overlay.nbHistHighlight`,
+  serialized via `toString()`): a multi-block selection's quote spans several text
+  nodes, so a single-text-node `indexOf` can't find it. It also matches whitespace
+  loosely (`\s*`, not `\s+`) because the snapshot drops the inter-block whitespace
+  the live selection swept up (those bare whitespace `<mark>`s are stripped in
+  `snapshot.assembleHtml`), so the quote's whitespace may have no counterpart.
+- **A selection paints one `<mark>` per text slice (same id), so a comment can span
+  many blocks/sections.** `snapshot.extractSections` therefore unions every section
+  the selection touches (via `querySelectorAll`, not `querySelector` — using only the
+  first mark captured just the start, a bug we shipped once). See its block-collection
+  loop and the per-section dedupe.
 - **History snapshots are read from the PAINTED highlights — paint before persist.**
   `snapshot.extractSections` locates a comment's section by querying
   `mark.noteback-highlight[data-noteback-id="<id>"]` in the live doc. So

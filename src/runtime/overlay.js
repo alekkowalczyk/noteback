@@ -1237,6 +1237,56 @@
       return d.toLocaleString();
     }
 
+    /**
+     * Highlighter injected into the snapshot iframe. Self-contained (no closure
+     * refs) — serialized via toString() and re-run in the iframe with the quote as
+     * its argument. Searches ACROSS text nodes (a multi-block selection's quote
+     * spans several) and tolerates whitespace differences, then wraps each touched
+     * slice in a <mark> (mirroring the main highlighter), so the whole selected
+     * passage is highlighted, not just a single-node match.
+     */
+    function nbHistHighlight(q) {
+      try {
+        if (!q) return;
+        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+        var nodes = [], starts = [], text = '', n;
+        while ((n = walker.nextNode())) {
+          var pn = n.parentNode;
+          if (pn && (pn.nodeName === 'SCRIPT' || pn.nodeName === 'STYLE')) continue;
+          starts.push(text.length); nodes.push(n); text += n.nodeValue;
+        }
+        var idx = text.indexOf(q), len = q.length;
+        if (idx < 0) {
+          // Whitespace-tolerant fallback: the stored quote keeps the inter-block
+          // whitespace the selection swept up, but the snapshot drops it (blocks end
+          // up adjacent), so each whitespace run becomes \s* (zero-or-more), not \s+.
+          var esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*');
+          var mt = new RegExp(esc).exec(text);
+          if (!mt) return;
+          idx = mt.index; len = mt[0].length;
+        }
+        var end = idx + len, segs = [];
+        for (var k = 0; k < nodes.length; k++) {
+          var s0 = starts[k], s1 = s0 + nodes[k].nodeValue.length;
+          if (s1 <= idx) continue;
+          if (s0 >= end) break;
+          var ls = Math.max(0, idx - s0), le = Math.min(s1, end) - s0;
+          if (le > ls) segs.push([nodes[k], ls, le]);
+        }
+        for (var s = segs.length - 1; s >= 0; s--) {
+          var nd = segs[s][0], a = segs[s][1], b = segs[s][2], full = nd.nodeValue;
+          if (b < full.length) nd.splitText(b);
+          if (a > 0) nd = nd.splitText(a);
+          var mk = document.createElement('mark');
+          mk.style.background = '#fde68a';
+          nd.parentNode.replaceChild(mk, nd);
+          mk.appendChild(nd);
+        }
+        var first = document.querySelector('mark');
+        if (first) first.scrollIntoView({ block: 'center' });
+      } catch (e) {}
+    }
+
     function openHistoryPopup(contentHash, comment) {
       Promise.resolve(history.getSection({ contentHash: contentHash, sectionId: comment.sectionId })).then(function (sec) {
         const back = doc.createElement('div');
@@ -1253,7 +1303,7 @@
         const quote = (comment.anchor && comment.anchor.quote) || '';
         const styles = (sec && sec.styles) || '';
         const bodyHtml = (sec && sec.html) || '<p>(context no longer stored)</p>';
-        const script = '<scr' + 'ipt>(function(){try{var q=' + JSON.stringify(quote).replace(/<\//g, '<\\/') + ';if(!q)return;var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);var n;while(n=w.nextNode()){var i=n.nodeValue.indexOf(q);if(i>=0){var r=document.createRange();r.setStart(n,i);r.setEnd(n,i+q.length);var m=document.createElement("mark");m.style.background="#fde68a";r.surroundContents(m);m.scrollIntoView({block:"center"});break;}}}catch(e){}})();</scr' + 'ipt>';
+        const script = '<scr' + 'ipt>(' + nbHistHighlight.toString() + ')(' + JSON.stringify(quote).replace(/<\//g, '<\\/') + ');</scr' + 'ipt>';
         frame.srcdoc = '<!DOCTYPE html><html><head><base href="' + (typeof location !== 'undefined' ? location.href : '') + '"><style>' + styles + '</style></head><body>' + bodyHtml + script + '</body></html>';
         panel.appendChild(close); panel.appendChild(frame);
         back.appendChild(panel); uiRoot.appendChild(back);

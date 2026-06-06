@@ -144,10 +144,21 @@
     return out;
   }
 
+  /** True if `node` is a highlight <mark> (not a content block). */
+  function isHighlightMark(node) {
+    return !!(node && node.tagName === 'MARK' && (' ' + (node.className || '') + ' ').indexOf(' ' + HL_CLASS + ' ') !== -1);
+  }
+
   /** Concatenated cleaned HTML for an ordered list of section nodes. */
   function assembleHtml(nodes, doc) {
     const wrap = doc.createElement('div');
-    for (let i = 0; i < nodes.length; i++) wrap.appendChild(cleanClone(nodes[i]));
+    for (let i = 0; i < nodes.length; i++) {
+      // A selection that crosses block boundaries wraps the inter-block whitespace
+      // in bare <mark>s that sit at the section level — skip them so they don't leak
+      // stray highlighted whitespace into the snapshot.
+      if (isHighlightMark(nodes[i])) continue;
+      wrap.appendChild(cleanClone(nodes[i]));
+    }
     return wrap.innerHTML;
   }
 
@@ -208,12 +219,16 @@
       const marks = root.querySelectorAll('mark.' + HL_CLASS + '[data-noteback-id="' + c.id + '"]');
       if (!marks || !marks.length) return; // orphaned / not painted
 
-      // Distinct blocks the selection touches, in document order.
+      // Distinct blocks the selection touches, in document order. A mark with no
+      // block ancestor (enclosingBlock returns the mark itself) is inter-block
+      // whitespace the selection swept up — not a content block; skip it.
       const blocks = [];
       for (let i = 0; i < marks.length; i++) {
         const b = enclosingBlock(marks[i], root);
+        if (b === marks[i]) continue;
         if (blocks.indexOf(b) === -1) blocks.push(b);
       }
+      if (!blocks.length) return;
       // Union of every section those blocks fall in, in document order (a contiguous
       // selection touches contiguous sections, so no gaps).
       const nodes = [];

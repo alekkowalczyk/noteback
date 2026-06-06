@@ -165,8 +165,8 @@ test('history snapshot is captured on create and the "Earlier feedback" entry op
   }
 });
 
-/** Read the headings rendered inside the snapshot popup iframe (pierces shadow DOM). */
-async function popupHeadings(page) {
+/** Read headings + highlight info from inside the snapshot popup iframe (pierces shadow DOM). */
+async function popupInfo(page) {
   return page.evaluate(() => {
     function findFrame(node) {
       if (node.shadowRoot) {
@@ -177,9 +177,13 @@ async function popupHeadings(page) {
       for (const c of node.children || []) { const r = findFrame(c); if (r) return r; }
       return null;
     }
-    const f = findFrame(document.documentElement);
-    const d = f.contentDocument;
-    return Array.from(d.body.querySelectorAll('h1,h2,h3,h4,h5,h6')).map((h) => h.textContent.trim());
+    const d = findFrame(document.documentElement).contentDocument;
+    const marks = Array.from(d.querySelectorAll('mark'));
+    return {
+      headings: Array.from(d.body.querySelectorAll('h1,h2,h3,h4,h5,h6')).map((h) => h.textContent.trim()),
+      markCount: marks.length,
+      markedText: marks.map((m) => m.textContent).join(' ').replace(/\s+/g, ' ').trim()
+    };
   });
 }
 
@@ -226,9 +230,12 @@ test('a selection spanning sections captures BOTH ends in the popup, not just th
     await page.locator('.nb-hist-item').first().click();
     await page.waitForTimeout(400);
 
-    const headings = await popupHeadings(page);
-    assert.ok(headings.includes('Overview'), 'start-of-selection section is present');
-    assert.ok(headings.includes('Architecture'), 'end-of-selection section is present too (not just the start)');
+    const info = await popupInfo(page);
+    assert.ok(info.headings.includes('Overview'), 'start-of-selection section is present');
+    assert.ok(info.headings.includes('Architecture'), 'end-of-selection section is present too (not just the start)');
+    // The selected passage is highlighted across blocks/sections (not nothing).
+    assert.ok(info.markCount >= 1, 'the selected passage is highlighted in the popup');
+    assert.ok(/Architecture/.test(info.markedText), 'the highlight spans into the second section (cross-block)');
   } finally {
     await context.close();
   }
