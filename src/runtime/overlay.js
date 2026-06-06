@@ -1535,14 +1535,22 @@
       if (cloneRoot) cloneRoot.innerHTML = snapInner;
 
       // Re-seed the machine-readable state block with the version's comments.
+      // The JSON lands in a <script> element's textContent and is then serialized
+      // via outerHTML, which emits raw-text VERBATIM (it does NOT escape
+      // </script>). A comment body or docTitle containing "</script>" would break
+      // out of the state block, truncating the JSON and making any trailing
+      // markup live in the opened tab (self-XSS). Escape exactly as the canonical
+      // exporter does (escapeForJsonScript): "<\/script" serializes verbatim and
+      // JSON.parse reads "\/" back as "/", so the comment round-trips intact.
       const stateEl = clone.querySelector('#noteback-state');
       if (stateEl) {
-        stateEl.textContent = JSON.stringify({
+        const stateJson = JSON.stringify({
           schemaVersion: 1,
           docId: docId || '',
           docTitle: docTitle || '',
           comments: v.comments || []
         });
+        stateEl.textContent = stateJson.replace(/<\/(script)/gi, '<\\/$1');
       }
 
       return '<!DOCTYPE html>\n' + clone.outerHTML;

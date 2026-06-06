@@ -90,7 +90,12 @@ test('the Versions timeline renders an earlier version row with working open + c
     await page.reload();
     await page.waitForTimeout(300);
 
-    await createComment(page, 'Draft-1 feedback note');
+    // Body carries a </script> breakout payload: if the checkout builder serialized
+    // the state <script> without escaping, this would close the state block early
+    // and inject live markup into the opened tab (self-XSS). The escaping is
+    // asserted below.
+    const D1_BODY = 'Draft-1 feedback note </script><img src=x onerror=alert(1)>';
+    await createComment(page, D1_BODY);
 
     // A version snapshot must be captured under the doc lineage at create time.
     const draft1 = await page.evaluate(() => {
@@ -192,16 +197,24 @@ test('the Versions timeline renders an earlier version row with working open + c
     // fetch the blob text, and assert the built canvas carries the version's
     // state block + comment body + the baked doc-id.
     await page.evaluate(() => {
+      window.__nbOpenOriginal = window.open;
       window.__nbOpened = [];
       window.open = (url) => { window.__nbOpened.push(url); return null; };
     });
-    await openBtn.click();
-    await page.waitForTimeout(300);
-    const checkoutHtml = await page.evaluate(async () => {
-      const url = (window.__nbOpened || [])[0];
-      if (!url) return null;
-      return await (await fetch(url)).text();
-    });
+    let checkoutHtml = null;
+    try {
+      await openBtn.click();
+      await page.waitForTimeout(300);
+      checkoutHtml = await page.evaluate(async () => {
+        const url = (window.__nbOpened || [])[0];
+        if (!url) return null;
+        return await (await fetch(url)).text();
+      });
+    } finally {
+      // Restore the real window.open so any later appended assertion doesn't
+      // inherit the stub.
+      await page.evaluate(() => { if (window.__nbOpenOriginal) window.open = window.__nbOpenOriginal; });
+    }
     assert.ok(checkoutHtml, 'open() handed window.open a blob URL');
     assert.ok(
       checkoutHtml.indexOf('noteback-state') !== -1,
@@ -214,6 +227,25 @@ test('the Versions timeline renders an earlier version row with working open + c
     assert.ok(
       checkoutHtml.indexOf('data-noteback-doc-id') !== -1,
       'the checkout canvas keeps the baked doc-id (it is a real canvas)'
+    );
+
+    // --- Safety: the </script> breakout payload must NOT survive unescaped. ---
+    // The raw sequence would close the state <script> early (truncating the JSON
+    // AND making the trailing markup live in the opened tab). The checkout builder
+    // escapes "</script" -> "<\/script" before it lands in the script textContent.
+    assert.ok(
+      !checkoutHtml.includes('</script><img src=x onerror=alert(1)>'),
+      'the raw </script> breakout sequence does NOT appear unescaped in the checkout HTML'
+    );
+    assert.ok(
+      checkoutHtml.includes('<\\/script'),
+      'the </script> in the comment body is escaped to <\\/script in the state block'
+    );
+    // Sanity: the comment data still round-trips (it lives safely inside the
+    // escaped JSON string, not as live markup).
+    assert.ok(
+      checkoutHtml.includes('onerror=alert(1)'),
+      'the comment body data survives (inside the escaped JSON state block)'
     );
   } finally {
     await context.close();
