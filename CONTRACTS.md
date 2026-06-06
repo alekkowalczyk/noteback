@@ -375,6 +375,7 @@ Each receives the current `State`.
 /**
  * @typedef {Object} ExporterHooks
  * @property {(state: State) => void|Promise<void>}   [onCopyMarkdown] Copy feedback as Markdown.
+ * @property {(state: State, opts: {clean?: boolean}) => Promise<string>} [onCopyHtml] Build HTML for the clipboard — the clean document (clean:true) or the full feedback canvas (clean:false). Returns the string; the overlay/popup writes it to the clipboard.
  * @property {(state: State) => void|Promise<void>}   [onSaveCanvas]   Save HTML *with* comments (re-shareable canvas).
  * @property {(state: State) => void|Promise<void>}   [onSaveClean]    Save HTML *without* Noteback (the original document).
  * @property {(state: State) => void}                 [onSavePdf]      Produce a PDF. Omit to use the overlay's default (`window.print()`).
@@ -383,10 +384,18 @@ Each receives the current `State`.
 
 Footer **Save…** menu → hooks: *HTML · with comments* → `onSaveCanvas`,
 *HTML · clean copy* → `onSaveClean`, *PDF/Print* → `onSavePdf` (default `window.print()`).
+
+Footer **Copy ▾** menu → `onCopyHtml`: *Copy html (with feedback)* →
+`onCopyHtml(state, {clean:false})` (same bytes as `onSaveCanvas`), *Copy html
+(clean)* → `onCopyHtml(state, {clean:true})` (same bytes as `onSaveClean`). The
+main "Copy feedback" button still uses `onCopyMarkdown`. In extension mode the
+with-feedback variant is assembled by the service worker (`NOTEBACK_BUILD_CANVAS`)
+and returned as a string; the page writes it to the clipboard.
+
 PDF cleanliness relies on the runtime's `@media print` rules (overlay `BUTTON_CSS`),
 which hide every `[data-noteback-ui]` node and strip highlight styling — so a PDF is
-the clean document without needing a hook. The embedded canvas supplies `onSaveCanvas`
-+ `onSaveClean`; both serialize the live document (clean copy additionally removes the
+the clean document without needing a hook. The embedded canvas supplies `onSaveCanvas`,
+`onSaveClean`, and `onCopyHtml`; the save hooks serialize the live document (clean copy additionally removes the
 state block, the inlined runtime `<script>`, the `#noteback-doc-root` wrapper, the
 guiding comment, and the title suffix) and persist via `saveCanvasInPlace`/`downloadCanvas`
 under the plain document filename.
