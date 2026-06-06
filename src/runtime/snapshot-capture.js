@@ -63,7 +63,6 @@
     out = out.replace(/<script\b[^>]*>([^<]|<(?!\/script))*NotebackRuntime([^<]|<(?!\/script))*<\/script\s*>/gi, '');
 
     // Unwrap highlight marks: <mark ... class="noteback-highlight" ...>text</mark> -> text
-    out = out.replace(/<mark\b[^>]*\bnotebook-highlight\b[^>]*>([\s\S]*?)<\/mark\s*>/gi, '$1');
     out = out.replace(/<mark\b[^>]*\bnoteback-highlight\b[^>]*>([\s\S]*?)<\/mark\s*>/gi, '$1');
 
     return out;
