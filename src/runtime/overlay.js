@@ -543,7 +543,7 @@
     const elList = sidebar.querySelector('.nb-list');
     const saveWrap = sidebar.querySelector('.nb-save-wrap');
     const saveBtn = sidebar.querySelector('.nb-save-btn');
-    const saveMenu = sidebar.querySelector('.nb-menu');
+    const saveMenu = saveWrap.querySelector('.nb-menu');
     const copyWrap = sidebar.querySelector('.nb-copy-wrap');
     const copyCaretBtn = sidebar.querySelector('.nb-copy-caret-btn');
     const copyMenu = sidebar.querySelector('.nb-copy-menu');
