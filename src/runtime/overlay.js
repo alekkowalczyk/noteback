@@ -262,12 +262,37 @@
     '.nb-copy-caret-btn .nb-caret{font-size:10px;line-height:1;opacity:.85;transition:transform .18s var(--dropdown-ease);}',
     '.nb-copy-wrap.nb-menu-open .nb-copy-caret-btn .nb-caret{transform:rotate(180deg);}',
 
-    /* earlier-feedback history + snapshot popup */
-    '.nb-history{margin-top:10px;border-top:1px solid var(--nb-line);padding-top:8px;}',
-    '.nb-hist-draft{font-size:12px;color:var(--nb-ink-soft,#6b7280);margin:8px 0 4px;}',
-    '.nb-hist-item{display:block;width:100%;text-align:left;border:none;background:none;cursor:pointer;padding:6px 8px;border-radius:8px;font:inherit;color:inherit;}',
-    '.nb-hist-item:hover:not(:disabled){background:var(--nb-accent-wash);}',
-    '.nb-hist-item:disabled{opacity:.55;cursor:default;}',
+    /* version timeline (snapshot-history-design §3) + snapshot peek popup */
+    '.nb-versions{margin-top:14px;border-top:1px solid var(--nb-line);}',
+    '.nb-versions .nb-group-label{margin:13px 4px 4px;}',
+    '.nb-ver-rest[hidden]{display:none;}',
+    '.nb-ver-row{padding:9px 4px;border-top:1px solid var(--nb-line);}',
+    '.nb-ver-row:first-of-type{border-top:none;}',
+    '.nb-ver-row.active{background:var(--nb-accent-wash);border-radius:10px;border-top:none;margin-top:2px;}',
+    '.nb-ver-line{display:flex;align-items:center;gap:9px;font:500 13px/1.3 var(--nb-ui);color:var(--nb-ink);cursor:pointer;}',
+    '.nb-ver-row.active .nb-ver-line{cursor:default;}',
+    '.nb-ver-dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--nb-ink-faint);flex:none;box-sizing:border-box;}',
+    '.nb-ver-row.active .nb-ver-dot{background:var(--nb-accent);border-color:var(--nb-accent);}',
+    '.nb-ver-name{font:700 13px/1.2 var(--nb-round);color:var(--nb-ink);}',
+    '.nb-ver-meta{font:400 11.5px/1.2 var(--nb-ui);color:var(--nb-ink-soft);}',
+    '.nb-ver-spacer{flex:1;}',
+    '.nb-ver-here{font:700 9.5px/1 var(--nb-round);letter-spacing:.08em;text-transform:uppercase;color:var(--nb-accent-deep);}',
+    '.nb-ver-count{font:600 11px/1 var(--nb-mono,ui-monospace,SFMono-Regular,Menlo,monospace);background:#efe7d6;',
+    '  border:1px solid var(--nb-line);border-radius:999px;padding:2px 9px;color:var(--nb-ink-soft);}',
+    '.nb-ver-row.active .nb-ver-count{background:#fff;}',
+    '.nb-ver-actions{display:flex;gap:7px;margin:8px 0 0 19px;}',
+    '.nb-ver-btn{font:600 12px/1 var(--nb-round);padding:5px 11px;border-radius:9px;border:1px solid var(--nb-line-strong);',
+    '  background:var(--nb-card);color:var(--nb-ink);cursor:pointer;transition:background .14s ease,border-color .14s ease;}',
+    '.nb-ver-btn:hover:not(:disabled){background:var(--nb-accent-wash);border-color:var(--nb-accent);color:var(--nb-accent-deep);}',
+    '.nb-ver-open{background:var(--nb-accent);border-color:var(--nb-accent);color:#fffdf8;}',
+    '.nb-ver-open:hover:not(:disabled){background:var(--nb-accent-deep);border-color:var(--nb-accent-deep);color:#fffdf8;}',
+    '.nb-ver-btn:disabled{opacity:.42;cursor:default;}',
+    '.nb-disclose{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:none;background:none;cursor:pointer;',
+    '  padding:11px 4px;border-top:1px solid var(--nb-line);border-radius:0;}',
+    '.nb-disclose:hover .nb-disclose-label{color:var(--nb-accent-deep);}',
+    '.nb-disclose-chev{display:inline-flex;color:var(--nb-ink-faint);font-size:14px;line-height:1;transition:transform .16s ease;}',
+    '.nb-disclose.nb-open .nb-disclose-chev{transform:rotate(90deg);}',
+    '.nb-disclose-label{font:700 10px/1 var(--nb-round);letter-spacing:.08em;text-transform:uppercase;color:var(--nb-ink-soft);}',
     '.nb-hist-backdrop{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;}',
     '.nb-hist-panel{position:relative;width:min(820px,92vw);height:min(80vh,720px);background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35);}',
     '.nb-hist-close{position:absolute;top:8px;right:8px;z-index:2;border:none;background:#0001;border-radius:50%;width:28px;height:28px;cursor:pointer;}',
@@ -1193,7 +1218,7 @@
           '<strong>No notes yet</strong>' +
           'Select any text and click <b>Comment</b>, or add a note about the whole document above.';
         elList.appendChild(empty);
-        renderHistory();
+        renderVersions();
         updateLauncher();
         return;
       }
@@ -1210,43 +1235,226 @@
         orphans.forEach(function (c) { elList.appendChild(renderItem(c, 'orphan')); });
       }
 
-      renderHistory();
+      renderVersions();
       updateLauncher();
     }
 
-    function renderHistory() {
+    /**
+     * The "Versions" timeline group (snapshot-history-design.html \u00A73). It shows the
+     * document's version history when there is earlier feedback:
+     *   - 0 earlier versions  \u2192 render nothing (the group is hidden entirely).
+     *   - exactly 1 earlier   \u2192 show it inline.
+     *   - 2+ earlier          \u2192 show the MOST-RECENT earlier version inline and tuck
+     *                           the rest under a "+N older versions" disclosure.
+     * A "now" row (the current draft) sits at the top with no action buttons.
+     * Version labels are ordinal by age: with N earlier versions (getHistory is
+     * newest-first), the newest earlier entry is v{N}, the next v{N-1}, \u2026 oldest v1.
+     */
+    function renderVersions() {
       if (!history) return;
-      const existing = elList.querySelector('.nb-history');
+      const existing = elList.querySelector('.nb-versions');
       if (existing) existing.remove();
       const wrap = doc.createElement('div');
-      wrap.className = 'nb-history';
-      wrap.setAttribute('data-noteback-ui', 'history');
+      wrap.className = 'nb-versions';
+      wrap.setAttribute(UI_ATTR, 'versions');
       elList.appendChild(wrap);
-      Promise.resolve(history.getHistory()).then(function (drafts) {
-        if (!drafts || drafts.length === 0) { wrap.remove(); return; }
+      Promise.resolve(history.getHistory()).then(function (versions) {
+        // Collapse rule: 0 earlier versions \u2192 the group is not rendered at all.
+        if (!versions || versions.length === 0) { wrap.remove(); return; }
+
         const label = doc.createElement('div');
         label.className = 'nb-group-label';
-        label.textContent = 'Earlier feedback (' + drafts.length + (drafts.length === 1 ? ' draft)' : ' drafts)');
+        label.textContent = 'Versions';
         wrap.appendChild(label);
-        drafts.forEach(function (d) {
-          const dl = doc.createElement('div');
-          dl.className = 'nb-hist-draft';
-          dl.textContent = 'Draft \u00B7 ' + formatWhen(d.lastEditedAt || d.firstSeenAt) + ' (' + d.comments.length + ')';
-          wrap.appendChild(dl);
-          d.comments.forEach(function (c) {
-            const item = doc.createElement('button');
-            item.type = 'button';
-            item.className = 'nb-hist-item';
-            const quote = (c.anchor && c.anchor.quote) ? condense(c.anchor.quote) : '(note on the whole document)';
-            item.textContent = '\u201C' + quote + '\u201D \u2014 ' + (c.body || '');
-            if (c.anchor && d.hasSnapshot && c.sectionId) {
-              item.addEventListener('click', function () { openHistoryPopup(d.contentHash, c); });
-            } else {
-              item.disabled = true;
-            }
-            wrap.appendChild(item);
+
+        // The "now" row: the live draft, no actions, status dot active.
+        wrap.appendChild(renderNowRow());
+
+        const total = versions.length; // earlier versions, newest-first
+        // The most-recent earlier version always stays inline.
+        wrap.appendChild(renderVersionRow(versions[0], total - 0, total));
+
+        if (total >= 2) {
+          // 2+ earlier versions \u2192 collapse indices 1..end under a disclosure.
+          const rest = doc.createElement('div');
+          rest.className = 'nb-ver-rest';
+          rest.setAttribute(UI_ATTR, 'versions-rest');
+          rest.hidden = true;
+          for (let i = 1; i < total; i++) {
+            rest.appendChild(renderVersionRow(versions[i], total - i, total));
+          }
+          const disclose = doc.createElement('button');
+          disclose.type = 'button';
+          disclose.className = 'nb-disclose';
+          disclose.setAttribute(UI_ATTR, 'versions-disclose');
+          const chev = doc.createElement('span');
+          chev.className = 'nb-disclose-chev';
+          chev.textContent = '\u203A'; // \u203A
+          const dlabel = doc.createElement('span');
+          dlabel.className = 'nb-disclose-label';
+          const remaining = total - 1;
+          dlabel.textContent = '+' + remaining + ' older version' + (remaining === 1 ? '' : 's');
+          disclose.appendChild(chev);
+          disclose.appendChild(dlabel);
+          disclose.addEventListener('click', function () {
+            const open = rest.hidden;
+            rest.hidden = !open;
+            disclose.classList.toggle('nb-open', open);
+            disclose.style.display = open ? 'none' : '';
           });
-        });
+          wrap.appendChild(disclose);
+          wrap.appendChild(rest);
+        }
+      });
+    }
+
+    /** The current-draft "now" row. No actions; status dot active. */
+    function renderNowRow() {
+      const s = getState();
+      const count = (s && Array.isArray(s.comments)) ? s.comments.length : 0;
+      const row = doc.createElement('div');
+      row.className = 'nb-ver-row active';
+      row.setAttribute(UI_ATTR, 'version-now');
+      const line = doc.createElement('div');
+      line.className = 'nb-ver-line';
+      const dot = doc.createElement('span');
+      dot.className = 'nb-ver-dot';
+      const name = doc.createElement('span');
+      name.className = 'nb-ver-name';
+      name.textContent = 'now';
+      const spacer = doc.createElement('span');
+      spacer.className = 'nb-ver-spacer';
+      const here = doc.createElement('span');
+      here.className = 'nb-ver-here';
+      here.textContent = 'you are here';
+      const cnt = doc.createElement('span');
+      cnt.className = 'nb-ver-count';
+      cnt.textContent = String(count);
+      line.appendChild(dot);
+      line.appendChild(name);
+      line.appendChild(spacer);
+      line.appendChild(here);
+      line.appendChild(cnt);
+      row.appendChild(line);
+      return row;
+    }
+
+    /**
+     * One earlier-version row: dot, v-label, time, count, and open + copy-feedback
+     * actions. The row BODY peeks the snapshot; the buttons stopPropagation so a
+     * button click doesn't also peek.
+     * @param {Object} d      a getHistory() entry
+     * @param {number} ordinal the v-number (oldest = 1)
+     * @param {number} total  total earlier versions (for a11y labels)
+     */
+    function renderVersionRow(d, ordinal, total) {
+      const row = doc.createElement('div');
+      row.className = 'nb-ver-row';
+      row.setAttribute(UI_ATTR, 'version');
+      row.setAttribute('data-version-key', d.versionKey || '');
+
+      const line = doc.createElement('div');
+      line.className = 'nb-ver-line';
+      const dot = doc.createElement('span');
+      dot.className = 'nb-ver-dot';
+      const name = doc.createElement('span');
+      name.className = 'nb-ver-name';
+      name.textContent = 'v' + ordinal;
+      const meta = doc.createElement('span');
+      meta.className = 'nb-ver-meta';
+      meta.textContent = formatWhen(d.lastEditedAt || d.createdAt);
+      const spacer = doc.createElement('span');
+      spacer.className = 'nb-ver-spacer';
+      const cnt = doc.createElement('span');
+      cnt.className = 'nb-ver-count';
+      cnt.textContent = String((d.comments && d.comments.length) || 0);
+      line.appendChild(dot);
+      line.appendChild(name);
+      line.appendChild(meta);
+      line.appendChild(spacer);
+      line.appendChild(cnt);
+      // Clicking the row body = peek the snapshot in context.
+      line.addEventListener('click', function () { openVersionPeek(d.versionKey); });
+      row.appendChild(line);
+
+      const acts = doc.createElement('div');
+      acts.className = 'nb-ver-actions';
+      const open = doc.createElement('button');
+      open.type = 'button';
+      open.className = 'nb-ver-btn nb-ver-open';
+      open.textContent = 'open';
+      if (!d.hasSnapshot) {
+        // Pruned snapshot (design state C): the heavy snapshot is evicted, so
+        // there is nothing to open \u2014 but the feedback survives, so copy still works.
+        open.disabled = true;
+        open.title = 'Snapshot no longer stored';
+      } else {
+        open.addEventListener('click', function (e) { e.stopPropagation(); openVersionTab(d.versionKey); });
+      }
+      const copy = doc.createElement('button');
+      copy.type = 'button';
+      copy.className = 'nb-ver-btn nb-ver-copy';
+      copy.textContent = 'copy feedback';
+      copy.addEventListener('click', function (e) { e.stopPropagation(); copyVersionFeedback(d); });
+      acts.appendChild(open);
+      acts.appendChild(copy);
+      row.appendChild(acts);
+      return row;
+    }
+
+    /** Export one earlier version's feedback as markdown, to the clipboard. */
+    async function copyVersionFeedback(d) {
+      const versionState = { docTitle: d.docTitle || '', comments: (d.comments || []).slice() };
+      let md = null;
+      if (markdownApi && typeof markdownApi.toMarkdown === 'function') {
+        md = markdownApi.toMarkdown(versionState, {});
+      } else if (renderMd) {
+        md = renderMd(versionState);
+      }
+      if (md == null) { toast('Markdown unavailable'); return; }
+      const ok = await copyToClipboard(md);
+      if (ok) toast('Copied feedback as Markdown', { success: true });
+      else toast('Copy failed \u2014 select & copy manually');
+    }
+
+    /**
+     * Peek a past version: open its full clean-document snapshot in the existing
+     * snapshot modal (iframe srcdoc). Pruned snapshots (html === '') are a no-op.
+     * Task 11 upgrades this to the live painter + a "Back to current" banner.
+     */
+    function openVersionPeek(versionKey) {
+      Promise.resolve(history.getVersion({ versionKey: versionKey })).then(function (v) {
+        if (!v || !v.html) return; // pruned \u2014 nothing to peek
+        const back = doc.createElement('div');
+        back.className = 'nb-hist-backdrop';
+        back.setAttribute(UI_ATTR, 'version-peek');
+        const panel = doc.createElement('div');
+        panel.className = 'nb-hist-panel';
+        const close = doc.createElement('button');
+        close.type = 'button'; close.className = 'nb-hist-close'; close.textContent = '\u2715';
+        close.addEventListener('click', function () { back.remove(); });
+        back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
+        const frame = doc.createElement('iframe');
+        frame.className = 'nb-hist-frame';
+        frame.srcdoc = v.html; // the full clean-document snapshot
+        panel.appendChild(close); panel.appendChild(frame);
+        back.appendChild(panel); uiRoot.appendChild(back);
+      });
+    }
+
+    /**
+     * Open a past version as a standalone document in a new tab. Pruned snapshots
+     * (html === '') are a no-op. Task 11 makes this a real annotatable canvas
+     * checkout; a blob-URL open of the snapshot is enough for now.
+     */
+    function openVersionTab(versionKey) {
+      Promise.resolve(history.getVersion({ versionKey: versionKey })).then(function (v) {
+        if (!v || !v.html) return; // pruned \u2014 nothing to open
+        try {
+          const blob = new Blob([v.html], { type: 'text/html' });
+          const url = URL.createObjectURL(blob);
+          if (win && typeof win.open === 'function') win.open(url, '_blank');
+        } catch (e) { toast('Could not open version'); }
       });
     }
 
@@ -1309,29 +1517,6 @@
         var first = document.querySelector('mark');
         if (first) first.scrollIntoView({ block: 'center' });
       } catch (e) {}
-    }
-
-    function openHistoryPopup(contentHash, comment) {
-      Promise.resolve(history.getSection({ contentHash: contentHash, sectionId: comment.sectionId })).then(function (sec) {
-        const back = doc.createElement('div');
-        back.className = 'nb-hist-backdrop';
-        back.setAttribute('data-noteback-ui', 'history-popup');
-        const panel = doc.createElement('div');
-        panel.className = 'nb-hist-panel';
-        const close = doc.createElement('button');
-        close.type = 'button'; close.className = 'nb-hist-close'; close.textContent = '\u2715';
-        close.addEventListener('click', function () { back.remove(); });
-        back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
-        const frame = doc.createElement('iframe');
-        frame.className = 'nb-hist-frame';
-        const quote = (comment.anchor && comment.anchor.quote) || '';
-        const styles = (sec && sec.styles) || '';
-        const bodyHtml = (sec && sec.html) || '<p>(context no longer stored)</p>';
-        const script = '<scr' + 'ipt>(' + nbHistHighlight.toString() + ')(' + JSON.stringify(quote).replace(/<\//g, '<\\/') + ');</scr' + 'ipt>';
-        frame.srcdoc = '<!DOCTYPE html><html><head><base href="' + (typeof location !== 'undefined' ? location.href : '') + '"><style>' + styles + '</style></head><body>' + bodyHtml + script + '</body></html>';
-        panel.appendChild(close); panel.appendChild(frame);
-        back.appendChild(panel); uiRoot.appendChild(back);
-      });
     }
 
     function groupLabel(textValue) {
