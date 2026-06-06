@@ -21,3 +21,12 @@ test('chrome-kv-store get/set/remove/keys round-trip', async () => {
   await kv.remove('nb:doc:D1');
   assert.strictEqual(await kv.get('nb:doc:D1'), null);
 });
+
+test('chrome-kv-store keys() returns [] on empty store', async () => {
+  const kv = mod.createChromeKvStore(fakeChrome());
+  assert.deepStrictEqual(await kv.keys(), []);
+});
+
+test('chrome-kv-store createChromeKvStore throws when chrome.storage.local is unavailable', () => {
+  assert.throws(() => mod.createChromeKvStore(null), /chrome\.storage\.local/);
+});
