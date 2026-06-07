@@ -630,8 +630,8 @@
       '        <span class="nb-mi-label">HTML · with comments</span>' +
       '        <span class="nb-mi-sub">highlights &amp; notes, re-shareable</span></button>' +
       '      <button type="button" class="nb-menu-item nb-save-history" role="menuitem" hidden>' +
-      '        <span class="nb-mi-label">HTML · with comments and history</span>' +
-      '        <span class="nb-mi-sub">embeds version history in the file</span></button>' +
+      '        <span class="nb-mi-label">HTML · with history</span>' +
+      '        <span class="nb-mi-sub">as above plus history</span></button>' +
       '      <div class="nb-menu-sep" role="none"></div>' +
       '      <button type="button" class="nb-menu-item nb-save-clean" role="menuitem">' +
       '        <span class="nb-mi-label">HTML · clean copy</span>' +
