@@ -366,3 +366,13 @@ test('buildCanvasHtml bakes data-noteback-doc-id onto #noteback-doc-root', () =>
   assert.ok(html.includes('data-noteback-doc-id="D7a"'), 'baked id present');
   assert.ok(!html.includes('{{DOC_ID}}'), 'token consumed');
 });
+
+test('EMBEDDED_BOOT wires historyControl + isEnabled for the live opt-out gear', () => {
+  const boot = exporter.EMBEDDED_BOOT;
+  assert.ok(/nb:nohist:global/.test(boot), 'reads the global opt-out flag key');
+  assert.ok(/nb:nohist:doc:/.test(boot), 'reads the per-doc opt-out flag key');
+  assert.ok(/var historyControl =/.test(boot), 'builds a historyControl object');
+  assert.ok(/isEnabled:\s*function/.test(boot), 'passes isEnabled into the history adapter');
+  assert.ok(/historyControl:\s*historyControl/.test(boot), 'passes historyControl into boot()');
+  assert.ok(/available:/.test(boot), 'historyControl exposes an availability flag');
+});
