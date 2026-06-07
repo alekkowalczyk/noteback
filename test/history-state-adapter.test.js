@@ -157,6 +157,48 @@ test('clearCurrent empties comments and resets the capture-once path', async () 
   assert.strictEqual(vv.html, '<html>SNAP-2</html>', 're-captured snapshot reflects the post-clear save');
 });
 
+test('isEnabled()=false makes the adapter pass through to inner (no version), flip on restores history', async () => {
+  const store = fakeStore();
+  let on = false; // start DISABLED
+  const inner = fakeInner();
+  const a = mod.createHistoryStateAdapter({
+    doc: { title: 'T', getElementById: () => ({ textContent: LONG }) },
+    store, inner, docId: 'D1',
+    contentText: () => LONG, captureSnapshot: () => '<html>SNAP</html>',
+    draftHistory: core, codec: idCodec, now: () => '2026-06-05T00:00:00Z',
+    isEnabled: () => on
+  });
+  // Disabled: a save writes through inner but records NO version.
+  await a.load();
+  const comments = [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }];
+  await a.save({ schemaVersion: 1, docId: 'D1', docTitle: 'T', comments: comments });
+  assert.deepStrictEqual(await a.getHistory(), [], 'no history while disabled');
+  assert.strictEqual((await inner.load()).comments.length, 1, 'comment still written through inner');
+  const verKeysWhileOff = (await store.keys()).filter((k) => k.indexOf('nb:ver:') === 0);
+  assert.strictEqual(verKeysWhileOff.length, 0, 'no version record created while disabled');
+
+  // Flip ON: the same adapter now records the current draft as a version.
+  on = true;
+  await a.save({ schemaVersion: 1, docId: 'D1', docTitle: 'T', comments: comments });
+  const verKeysWhileOn = (await store.keys()).filter((k) => k.indexOf('nb:ver:') === 0);
+  assert.strictEqual(verKeysWhileOn.length, 1, 'a version record exists once re-enabled');
+  // It is the CURRENT version (excluded from getHistory), so a fresh sibling draft sees it as history.
+  const b = mod.createHistoryStateAdapter({ doc: { title: 'T', getElementById: () => ({ textContent: LONG + ' changed.' }) }, store, inner: fakeInner(), docId: 'D1', contentText: () => LONG + ' changed.', captureSnapshot: () => '<html>OTHER</html>', draftHistory: core, codec: idCodec, now: () => '2026-06-05T00:00:02Z' });
+  await b.load();
+  const hist = await b.getHistory();
+  assert.strictEqual(hist.length, 1, 'the re-enabled draft is visible as history to a later version');
+  assert.strictEqual(hist[0].comments.length, 1);
+});
+
+test('isEnabled defaults to true (omitted → unchanged behavior)', async () => {
+  const store = fakeStore();
+  const a = build(store, '<html>FIRST</html>'); // build() passes no isEnabled
+  await a.load();
+  await a.save({ schemaVersion: 1, docId: 'D1', docTitle: 'T', comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }] });
+  const verKeys = (await store.keys()).filter((k) => k.indexOf('nb:ver:') === 0);
+  assert.strictEqual(verKeys.length, 1, 'history records normally when isEnabled is omitted');
+});
+
 test('makeCodec gzip roundtrip (when CompressionStream is available)', async () => {
   if (typeof CompressionStream === 'undefined') return; // Node without CompressionStream: skip
   const c = mod.makeCodec();

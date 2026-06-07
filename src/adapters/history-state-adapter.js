@@ -49,6 +49,9 @@
    * @param {Object} [cfg.draftHistory]   override (tests); else rt().draftHistory
    * @param {Object} [cfg.codec]          override; else gzip-or-identity
    * @param {() => string} [cfg.now]
+   * @param {() => boolean} [cfg.isEnabled]  when it returns false the adapter passes
+   *   through to inner (no version/snapshot) and getHistory()/getVersion() report
+   *   empty — used by the embedded gear's live opt-out. Defaults to always-true.
    */
   function createHistoryStateAdapter(cfg) {
     const doc = cfg.doc, inner = cfg.inner || null;
@@ -59,15 +62,21 @@
     const codec = cfg.codec || makeCodec();
     const dh = usable ? dhMod.createDraftHistory({ store: cfg.store, now: now, codec: codec }) : null;
     let resolved = null;
+    const isEnabled = cfg.isEnabled || function () { return true; };
+    function currentlyEnabled() { try { return !!isEnabled(); } catch (e) { return true; } }
+    let lastEnabled = currentlyEnabled();
 
     function docTitle() { return (doc && doc.title) || ''; }
 
     function ensureResolved() {
+      const en = currentlyEnabled();
+      if (en !== lastEnabled) { resolved = null; lastEnabled = en; } // enabled flipped → re-resolve
       if (resolved) return Promise.resolve(resolved);
       const innerLoad = inner ? inner.load() : Promise.resolve(null);
       return innerLoad.then((innerState) => {
         const fallback = (innerState && innerState.comments) || [];
-        if (!usable) { resolved = { degraded: true, comments: fallback.slice(), versionKey: null, hasSnapshot: true }; return resolved; }
+        // !usable OR disabled → degrade to inner: comments flow, no version written.
+        if (!usable || !en) { resolved = { degraded: true, comments: fallback.slice(), versionKey: null, hasSnapshot: true }; return resolved; }
         return dh.resolve({ docId: docId, contentText: cfg.contentText ? cfg.contentText() : '', fallbackComments: fallback, docTitle: docTitle() })
           .then((r) => { resolved = { degraded: r.degraded, docId: r.docId, versionKey: r.versionKey, comments: r.comments, hasSnapshot: !!r.hasSnapshot }; return resolved; });
       });
@@ -112,7 +121,7 @@
       },
 
       getVersion: function (ref) {
-        if (!usable) return Promise.resolve(null);
+        if (!usable || !currentlyEnabled()) return Promise.resolve(null);
         return dh.version({ versionKey: ref.versionKey });
       },
 
