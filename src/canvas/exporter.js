@@ -174,6 +174,7 @@
     '        getVersion: function (ref) { return adapter.getVersion(ref); },',
     '        clearCurrent: function () { return adapter.clearCurrent(); }',
     '      } : null),',
+    '      mode: "embedded",',
     '      docId: (typeof location !== "undefined" ? location.href : ""),',
     '      docTitle: suggestedName()',
     '    });',

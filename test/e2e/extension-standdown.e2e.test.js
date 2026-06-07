@@ -150,11 +150,19 @@ test('the extension stands down on a canvas (single overlay; comment -> localSto
       await probe.locator('[data-noteback-ui="panel"]').first().waitFor({ state: 'attached', timeout: 6000 });
       injected = true;
     } catch (e) { injected = false; }
-    await probe.close();
     if (!injected) {
+      await probe.close();
       t.skip('the unpacked extension did not inject in this environment');
       return;
     }
+    // On a plain page the extension mounts its OWN overlay — its info dialog must
+    // report "extension mode" (the embedded canvas reports "embedded mode").
+    assert.strictEqual(
+      ((await probe.locator('.nb-info-mode').textContent()) || '').trim(),
+      'extension mode',
+      'the extension-mounted overlay shows the extension-mode indicator'
+    );
+    await probe.close();
 
     // The real scenario: open the canvas with the extension active.
     const page = await extContext.newPage();

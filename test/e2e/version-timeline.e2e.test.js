@@ -126,6 +126,18 @@ test('the Versions timeline renders an earlier version row with working open + c
     const groupLabel = await versions.locator('.nb-group-label').first().textContent();
     assert.strictEqual((groupLabel || '').trim(), 'Versions', 'the group carries the "Versions" label');
 
+    // The timeline docks at the BOTTOM (its own band above the action buttons), not
+    // inside the scrolling comment list, so the comments keep the available room.
+    assert.strictEqual(await page.locator('.nb-versions-dock .nb-versions').count(), 1, 'the timeline lives in the bottom versions dock');
+    assert.strictEqual(await page.locator('.nb-list .nb-versions').count(), 0, 'the timeline is NOT inside the scrolling comment list');
+
+    // The info dialog carries the run-mode indicator (this is a saved canvas).
+    assert.strictEqual(
+      ((await page.locator('.nb-info-mode').textContent()) || '').trim(),
+      'embedded mode',
+      'the info dialog shows the embedded-mode indicator'
+    );
+
     // The "now" row exists (current draft, no actions).
     assert.strictEqual(await page.locator('.nb-ver-row.active').count(), 1, 'the "now" row is present');
     assert.strictEqual(
@@ -173,24 +185,41 @@ test('the Versions timeline renders an earlier version row with working open + c
       const f = findFrame(document.documentElement);
       if (!f) return null;
       const cd = f.contentDocument;
+      const mark = cd.querySelector('mark.noteback-highlight');
+      const panel = f.parentElement; // .nb-hist-panel (panel > backBar + frame)
       return {
         textLen: (cd.body.textContent || '').length,
-        marks: cd.querySelectorAll('mark.noteback-highlight').length
+        marks: cd.querySelectorAll('mark.noteback-highlight').length,
+        frameH: Math.round(f.getBoundingClientRect().height),
+        panelH: Math.round(panel.getBoundingClientRect().height),
+        markBg: mark ? f.contentWindow.getComputedStyle(mark).backgroundColor : null
       };
     });
     assert.ok(peek && peek.textLen > 0, 'the peek iframe shows the captured snapshot');
     assert.ok(peek.marks >= 1, 'the live painter wrapped the commented quote in a <mark.noteback-highlight> (got ' + (peek && peek.marks) + ')');
 
-    // "Back to current" control: present in the panel, and closes the peek on click.
-    const backCtrl = page.locator('.nb-hist-back');
-    assert.strictEqual(await backCtrl.count(), 1, 'the "Back to current" control is present');
+    // The iframe FILLS the panel below the back bar. Regression: an iframe is a
+    // replaced element, so top+bottom+height:auto did NOT stretch it — it collapsed
+    // to the intrinsic ~150px and the doc sat in a thin strip at the top (~20%). An
+    // explicit height:calc(100% - 38px) fixes it.
     assert.ok(
-      /Back to current/.test((await backCtrl.first().textContent()) || ''),
-      'the control reads "Back to current"'
+      peek.frameH >= peek.panelH * 0.8,
+      'the snapshot iframe fills the panel (frame ' + peek.frameH + 'px of panel ' + peek.panelH + 'px — was ~150px)'
     );
+    // The peek highlight matches the LIVE document (HIGHLIGHT_CSS is re-injected into
+    // the clean snapshot): honey #ffe7a3, not a bare browser <mark> yellow.
+    assert.strictEqual(peek.markBg, 'rgb(255, 231, 163)', 'the peek highlight uses the live honey styling (got ' + peek.markBg + ')');
+
+    // "Back" control: present, reads "Back" (not "Back to current"), and closes the
+    // peek. The redundant ✕ close button is gone (the full-width bar replaces it).
+    const backCtrl = page.locator('.nb-hist-back');
+    assert.strictEqual(await backCtrl.count(), 1, 'the "Back" control is present');
+    const backText = (await backCtrl.first().textContent()) || '';
+    assert.ok(/Back/.test(backText) && !/current/.test(backText), 'the control reads "Back" (got "' + backText + '")');
+    assert.strictEqual(await page.locator('.nb-hist-close').count(), 0, 'the redundant ✕ close button is removed');
     await backCtrl.first().click();
     await page.waitForTimeout(150);
-    assert.strictEqual(await page.locator('.nb-hist-backdrop').count(), 0, '"Back to current" closes the peek');
+    assert.strictEqual(await page.locator('.nb-hist-backdrop').count(), 0, 'clicking "Back" closes the peek');
 
     // --- Checkout: "open" builds a real annotatable canvas of the version. ---
     // window.open is unobservable headless, so capture the blob URL it's handed,

@@ -258,6 +258,7 @@
           adapter: built.adapter,
           exporter: exporter,
           history: built.history,
+          mode: 'extension',
           docId: docId,
           docTitle: docTitle
         });

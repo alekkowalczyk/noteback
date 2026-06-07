@@ -138,6 +138,7 @@
       adapter: adapter,
       exporter: cfg.exporter || {},
       history: cfg.history || null,
+      mode: cfg.mode, // 'extension' | 'embedded' — drives the info-dialog mode indicator
       getState: getState,
       setState: setState,
       onChange: function () { repaint(); },

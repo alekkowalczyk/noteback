@@ -55,9 +55,29 @@
    * head for the floating light-DOM button).                                *
    * ----------------------------------------------------------------------- */
 
+  // The painted highlight — a filled honey swatch with rounded corners and a 1px
+  // darker-yellow ring; the passage being actively commented gets a teal ring.
+  // Shared so the version-peek iframe paints highlights identically to the live
+  // document (openVersionPeek injects this into the snapshot's <head>).
+  const HIGHLIGHT_CSS =
+    'mark.noteback-highlight{' +
+    '  background:#ffe7a3;color:inherit;border-radius:4px;padding:0 1.5px;cursor:pointer;' +
+    '  box-shadow:0 0 0 1px rgba(210,158,40,.55);' +
+    '  -webkit-box-decoration-break:clone;box-decoration-break:clone;' +
+    '  transition:background .2s ease,box-shadow .2s ease;' +
+    '}' +
+    'mark.noteback-highlight:hover{background:#ffdd83;box-shadow:0 0 0 1px rgba(198,148,34,.8);}' +
+    /* the passage being commented in the open editor — teal-ringed to stand out */
+    'mark.noteback-highlight[data-noteback-id="__nb_preview"]{' +
+    '  background:#ffdd83;box-shadow:0 0 0 2px rgba(18,122,114,.6);}' +
+    'mark.noteback-highlight-flash{' +
+    '  background:#ffd166 !important;border-radius:4px !important;' +
+    '  box-shadow:0 0 0 2px rgba(18,122,114,.6) !important;' +
+    '  transition:background .25s ease,box-shadow .25s ease;' +
+    '}';
+
   // Light-DOM styles: the floating "Comment" chip that appears on selection, and
-  // the painted highlight — a filled honey swatch with rounded corners and a 1px
-  // darker-yellow ring. The passage being actively commented gets a teal ring.
+  // the painted highlight (HIGHLIGHT_CSS, shared with the peek).
   const BUTTON_CSS = [
     '.noteback-fab{',
     '  position:absolute;z-index:2147483646;',
@@ -77,22 +97,8 @@
     '@keyframes nb-fab-pop{0%{opacity:0;transform:scale(.8) translateY(3px);}',
     '  55%{opacity:1;}100%{opacity:1;transform:scale(1) translateY(0);}}',
     '.noteback-fab:hover{background:#0e6960;}',
-    '.noteback-fab:active{transform:scale(.96);}',
-    'mark.noteback-highlight{',
-    '  background:#ffe7a3;color:inherit;border-radius:4px;padding:0 1.5px;cursor:pointer;',
-    '  box-shadow:0 0 0 1px rgba(210,158,40,.55);',
-    '  -webkit-box-decoration-break:clone;box-decoration-break:clone;',
-    '  transition:background .2s ease,box-shadow .2s ease;',
-    '}',
-    'mark.noteback-highlight:hover{background:#ffdd83;box-shadow:0 0 0 1px rgba(198,148,34,.8);}',
-    /* the passage being commented in the open editor — teal-ringed to stand out */
-    'mark.noteback-highlight[data-noteback-id="__nb_preview"]{',
-    '  background:#ffdd83;box-shadow:0 0 0 2px rgba(18,122,114,.6);}',
-    'mark.noteback-highlight-flash{',
-    '  background:#ffd166 !important;border-radius:4px !important;',
-    '  box-shadow:0 0 0 2px rgba(18,122,114,.6) !important;',
-    '  transition:background .25s ease,box-shadow .25s ease;',
-    '}',
+    '.noteback-fab:active{transform:scale(.96);}'
+  ].join('') + HIGHLIGHT_CSS + [
     '@media (prefers-reduced-motion: reduce){',
     '  .noteback-fab,mark.noteback-highlight,mark.noteback-highlight-flash{transition:none !important;animation:none !important;}',
     '  .noteback-fab,.noteback-fab.nb-in{opacity:1;transform:none;animation:none !important;}',
@@ -182,9 +188,15 @@
     '.nb-cmd-copy{flex:none;border:1px solid var(--nb-line);background:#fff;cursor:pointer;border-radius:8px;',
     '  font:600 11px/1 var(--nb-ui);padding:6px 9px;color:var(--nb-ink-soft);transition:background .15s ease,color .15s ease;}',
     '.nb-cmd-copy:hover{background:#f3f2ef;color:var(--nb-ink);}',
-    '.nb-info-link{display:inline-block;margin-top:13px;font:600 12px/1 var(--nb-ui);',
+    '.nb-info-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:14px;}',
+    '.nb-info-link{display:inline-block;font:600 12px/1 var(--nb-ui);',
     '  color:#2563eb;text-decoration:none;}',
     '.nb-info-link:hover{text-decoration:underline;}',
+    /* small mode indicator (bottom-right of the info card): extension vs embedded */
+    '.nb-info-mode{display:inline-flex;align-items:center;gap:5px;flex:none;',
+    '  font:700 9.5px/1 var(--nb-round);letter-spacing:.07em;text-transform:uppercase;',
+    '  color:var(--nb-ink-faint);white-space:nowrap;}',
+    '.nb-info-mode::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--nb-accent);flex:none;}',
 
     /* list */
     '.nb-list{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:13px 14px 16px;scrollbar-width:thin;}',
@@ -263,8 +275,13 @@
     '.nb-copy-wrap.nb-menu-open .nb-copy-caret-btn .nb-caret{transform:rotate(180deg);}',
 
     /* version timeline (docs/design.md §14.4) + snapshot peek popup */
-    '.nb-versions{margin-top:14px;border-top:1px solid var(--nb-line);}',
-    '.nb-versions .nb-group-label{margin:13px 4px 4px;}',
+    // Docked at the bottom of the sidebar, above .nb-foot: a bounded, self-scrolling
+    // band so the comment list (flex:1) keeps the room. Collapses (no border) when
+    // there are no earlier versions.
+    '.nb-versions-dock{flex:0 0 auto;max-height:34vh;overflow-y:auto;overflow-x:hidden;',
+    '  border-top:1px solid var(--nb-line);padding:2px 14px 8px;scrollbar-width:thin;}',
+    '.nb-versions-dock:empty{display:none;}',
+    '.nb-versions .nb-group-label{margin:11px 4px 4px;}',
     '.nb-ver-rest[hidden]{display:none;}',
     '.nb-ver-row{padding:9px 4px;border-top:1px solid var(--nb-line);}',
     '.nb-ver-row:first-of-type{border-top:none;}',
@@ -295,13 +312,15 @@
     '.nb-disclose-label{font:700 10px/1 var(--nb-round);letter-spacing:.08em;text-transform:uppercase;color:var(--nb-ink-soft);}',
     '.nb-hist-backdrop{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;}',
     '.nb-hist-panel{position:relative;width:min(820px,92vw);height:min(80vh,720px);background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35);}',
-    '.nb-hist-close{position:absolute;top:8px;right:8px;z-index:3;border:none;background:#0001;border-radius:50%;width:28px;height:28px;cursor:pointer;}',
     '.nb-hist-back{position:absolute;top:0;left:0;right:0;z-index:2;display:flex;align-items:center;gap:6px;',
     '  border:none;border-bottom:1px solid var(--nb-line);background:var(--nb-accent-wash);color:var(--nb-accent-deep);',
-    '  font:700 12px/1 var(--nb-round);letter-spacing:.01em;padding:11px 40px 11px 14px;cursor:pointer;text-align:left;',
+    '  font:700 12px/1 var(--nb-round);letter-spacing:.01em;padding:11px 14px;cursor:pointer;text-align:left;',
     '  transition:background .14s ease,color .14s ease;}',
     '.nb-hist-back:hover{background:var(--nb-accent);color:#fffdf8;}',
-    '.nb-hist-frame{position:absolute;top:38px;left:0;right:0;bottom:0;width:100%;height:auto;border:0;background:#fff;}',
+    // The iframe is a REPLACED element: top+bottom+height:auto does NOT stretch it
+    // (it falls back to the intrinsic ~150px, leaving the doc in a thin strip at the
+    // top). Give it an explicit height so it fills the panel below the back bar.
+    '.nb-hist-frame{position:absolute;top:38px;left:0;right:0;width:100%;height:calc(100% - 38px);border:0;background:#fff;}',
 
     /* toast + success check (transitions.dev) */
     '.nb-toast{position:fixed;bottom:20px;right:20px;display:inline-flex;align-items:center;gap:9px;',
@@ -443,6 +462,11 @@
     const getState = cfg.getState || (function () { return null; });
     const setState = cfg.setState || function () {};
     const history = cfg.history || null;
+    // How Noteback is running on this page — 'extension' (content script) or
+    // 'embedded' (inlined into a saved canvas). Surfaced as a small indicator in
+    // the info dialog. Defaults to embedded (the self-contained canvas is the
+    // common case); the extension passes 'extension' explicitly.
+    const runMode = (cfg.mode === 'extension') ? 'extension' : 'embedded';
     const onChange = cfg.onChange || function () {};
     // Prefer the runtime markdown module directly so we can hand it the document
     // markup for line references; fall back to the boot-supplied renderer.
@@ -521,6 +545,7 @@
       '  </div>' +
       '</div>' +
       '<div class="nb-list"></div>' +
+      '<div class="nb-versions-dock"></div>' +
       '<div class="nb-foot">' +
       '  <div class="nb-copy-wrap">' +
       '    <button type="button" class="nb-btn nb-secondary nb-copy">Copy feedback</button>' +
@@ -562,17 +587,21 @@
       '      <span class="nb-info-title">Hand yourself annotatable docs</span>' +
       '      <button type="button" class="nb-info-x" title="Close" aria-label="Close">×</button>' +
       '    </div>' +
-      '    <p class="nb-info-note">Noteback also ships as an agent skill + CLI, so an AI (Claude Code, etc.) can give you HTML that is already annotatable.</p>' +
+      '    <p class="nb-info-note">Skill so that AI produces annotable HTML\'s.</p>' +
       '    <div class="nb-cmd"><code>npx skills add alekkowalczyk/noteback</code>' +
       '      <button type="button" class="nb-cmd-copy" data-cmd="npx skills add alekkowalczyk/noteback" title="Copy command">Copy</button></div>' +
       '    <div class="nb-cmd"><code>npx noteback install-skill</code>' +
       '      <button type="button" class="nb-cmd-copy" data-cmd="npx noteback install-skill" title="Copy command">Copy</button></div>' +
-      '    <a class="nb-info-link" href="https://github.com/alekkowalczyk/noteback" target="_blank" rel="noopener noreferrer">View the project on GitHub ↗</a>' +
+      '    <div class="nb-info-foot">' +
+      '      <a class="nb-info-link" href="https://github.com/alekkowalczyk/noteback" target="_blank" rel="noopener noreferrer">View the project on GitHub ↗</a>' +
+      '      <span class="nb-info-mode" title="How Noteback is running on this page"></span>' +
+      '    </div>' +
       '  </div>' +
       '</div>';
 
     const elCount = sidebar.querySelector('.nb-count');
     const elList = sidebar.querySelector('.nb-list');
+    const elVersionsDock = sidebar.querySelector('.nb-versions-dock');
     const saveWrap = sidebar.querySelector('.nb-save-wrap');
     const saveBtn = sidebar.querySelector('.nb-save-btn');
     const saveMenu = saveWrap.querySelector('.nb-menu');
@@ -607,6 +636,8 @@
     /* --- info dialog (install-as-a-skill) ------------------------------- */
     const infoBtn = sidebar.querySelector('.nb-info');
     const infoDialog = sidebar.querySelector('.nb-info-dialog');
+    const infoModeEl = sidebar.querySelector('.nb-info-mode');
+    if (infoModeEl) infoModeEl.textContent = runMode + ' mode';
     let infoOpen = false;
     function openInfo() { infoDialog.hidden = false; infoOpen = true; infoBtn.setAttribute('aria-expanded', 'true'); }
     function closeInfo() { infoDialog.hidden = true; infoOpen = false; infoBtn.setAttribute('aria-expanded', 'false'); }
@@ -1324,12 +1355,16 @@
      */
     function renderVersions() {
       if (!history) return;
-      const existing = elList.querySelector('.nb-versions');
+      // The versions timeline docks at the BOTTOM of the sidebar (above the action
+      // buttons), not inside the scrolling comment list — so the comments/empty
+      // state fill the available space and the timeline stays put. See the
+      // .nb-versions-dock CSS.
+      const existing = elVersionsDock.querySelector('.nb-versions');
       if (existing) existing.remove();
       const wrap = doc.createElement('div');
       wrap.className = 'nb-versions';
       wrap.setAttribute(UI_ATTR, 'versions');
-      elList.appendChild(wrap);
+      elVersionsDock.appendChild(wrap);
       Promise.resolve(history.getHistory()).then(function (versions) {
         // Collapse rule: 0 earlier versions \u2192 the group is not rendered at all.
         if (!versions || versions.length === 0) { wrap.remove(); return; }
@@ -1497,9 +1532,10 @@
     /**
      * Peek a past version: parse its clean-document snapshot, run the LIVE
      * highlight painter over it (so the commented passages are wrapped in the
-     * same `<mark class="noteback-highlight">` the live doc uses), and show the
-     * result in the snapshot modal (iframe srcdoc). A "\u2190 Back to current" banner
-     * at the top of the panel returns to the live document (same as the \u2715 /
+     * same `<mark class="noteback-highlight">` the live doc uses), re-inject
+     * HIGHLIGHT_CSS so the marks are styled like the live doc, and show the result
+     * in the snapshot modal (iframe srcdoc, filling the panel). A full-width
+     * "\u2190 Back" banner at the top returns to the live document (same as a
      * backdrop click). Pruned snapshots (html === '') are a no-op.
      */
     function openVersionPeek(versionKey) {
@@ -1517,6 +1553,15 @@
           try {
             highlightApi.paintHighlights(parsed.body, { schemaVersion: 1, comments: v.comments || [] }, {});
           } catch (e) { /* keep the un-highlighted snapshot */ }
+          // The clean snapshot dropped Noteback's injected styles, so the painted
+          // marks would render as bare browser <mark>s. Re-inject HIGHLIGHT_CSS so
+          // the peek's highlights match the live document exactly.
+          try {
+            const hlStyle = parsed.createElement('style');
+            hlStyle.setAttribute(UI_ATTR, 'peek-highlight-style');
+            hlStyle.textContent = HIGHLIGHT_CSS;
+            (parsed.head || parsed.documentElement).appendChild(hlStyle);
+          } catch (e) { /* styling is best-effort */ }
           // Scroll the first highlight into view once the iframe loads.
           const scrollScript =
             '<scr' + 'ipt>(function(){var m=document.querySelector("mark.noteback-highlight");' +
@@ -1529,22 +1574,19 @@
         back.setAttribute(UI_ATTR, 'version-peek');
         const panel = doc.createElement('div');
         panel.className = 'nb-hist-panel';
-        const close = doc.createElement('button');
-        close.type = 'button'; close.className = 'nb-hist-close'; close.textContent = '\u2715';
-        close.addEventListener('click', function () { back.remove(); });
         back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
-        // "\u2190 Back to current" banner \u2014 an obvious clickable control that closes the
-        // peek and returns to the live document. (Locked wording: "Back to current".)
+        // "\u2190 Back" banner \u2014 the single, obvious control that closes the peek and
+        // returns to the live document (backdrop click does the same). It spans the
+        // top, so a separate \u2715 button would be redundant.
         const backBar = doc.createElement('button');
         backBar.type = 'button';
         backBar.className = 'nb-hist-back';
         backBar.setAttribute(UI_ATTR, 'version-peek-back');
-        backBar.textContent = '\u2190 Back to current';
+        backBar.textContent = '\u2190 Back';
         backBar.addEventListener('click', function () { back.remove(); });
         const frame = doc.createElement('iframe');
         frame.className = 'nb-hist-frame';
         frame.srcdoc = painted; // the snapshot with live highlights painted in
-        panel.appendChild(close);
         panel.appendChild(backBar);
         panel.appendChild(frame);
         back.appendChild(panel); uiRoot.appendChild(back);

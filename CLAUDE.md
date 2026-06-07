@@ -88,10 +88,24 @@ the code, that have already bitten us once.
   cross-node matcher.** `overlay.openVersionPeek` parses the stored snapshot with
   `DOMParser`, runs `highlightApi.paintHighlights(parsed.body, {comments}, {})` over it
   (the marks are created in the parsed doc's own `ownerDocument`, so they survive
-  serialization), and shows the result in an `<iframe srcdoc>` with a fixed
-  **"← Back to current"** banner (locked wording). No `nbHistHighlight`, no
-  `\s*`-loose whitespace re-finder — the painter re-anchors from the same comment data
-  the live doc uses. A pruned snapshot (`html === ''`) is a no-op.
+  serialization), re-injects the shared **`HIGHLIGHT_CSS`** into the snapshot's `<head>`
+  (the clean snapshot dropped Noteback's styles, so without it the marks render as bare
+  browser `<mark>`s instead of the honey live styling), and shows the result in an
+  `<iframe srcdoc>` under a single full-width **"← Back"** banner (no separate ✕). No
+  `nbHistHighlight`, no `\s*`-loose whitespace re-finder — the painter re-anchors from the
+  same comment data the live doc uses. A pruned snapshot (`html === ''`) is a no-op.
+- **The peek `<iframe>` needs an EXPLICIT height — it's a replaced element.** `top` +
+  `bottom` + `height:auto` does NOT stretch an iframe (replaced elements fall back to the
+  intrinsic ~150px), so the snapshot collapsed into a thin strip at the top of the panel
+  (~20%). `.nb-hist-frame` uses `top:38px;height:calc(100% - 38px)` to fill below the back
+  bar. Guarded by `version-timeline.e2e.test.js` (asserts the frame covers ≥80% of the
+  panel height).
+- **The Versions timeline docks at the BOTTOM of the sidebar, not inside the comment
+  list.** `renderVersions()` renders into `.nb-versions-dock` (a `flex:0 0 auto` band with
+  `max-height:34vh`, its own scroll, collapsing via `:empty` when there are no earlier
+  versions), a sibling between `.nb-list` (`flex:1`) and `.nb-foot`. So the current
+  draft's notes (or the "No notes yet" empty state) keep the available room and the
+  timeline stays put above the action buttons.
 - **CHECKOUT (`open`) re-seeds `#noteback-state` and MUST escape `</script>`.**
   `overlay.openVersionTab` → `buildVersionCanvasHtml` clones the live page shell (to
   keep the inlined runtime + styles), swaps the snapshot's `#noteback-doc-root` content

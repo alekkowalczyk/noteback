@@ -137,6 +137,10 @@ source of truth and is shared by the content script (gating) and the popup
   (§8). Default-**on** for `file`/`localhost`/`127.0.0.1`; for any other origin it is
   opt-in via `origin ∈ historySites`. When false the content script keeps the
   comments-only `ChromeStorageAdapter` (no version timeline). Decided at first mount.
+- `overlayMounted(doc) -> boolean` — true when a Noteback overlay is already mounted on
+  `doc` (any `[data-noteback-ui]` node). The content script calls this to stand down on a
+  page whose own embedded canvas runtime already booted (see §3.7's cross-world note);
+  `doc` is caller-supplied, so the module stays node-testable.
 
 **Active** → the content script mounts the overlay. **Dormant** → injected but
 mounts nothing (no chip, launcher, or listeners); stored comments are untouched.
@@ -343,6 +347,9 @@ Mode-agnostic UI: floating "💬 Comment" button, comment popover, sidebar.
  * @param {StorageAdapter} cfg.adapter    Persistence (see §1).
  * @param {Object} cfg.exporter           Export hooks (see §3.6); may be partial in embedded mode.
  * @param {Object} [cfg.history]          Snapshot-history adapter (see §1, §8); null/absent → timeline hidden.
+ * @param {string} [cfg.mode]             'extension' | 'embedded' — drives the info-dialog run-mode
+ *                                        indicator. Defaults to 'embedded' (the canvas is the common case);
+ *                                        the extension content script passes 'extension'.
  * @returns {{ destroy: () => void, refresh: () => Promise<void> }}
  */
 function mountOverlay(cfg) { ... }
@@ -445,16 +452,24 @@ Single entry point used by **both** modes.
 async function boot(cfg) { ... }
 ```
 
-**Single-mount guard (cross-module invariant).** `boot()` sets `window.__notebackBooted`
+**Single-mount guard (per JS world).** `boot()` sets `window.__notebackBooted`
 synchronously on first call (before any `await`) and stores its controller on
-`window.__notebackController`. A second `boot()` returns that existing controller
-instead of mounting again. This matters when a page carries **both** an embedded
-canvas runtime **and** the installed extension (opening a saved/agent-wrapped canvas
-with the extension on): the embedded canvas boots first (its inline script runs before
-the content script's `document_idle`), so it wins and the extension stands down — no
-duplicate launcher/sidebar, and the canvas's in-file state stays authoritative rather
-than competing with `chrome.storage`. `content-script.js` only **reads** the flag
-(early-returns if set); `boot.js` owns writing it, and `destroy()` clears it.
+`window.__notebackController`; a second `boot()` **in the same world** returns that
+controller instead of mounting again (a duplicate injection / re-boot).
+
+**Cross-world stand-down (embedded canvas vs. extension).** When a page carries **both**
+an embedded canvas runtime **and** the installed extension (opening a saved canvas with
+the extension on), the two run in **separate JS worlds** — the canvas in the page's MAIN
+world, the content script in an ISOLATED world — so neither sees the other's
+`__notebackBooted` flag. The hand-off goes through the **shared DOM** instead: `boot()`
+appends a synchronous `<div data-noteback-ui="mount">` marker (before its first `await`,
+so it's present by the extension's `document_idle`; `destroy()` removes it). The content
+script stands down when `originPolicy.overlayMounted(document)` finds any
+`[data-noteback-ui]` node — the embedded canvas boots at `DOMContentLoaded` (before
+`document_idle`), so it wins and the extension does **not** double-mount. Because the
+marker only exists when `boot()` actually ran, a canvas whose runtime was blocked (e.g.
+CSP) leaves no marker and the extension correctly takes over. Guarded by
+`test/e2e/extension-standdown.e2e.test.js` (loads the real unpacked extension).
 
 ---
 
@@ -675,14 +690,21 @@ equivalent (no DOM); `identityCodec` is the no-op gzip fallback.
 ### 8.7 Overlay — version timeline + peek + checkout
 
 The overlay renders a **version timeline** (`renderVersions`) instead of the old
-history popup. Collapse rule: **0** earlier versions → hidden; **1** → inline; **2+** →
-newest inline + a "+N older versions" disclosure. Each row has **open** and **copy
-feedback** actions and a whole-row **peek**:
+history popup. It docks at the **bottom** of the sidebar — `.nb-versions-dock`, a
+bounded (`max-height:34vh`), self-scrolling band between the scrolling comment list
+(`.nb-list`, `flex:1`) and the action footer (`.nb-foot`), collapsing via `:empty` when
+there are no earlier versions — so the current draft's notes keep the available space.
+Collapse rule: **0** earlier versions → hidden; **1** → inline; **2+** → newest inline +
+a "+N older versions" disclosure. Each row has **open** and **copy feedback** actions and
+a whole-row **peek**:
 
 - **Peek** (`openVersionPeek`) parses the stored snapshot and re-renders it by running
   the **live** highlight painter (`highlightApi.paintHighlights`) over the parsed doc —
-  no cross-node re-highlighter — inside an `<iframe srcdoc>`, with a fixed
-  **"← Back to current"** banner (exact wording).
+  no cross-node re-highlighter — then **re-injects the shared `HIGHLIGHT_CSS`** into the
+  snapshot `<head>` so the marks match the live document (the clean snapshot dropped
+  Noteback's styles). It renders inside an `<iframe srcdoc>` that **fills the panel**
+  (`height:calc(100% - 38px)` — an iframe is a replaced element, so `top`+`bottom` alone
+  collapse it to ~150px), under a single full-width **"← Back"** banner (no separate ✕).
 - **Checkout** (`openVersionTab` → `buildVersionCanvasHtml`) opens a version as a real,
   annotatable canvas: it clones the live page shell (keeping the inlined runtime +
   styles), strips Noteback UI/marks, swaps in the snapshot's `#noteback-doc-root`

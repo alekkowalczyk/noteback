@@ -307,8 +307,15 @@ A single panel adapts to where you are:
   earlier version stays inline while the rest tuck under a "+N older versions"
   disclosure. Last round of feedback is always zero-click; deeper history is one click;
   the current draft is never buried.
-- **Peek** expands the row in place with a pinned **"← Back to current"** banner;
-  **open** promotes the same version to a live canvas in a new tab.
+- **Layout:** the live comments (or the "No notes yet" empty state) own the scrollable
+  space; the Versions timeline **docks at the bottom** — a bounded, self-scrolling band
+  above the action buttons — so it never pushes the current draft's notes out of view.
+- **Peek** renders that version full-bleed in a modal: the snapshot **fills the panel**
+  (it's an `<iframe>`, a replaced element, so it needs an explicit height — top+bottom
+  alone collapse it to a thin strip), with highlights **styled exactly like the live
+  document** (the shared `HIGHLIGHT_CSS` is re-injected into the clean snapshot). A single
+  pinned **"← Back"** banner spans the top and closes it (no separate ✕ — it'd be
+  redundant). **Open** promotes the same version to a live canvas in a new tab.
 - **Edge states:** first read (Versions list hidden until there's something in it);
   history unavailable (storage blocked or content too short to fingerprint — comments
   still save, only the timeline steps aside); a site you haven't opted into (no
@@ -348,7 +355,7 @@ A single panel adapts to where you are:
 - **Checkout depth — full:** inline peek + open as a live canvas tab + copy feedback.
 - **Re-wrap continuity — yes:** `wrap` preserves the baked doc-id (reuse from the `-o`
   target, plus a `--id` escape hatch). Worst case it mints a new lineage — graceful.
-- **"Return to live" wording — "Back to current".**
+- **"Return to live" wording — "Back"** (one full-width banner; the redundant ✕ is gone).
 - **Sequencing — both modes at once:** one cutover to the shared engine + both kv
   backends.
 - **Collapsed history:** most-recent earlier version inline; rest under "+N older
