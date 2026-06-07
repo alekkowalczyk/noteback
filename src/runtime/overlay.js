@@ -76,6 +76,24 @@
     '  transition:background .25s ease,box-shadow .25s ease;' +
     '}';
 
+  // Styles for the popover shown INSIDE a version peek iframe when a highlight is
+  // clicked (openVersionPeek injects this into the snapshot's <head>). It lives in
+  // the snapshot's own document, so it must be self-contained (no shadow vars).
+  const PEEK_POP_CSS =
+    '.nb-peek-pop{position:fixed;z-index:2147483647;max-width:320px;min-width:190px;' +
+    '  background:#ffffff;border:1px solid #e6e5e2;border-radius:12px;' +
+    '  box-shadow:0 18px 40px -20px rgba(40,40,38,.5),0 2px 6px rgba(20,30,20,.08);' +
+    '  padding:11px 13px;color:#2b2b29;' +
+    '  font:400 13.5px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;' +
+    '  opacity:0;transform:translateY(4px);transition:opacity .14s ease,transform .14s ease;pointer-events:none;}' +
+    '.nb-peek-pop.nb-show{opacity:1;transform:translateY(0);pointer-events:auto;}' +
+    '.nb-peek-pop-quote{display:block;border-left:2px solid #ffd166;padding-left:8px;margin-bottom:7px;' +
+    '  font:italic 400 12px/1.45 ui-serif,Georgia,"Times New Roman",serif;color:#6c6c68;' +
+    '  max-height:56px;overflow:hidden;}' +
+    '.nb-peek-pop-body{white-space:pre-wrap;word-break:break-word;}' +
+    '.nb-peek-pop-empty{color:#a2a09b;font-style:italic;}' +
+    '@media (prefers-reduced-motion: reduce){.nb-peek-pop{transition:none;}}';
+
   // Light-DOM styles: the floating "Comment" chip that appears on selection, and
   // the painted highlight (HIGHLIGHT_CSS, shared with the peek).
   const BUTTON_CSS = [
@@ -297,13 +315,19 @@
     '.nb-ver-count{font:600 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;background:#efe7d6;',
     '  border:1px solid var(--nb-line);border-radius:999px;padding:2px 9px;color:var(--nb-ink-soft);}',
     '.nb-ver-row.active .nb-ver-count{background:#fff;}',
-    '.nb-ver-actions{display:flex;gap:7px;margin:8px 0 0 19px;}',
-    '.nb-ver-btn{font:600 12px/1 var(--nb-round);padding:5px 11px;border-radius:9px;border:1px solid var(--nb-line-strong);',
-    '  background:var(--nb-card);color:var(--nb-ink);cursor:pointer;transition:background .14s ease,border-color .14s ease;}',
-    '.nb-ver-btn:hover:not(:disabled){background:var(--nb-accent-wash);border-color:var(--nb-accent);color:var(--nb-accent-deep);}',
-    '.nb-ver-open{background:var(--nb-accent);border-color:var(--nb-accent);color:#fffdf8;}',
-    '.nb-ver-open:hover:not(:disabled){background:var(--nb-accent-deep);border-color:var(--nb-accent-deep);color:#fffdf8;}',
-    '.nb-ver-btn:disabled{opacity:.42;cursor:default;}',
+    /* per-row actions live behind a chevron next to the version name; clicking it
+       opens .nb-ver-menu (a portaled .nb-menu positioned in JS, since the dock
+       clips overflow) with Open + Copy feedback. */
+    '.nb-ver-menu-btn{flex:none;border:none;background:none;cursor:pointer;color:var(--nb-ink-faint);',
+    '  display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;',
+    '  font-size:10px;line-height:1;padding:0;margin-left:-3px;',
+    '  transition:background .14s ease,color .14s ease,transform .18s var(--dropdown-ease);}',
+    '.nb-ver-menu-btn:hover{background:#ececea;color:var(--nb-ink);}',
+    '.nb-ver-menu-btn[aria-expanded="true"]{color:var(--nb-accent-deep);transform:rotate(180deg);}',
+    '.nb-ver-menu{position:fixed;left:0;top:auto;right:auto;bottom:auto;width:214px;transform-origin:bottom left;}',
+    '.nb-ver-menu .nb-mi-sub{text-transform:none;letter-spacing:normal;}',
+    '.nb-ver-menu .nb-menu-item:disabled{opacity:.42;cursor:default;}',
+    '.nb-ver-menu .nb-menu-item:disabled .nb-mi-label{color:var(--nb-ink);}',
     '.nb-disclose{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:none;background:none;cursor:pointer;',
     '  padding:11px 4px;border-top:1px solid var(--nb-line);border-radius:0;}',
     '.nb-disclose:hover .nb-disclose-label{color:var(--nb-accent-deep);}',
@@ -1470,6 +1494,16 @@
       const name = doc.createElement('span');
       name.className = 'nb-ver-name';
       name.textContent = 'v' + ordinal;
+      // Chevron next to the label: opens the actions menu (Open / Copy feedback).
+      const menuBtn = doc.createElement('button');
+      menuBtn.type = 'button';
+      menuBtn.className = 'nb-ver-menu-btn';
+      menuBtn.setAttribute('aria-haspopup', 'menu');
+      menuBtn.setAttribute('aria-expanded', 'false');
+      menuBtn.setAttribute('aria-label', 'Version actions');
+      menuBtn.setAttribute('title', 'Version actions');
+      menuBtn.innerHTML = '<span class="nb-caret" aria-hidden="true">\u25be</span>';
+      menuBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleVersionMenu(menuBtn, d); });
       const meta = doc.createElement('span');
       meta.className = 'nb-ver-meta';
       meta.textContent = formatWhen(d.lastEditedAt || d.createdAt);
@@ -1480,36 +1514,14 @@
       cnt.textContent = String((d.comments && d.comments.length) || 0);
       line.appendChild(dot);
       line.appendChild(name);
+      line.appendChild(menuBtn);
       line.appendChild(meta);
       line.appendChild(spacer);
       line.appendChild(cnt);
       row.appendChild(line);
 
-      const acts = doc.createElement('div');
-      acts.className = 'nb-ver-actions';
-      const open = doc.createElement('button');
-      open.type = 'button';
-      open.className = 'nb-ver-btn nb-ver-open';
-      open.textContent = 'open';
-      if (!d.hasSnapshot) {
-        // Pruned snapshot (design state C): the heavy snapshot is evicted, so
-        // there is nothing to open \u2014 but the feedback survives, so copy still works.
-        open.disabled = true;
-        open.title = 'Snapshot no longer stored';
-      } else {
-        open.addEventListener('click', function (e) { e.stopPropagation(); openVersionTab(d.versionKey); });
-      }
-      const copy = doc.createElement('button');
-      copy.type = 'button';
-      copy.className = 'nb-ver-btn nb-ver-copy';
-      copy.textContent = 'copy feedback';
-      copy.addEventListener('click', function (e) { e.stopPropagation(); copyVersionFeedback(d); });
-      acts.appendChild(open);
-      acts.appendChild(copy);
-      row.appendChild(acts);
-      // Peek lives on the whole row, so clicking the line OR the actions strip's
-      // empty space opens the snapshot; the buttons' stopPropagation keeps a
-      // button click from also peeking.
+      // Peek lives on the whole row; the chevron's stopPropagation keeps a menu
+      // click from also peeking.
       row.addEventListener('click', function () { openVersionPeek(d.versionKey); });
       return row;
     }
@@ -1539,6 +1551,7 @@
      * backdrop click). Pruned snapshots (html === '') are a no-op.
      */
     function openVersionPeek(versionKey) {
+      closeVersionMenu(true); // a row chevron may have opened it; the peek replaces it
       Promise.resolve(history.getVersion({ versionKey: versionKey })).then(function (v) {
         if (!v || !v.html) return; // pruned \u2014 nothing to peek
 
@@ -1555,18 +1568,25 @@
           } catch (e) { /* keep the un-highlighted snapshot */ }
           // The clean snapshot dropped Noteback's injected styles, so the painted
           // marks would render as bare browser <mark>s. Re-inject HIGHLIGHT_CSS so
-          // the peek's highlights match the live document exactly.
+          // the peek's highlights match the live document exactly, plus the
+          // peek-popover styles (a click on a highlight shows its comment in-place).
           try {
             const hlStyle = parsed.createElement('style');
             hlStyle.setAttribute(UI_ATTR, 'peek-highlight-style');
-            hlStyle.textContent = HIGHLIGHT_CSS;
+            hlStyle.textContent = HIGHLIGHT_CSS + PEEK_POP_CSS;
             (parsed.head || parsed.documentElement).appendChild(hlStyle);
           } catch (e) { /* styling is best-effort */ }
           // Scroll the first highlight into view once the iframe loads.
           const scrollScript =
             '<scr' + 'ipt>(function(){var m=document.querySelector("mark.noteback-highlight");' +
             'if(m)m.scrollIntoView({block:"center"});})();</scr' + 'ipt>';
-          painted = '<!DOCTYPE html>' + parsed.documentElement.outerHTML + scrollScript;
+          // Clicking a painted highlight in the peek opens a small popover with that
+          // comment's body (and quoted passage). The id->comment map is serialized
+          // into the iframe; comment bodies are placed via textContent at runtime
+          // (no HTML injection), and any literal "</script>" in the JSON is escaped
+          // exactly as the canonical exporter does so it can't break the block.
+          const peekScript = buildPeekPopoverScript(v.comments || []);
+          painted = '<!DOCTYPE html>' + parsed.documentElement.outerHTML + scrollScript + peekScript;
         } catch (e) { /* DOMParser unavailable \u2014 fall back to the raw snapshot */ }
 
         const back = doc.createElement('div');
@@ -1591,6 +1611,55 @@
         panel.appendChild(frame);
         back.appendChild(panel); uiRoot.appendChild(back);
       });
+    }
+
+    /**
+     * Build the <script> that runs INSIDE a version-peek iframe so that clicking a
+     * painted highlight shows that comment in a small in-place popover.
+     *
+     * The id->{body,quote} map is serialized as JSON; at runtime the iframe reads
+     * a clicked mark's data-noteback-id and renders the matching comment via
+     * textContent (no innerHTML — comment text is never parsed as HTML). The whole
+     * script is emitted as raw text into the srcdoc, so two things must hold:
+     *   1. The <script> open/close tags are split ('<scr'+'ipt>') so this source
+     *      survives being inlined into a canvas (overlay.js itself ships inside a
+     *      <script> block in every exported canvas).
+     *   2. Any literal "</script>" in the JSON is escaped ("<\/script") the same way
+     *      the canonical exporter does, so a comment body can't close the block.
+     */
+    function buildPeekPopoverScript(comments) {
+      const map = {};
+      for (let i = 0; i < comments.length; i++) {
+        const c = comments[i];
+        if (!c || !c.id) continue;
+        map[c.id] = { body: c.body || '', quote: (c.anchor && c.anchor.quote) || '' };
+      }
+      const mapJson = JSON.stringify(map).replace(/<\/(script)/gi, '<\\/$1');
+      return '<scr' + 'ipt>(function(){' +
+        'var MAP=' + mapJson + ';var pop=null;' +
+        'function ensure(){if(pop)return pop;pop=document.createElement("div");' +
+        'pop.className="nb-peek-pop";(document.body||document.documentElement).appendChild(pop);return pop;}' +
+        'function hide(){if(pop)pop.classList.remove("nb-show");}' +
+        'function show(mark){var id=mark.getAttribute("data-noteback-id");var c=MAP[id];if(!c){hide();return;}' +
+        'var p=ensure();p.textContent="";' +
+        'if(c.quote){var q=document.createElement("span");q.className="nb-peek-pop-quote";' +
+        'q.textContent="\\u201c"+c.quote+"\\u201d";p.appendChild(q);}' +
+        'var b=document.createElement("div");b.className="nb-peek-pop-body";' +
+        'if(c.body){b.textContent=c.body;}else{b.className+=" nb-peek-pop-empty";b.textContent="(no comment)";}' +
+        'p.appendChild(b);' +
+        'var r=mark.getBoundingClientRect();p.style.visibility="hidden";p.classList.add("nb-show");' +
+        'var pw=p.offsetWidth,ph=p.offsetHeight;' +
+        'var vw=document.documentElement.clientWidth,vh=document.documentElement.clientHeight;' +
+        'var left=r.left;if(left+pw>vw-8)left=vw-8-pw;if(left<8)left=8;' +
+        'var top=r.bottom+8;if(top+ph>vh-8)top=r.top-8-ph;if(top<8)top=8;' +
+        'p.style.left=left+"px";p.style.top=top+"px";p.style.visibility="";}' +
+        'document.addEventListener("click",function(e){' +
+        'var t=e.target;var m=t&&t.closest?t.closest("mark.noteback-highlight[data-noteback-id]"):null;' +
+        'if(m){e.preventDefault();e.stopPropagation();show(m);return;}' +
+        'if(pop&&!(t.closest&&t.closest(".nb-peek-pop")))hide();},true);' +
+        'document.addEventListener("keydown",function(e){if(e.key==="Escape")hide();});' +
+        'window.addEventListener("scroll",hide,true);' +
+        '}());</scr' + 'ipt>';
     }
 
     /**
@@ -2059,6 +2128,7 @@
     function closeSidebar() {
       closeSaveMenu();
       closeCopyMenu();
+      closeVersionMenu(true);
       sidebar.classList.remove('nb-open');
       launcher.classList.remove('nb-hidden');
     }
@@ -2144,6 +2214,99 @@
     }
 
     /* ------------------------------------------------------------------- *
+     * Version-row actions menu (chevron → Open / Copy feedback)           *
+     * Portaled to uiRoot and positioned in JS: the versions dock clips    *
+     * overflow, so an in-row dropdown would be cut off.                   *
+     * ------------------------------------------------------------------- */
+
+    const versionMenu = doc.createElement('div');
+    versionMenu.className = 'nb-ver-menu nb-menu';
+    versionMenu.setAttribute('role', 'menu');
+    versionMenu.setAttribute(UI_ATTR, 'version-menu');
+    versionMenu.innerHTML =
+      '<button type="button" class="nb-menu-item nb-vm-open" role="menuitem">' +
+      '<span class="nb-mi-label">Open</span>' +
+      '<span class="nb-mi-sub">check out as a canvas tab</span></button>' +
+      '<div class="nb-menu-sep" role="none"></div>' +
+      '<button type="button" class="nb-menu-item nb-vm-copy" role="menuitem">' +
+      '<span class="nb-mi-label">Copy feedback</span>' +
+      '<span class="nb-mi-sub">this version’s markdown</span></button>';
+    uiRoot.appendChild(versionMenu);
+    const vmOpenItem = versionMenu.querySelector('.nb-vm-open');
+    const vmCopyItem = versionMenu.querySelector('.nb-vm-copy');
+    let versionMenuOpen = false;
+    let versionMenuCloseTimer = null;
+    let versionMenuBtn = null;   // the chevron that opened it
+    let versionMenuData = null;  // the version record `d`
+
+    vmOpenItem.addEventListener('click', function (e) {
+      e.stopPropagation();
+      const d = versionMenuData;
+      closeVersionMenu();
+      if (d && d.hasSnapshot) openVersionTab(d.versionKey);
+    });
+    vmCopyItem.addEventListener('click', function (e) {
+      e.stopPropagation();
+      const d = versionMenuData;
+      closeVersionMenu();
+      if (d) copyVersionFeedback(d);
+    });
+
+    function positionVersionMenu(btn) {
+      const r = btn.getBoundingClientRect();
+      const vw = (win && win.innerWidth) || 360;
+      const vh = (win && win.innerHeight) || 800;
+      const MENU_W = 214;
+      let left = r.left;
+      if (left + MENU_W > vw - 8) left = vw - MENU_W - 8;
+      if (left < 8) left = 8;
+      versionMenu.style.left = left + 'px';
+      // Open upward — version rows sit low in the viewport (dock above the footer).
+      versionMenu.style.top = 'auto';
+      versionMenu.style.bottom = (vh - r.top + 6) + 'px';
+    }
+
+    function openVersionMenu(btn, d) {
+      closeSaveMenu(); closeCopyMenu();
+      if (versionMenuOpen && versionMenuBtn === btn) return;
+      if (versionMenuOpen) closeVersionMenu(true); // switching rows: snap shut first
+      versionMenuOpen = true;
+      versionMenuBtn = btn;
+      versionMenuData = d;
+      if (versionMenuCloseTimer) {
+        (win && win.clearTimeout ? win.clearTimeout : clearTimeout)(versionMenuCloseTimer);
+        versionMenuCloseTimer = null;
+      }
+      // Pruned snapshot: nothing to open, but the feedback still copies.
+      vmOpenItem.disabled = !d.hasSnapshot;
+      vmOpenItem.title = d.hasSnapshot ? '' : 'Snapshot no longer stored';
+      btn.setAttribute('aria-expanded', 'true');
+      versionMenu.classList.remove('is-closing');
+      positionVersionMenu(btn);
+      void versionMenu.offsetWidth; // reflow so the closed scale applies before growing
+      versionMenu.classList.add('is-open');
+    }
+
+    function closeVersionMenu(immediate) {
+      if (!versionMenuOpen) return;
+      versionMenuOpen = false;
+      if (versionMenuBtn) versionMenuBtn.setAttribute('aria-expanded', 'false');
+      versionMenuBtn = null;
+      versionMenuData = null;
+      versionMenu.classList.remove('is-open');
+      versionMenu.classList.add('is-closing');
+      const settle = function () { versionMenu.classList.remove('is-closing'); versionMenuCloseTimer = null; };
+      const ms = (immediate || reduceMotion()) ? 0 : POPOVER_CLOSE_MS;
+      if (ms && win && win.setTimeout) versionMenuCloseTimer = win.setTimeout(settle, ms);
+      else settle();
+    }
+
+    function toggleVersionMenu(btn, d) {
+      if (versionMenuOpen && versionMenuBtn === btn) closeVersionMenu();
+      else openVersionMenu(btn, d);
+    }
+
+    /* ------------------------------------------------------------------- *
      * Persistence helper                                                  *
      * ------------------------------------------------------------------- */
 
@@ -2160,6 +2323,7 @@
     const onSelChange = function () { onSelectionChange(); };
     const onScrollOrResize = function () {
       if (fab.style.display !== 'none') hideFab();
+      closeVersionMenu(true); // it's fixed-positioned off a chevron that just moved
     };
     // The comment composer is intentionally NOT dismissed by clicking outside it
     // (only Cancel / Save / Escape close it), so a stray click can't discard an
@@ -2249,10 +2413,29 @@
         if (copyCaretBtn && copyCaretBtn.focus) copyCaretBtn.focus();
       }
     };
+    // The version-row actions menu closes on any click outside it (and its chevron),
+    // and on Escape. The chevron + items stopPropagation, so their own clicks don't
+    // reach here.
+    const onDocClickVersionMenu = function (e) {
+      if (!versionMenuOpen) return;
+      const path = (typeof e.composedPath === 'function') ? e.composedPath() : [];
+      if (path.indexOf(versionMenu) !== -1) return;
+      if (versionMenuBtn && path.indexOf(versionMenuBtn) !== -1) return;
+      closeVersionMenu();
+    };
+    const onDocKeydownVersionMenu = function (e) {
+      if (e.key === 'Escape' && versionMenuOpen) {
+        const btn = versionMenuBtn;
+        closeVersionMenu();
+        if (btn && btn.focus) btn.focus();
+      }
+    };
     doc.addEventListener('click', onDocClickCopyMenu);
     doc.addEventListener('keydown', onDocKeydownCopyMenu);
     doc.addEventListener('click', onDocClickSaveMenu);
     doc.addEventListener('keydown', onDocKeydownSaveMenu);
+    doc.addEventListener('click', onDocClickVersionMenu);
+    doc.addEventListener('keydown', onDocKeydownVersionMenu);
 
     // Initial render so the sidebar reflects loaded state when first opened.
     renderSidebar();
@@ -2270,6 +2453,8 @@
       doc.removeEventListener('keydown', onDocKeydownSaveMenu);
       doc.removeEventListener('click', onDocClickCopyMenu);
       doc.removeEventListener('keydown', onDocKeydownCopyMenu);
+      doc.removeEventListener('click', onDocClickVersionMenu);
+      doc.removeEventListener('keydown', onDocKeydownVersionMenu);
       doc.removeEventListener('keydown', onDocKeydownInfo);
       cancelFabTimer();
       closePopover();

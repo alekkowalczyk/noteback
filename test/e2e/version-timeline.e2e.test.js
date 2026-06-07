@@ -138,11 +138,11 @@ test('the Versions timeline renders an earlier version row with working open + c
       'the info dialog shows the embedded-mode indicator'
     );
 
-    // The "now" row exists (current draft, no actions).
+    // The "now" row exists (current draft, no actions chevron).
     assert.strictEqual(await page.locator('.nb-ver-row.active').count(), 1, 'the "now" row is present');
     assert.strictEqual(
-      await page.locator('.nb-ver-row.active .nb-ver-actions').count(), 0,
-      'the "now" row has no action buttons'
+      await page.locator('.nb-ver-row.active .nb-ver-menu-btn').count(), 0,
+      'the "now" row has no actions chevron'
     );
 
     // At least one EARLIER-version row (not the active "now" row).
@@ -154,13 +154,26 @@ test('the Versions timeline renders an earlier version row with working open + c
     const vname = await row.locator('.nb-ver-name').first().textContent();
     assert.ok(/v1/.test(vname || ''), 'the earlier version is labelled v1 (got "' + vname + '")');
 
-    // open + copy-feedback buttons exist and are ENABLED (snapshot present).
-    const openBtn = row.locator('.nb-ver-open');
-    const copyBtn = row.locator('.nb-ver-copy');
-    assert.strictEqual(await openBtn.count(), 1, 'the open button exists');
-    assert.strictEqual(await copyBtn.count(), 1, 'the copy-feedback button exists');
-    assert.strictEqual(await openBtn.isDisabled(), false, 'open is enabled (snapshot stored)');
-    assert.strictEqual(await copyBtn.isDisabled(), false, 'copy feedback is enabled');
+    // The per-row actions now live behind a chevron next to the version label. The
+    // portaled .nb-ver-menu starts closed; clicking the chevron opens it with Open +
+    // Copy feedback items, both ENABLED (the snapshot is stored).
+    const chevron = row.locator('.nb-ver-menu-btn');
+    assert.strictEqual(await chevron.count(), 1, 'the row has an actions chevron');
+    assert.strictEqual(await page.locator('.nb-ver-menu.is-open').count(), 0, 'the actions menu starts closed');
+    await chevron.click();
+    await page.waitForTimeout(250);
+    const verMenu = page.locator('.nb-ver-menu');
+    assert.strictEqual(await page.locator('.nb-ver-menu.is-open').count(), 1, 'clicking the chevron opens the actions menu');
+    const openItem = verMenu.locator('.nb-vm-open');
+    const copyItem = verMenu.locator('.nb-vm-copy');
+    assert.strictEqual(await openItem.count(), 1, 'the menu has an Open item');
+    assert.strictEqual(await copyItem.count(), 1, 'the menu has a Copy feedback item');
+    assert.strictEqual(await openItem.isDisabled(), false, 'Open is enabled (snapshot stored)');
+    assert.strictEqual(await copyItem.isDisabled(), false, 'Copy feedback is enabled');
+    // Escape closes the menu (so the next row-click peeks instead of re-toggling).
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    assert.strictEqual(await page.locator('.nb-ver-menu.is-open').count(), 0, 'Escape closes the actions menu');
 
     // The row body shows a pointer cursor (it peeks on click).
     const cursor = await row.locator('.nb-ver-line').first().evaluate((el) => getComputedStyle(el).cursor);
@@ -210,6 +223,42 @@ test('the Versions timeline renders an earlier version row with working open + c
     // the clean snapshot): honey #ffe7a3, not a bare browser <mark> yellow.
     assert.strictEqual(peek.markBg, 'rgb(255, 231, 163)', 'the peek highlight uses the live honey styling (got ' + peek.markBg + ')');
 
+    // Clicking a highlight inside the peek shows that comment in an in-place popover
+    // (the comment body is rendered via textContent — never parsed as HTML). That the
+    // popover appears AT ALL also proves the injected peek script survived the comment
+    // body's literal "</script>" (escaped to "<\/script" before it lands in the srcdoc).
+    const popInfo = await page.evaluate(() => {
+      function findFrame(node) {
+        if (node.shadowRoot) {
+          const f = node.shadowRoot.querySelector('iframe.nb-hist-frame');
+          if (f) return f;
+          for (const c of node.shadowRoot.querySelectorAll('*')) { const r = findFrame(c); if (r) return r; }
+        }
+        for (const c of node.children || []) { const r = findFrame(c); if (r) return r; }
+        return null;
+      }
+      const f = findFrame(document.documentElement);
+      if (!f) return null;
+      const cd = f.contentDocument;
+      const mark = cd.querySelector('mark.noteback-highlight[data-noteback-id]');
+      if (!mark) return null;
+      mark.click(); // routes through the injected capture-phase click handler
+      const pop = cd.querySelector('.nb-peek-pop.nb-show');
+      return {
+        shown: !!pop,
+        body: pop ? ((pop.querySelector('.nb-peek-pop-body') || {}).textContent || '') : null,
+        hasQuote: pop ? !!pop.querySelector('.nb-peek-pop-quote') : false,
+        liveImg: !!cd.querySelector('img[src="x"]') // the </script> payload must NOT have rendered as live markup
+      };
+    });
+    assert.ok(popInfo && popInfo.shown, 'clicking a peek highlight shows the comment popover');
+    assert.ok(
+      popInfo.body && popInfo.body.indexOf('Draft-1 feedback note') !== -1,
+      'the peek popover shows the comment body as text (got "' + (popInfo && popInfo.body) + '")'
+    );
+    assert.ok(popInfo.hasQuote, 'the peek popover shows the quoted passage');
+    assert.strictEqual(popInfo.liveImg, false, 'the </script> payload did not become live markup inside the peek');
+
     // "Back" control: present, reads "Back" (not "Back to current"), and closes the
     // peek. The redundant ✕ close button is gone (the full-width bar replaces it).
     const backCtrl = page.locator('.nb-hist-back');
@@ -232,7 +281,10 @@ test('the Versions timeline renders an earlier version row with working open + c
     });
     let checkoutHtml = null;
     try {
-      await openBtn.click();
+      // Re-open the row's actions menu and click Open (checks out the version).
+      await chevron.click();
+      await page.waitForTimeout(250);
+      await verMenu.locator('.nb-vm-open').click();
       await page.waitForTimeout(300);
       checkoutHtml = await page.evaluate(async () => {
         const url = (window.__nbOpened || [])[0];
