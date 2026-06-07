@@ -254,7 +254,7 @@
     '.nb-empty b{font-weight:600;color:var(--nb-accent-ink);}',
 
     /* footer + buttons */
-    '.nb-foot{border-top:1px solid var(--nb-line);padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;',
+    '.nb-foot{border-top:1px solid var(--nb-line);padding:12px 14px 14px;display:flex;flex-direction:row;align-items:stretch;gap:8px;',
     '  background:linear-gradient(180deg,rgba(245,245,243,0),#eeeeec);}',
     '.nb-btn{font:700 13px/1 var(--nb-round);border:1px solid var(--nb-accent);background:var(--nb-accent);color:#fffdf8;',
     '  border-radius:11px;padding:11px 12px;cursor:pointer;text-align:center;display:inline-flex;align-items:center;justify-content:center;gap:7px;',
@@ -264,8 +264,9 @@
     '.nb-btn.nb-secondary{background:var(--nb-card);color:var(--nb-accent-ink);border-color:var(--nb-line-strong);box-shadow:none;}',
     '.nb-btn.nb-secondary:hover{background:var(--nb-accent-wash);border-color:var(--nb-accent);}',
 
+    /* footer is one row: Copy feedback (left) + Save (right), each 50% wide. */
     /* save menu — a dropdown that grows upward from the footer "Save" button */
-    '.nb-save-wrap{position:relative;}',
+    '.nb-save-wrap{position:relative;flex:1 1 0;min-width:0;}',
     '.nb-save-btn{width:100%;}',
     '.nb-save-btn .nb-caret{margin-left:6px;font-size:10px;line-height:1;opacity:.85;transition:transform .18s var(--dropdown-ease);}',
     '.nb-save-wrap.nb-menu-open .nb-save-btn .nb-caret{transform:rotate(180deg);}',
@@ -286,11 +287,18 @@
     '.nb-mi-sub{display:block;font:400 11.5px/1.3 var(--nb-ui);color:var(--nb-ink-soft);margin-top:2px;}',
     '.nb-menu-sep{height:1px;background:var(--nb-line);margin:4px 9px;}',
     /* copy split-button — main keeps its action; the caret opens this menu */
-    '.nb-copy-wrap{position:relative;display:flex;}',
-    '.nb-copy-wrap .nb-copy{flex:1;border-top-right-radius:0;border-bottom-right-radius:0;}',
+    '.nb-copy-wrap{position:relative;display:flex;flex:1 1 0;min-width:0;}',
+    '.nb-copy-wrap .nb-copy{flex:1;min-width:0;border-top-right-radius:0;border-bottom-right-radius:0;}',
     '.nb-copy-caret-btn{flex:none;padding:0 10px;border-left:none;border-top-left-radius:0;border-bottom-left-radius:0;}',
     '.nb-copy-caret-btn .nb-caret{font-size:10px;line-height:1;opacity:.85;transition:transform .18s var(--dropdown-ease);}',
     '.nb-copy-wrap.nb-menu-open .nb-copy-caret-btn .nb-caret{transform:rotate(180deg);}',
+    /* Each half is now ~50% of the sidebar, too narrow for the two-line menu items.
+       Give the footer dropdowns a comfortable min-width and anchor each to its own
+       outer edge so it expands inward (staying within the sidebar): the copy menu
+       (left half) opens to the right, the save menu (right half) to the left. */
+    '.nb-foot .nb-menu{min-width:228px;}',
+    '.nb-copy-wrap .nb-menu{left:0;right:auto;transform-origin:bottom left;}',
+    '.nb-save-wrap .nb-menu{left:auto;right:0;transform-origin:bottom right;}',
 
     /* version timeline (docs/design.md §14.4) + snapshot peek popup */
     // Docked at the bottom of the sidebar, above .nb-foot: a bounded, self-scrolling
