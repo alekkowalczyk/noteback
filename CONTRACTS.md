@@ -155,26 +155,45 @@ source of truth and is shared by the content script (gating) and the popup
 
 - `classifyOrigin(loc) -> 'file' | 'localhost' | '127.0.0.1' | 'other'`
 - `originOf(loc) -> canonical origin` (`"file://"` for file pages)
-- `normalizeSettings(s) -> { origins, disabledSites, historySites }` (defaults filled)
+- `normalizeSettings(s) -> { origins, disabledSites, historySites, historyDisabledGlobal, historyDisabledSites, historyDisabledDocs }` (defaults filled)
 - `isActive({type, origin}, settings)` — **active** iff `origins[type] !== false`
   **and** `origin ∉ disabledSites`. Per-type is the master gate; per-site only
   subtracts a single origin. `'other'` is never active.
-- `historyAllowed({type, origin}, settings)` — gates the **snapshot-history engine**
-  (§8). Default-**on** for `file`/`localhost`/`127.0.0.1`; for any other origin it is
-  opt-in via `origin ∈ historySites`. When false the content script keeps the
+- `historyAllowed({type, origin, docKey}, settings)` — gates the **snapshot-history
+  engine** (§8). Default-**on** for `file`/`localhost`/`127.0.0.1`; for any other origin
+  it is opt-in via `origin ∈ historySites`. When false the content script keeps the
   comments-only `ChromeStorageAdapter` (no version timeline). Decided at first mount.
 - `overlayMounted(doc) -> boolean` — true when a Noteback overlay is already mounted on
   `doc` (any `[data-noteback-ui]` node). The content script calls this to stand down on a
   page whose own embedded canvas runtime already booted (see §3.7's cross-world note);
   `doc` is caller-supplied, so the module stays node-testable.
 
+**History opt-out (subtract layer).** A user can stop recording history without
+losing what's stored. The mechanism differs by mode but the semantics match — both
+take effect **live** and **keep** stored data:
+
+- `historyAllowed({type, origin, docKey}, settings)` applies an opt-out subtract
+  layer above the base rule: `historyDisabledGlobal` (kill switch),
+  `historyDisabledSites` (origins), and `historyDisabledDocs` (history doc-ids) each
+  force `false`. Base rule unchanged (on for file/localhost/127; `historySites`
+  opt-in for other origins). `nb:settings` gains those three fields (normalized:
+  bool / [] / []).
+- Embedded mode carries no settings; it opts out via two localStorage flags,
+  `nb:nohist:global` and `nb:nohist:doc:<docId>`, surfaced as `historyControl`
+  (`available/globalOff/docOff/enabled/setGlobal/setDoc`) on the embedded boot.
+- `createHistoryStateAdapter` accepts an optional `isEnabled()` predicate; false ⇒
+  pass-through to `inner`, empty `getHistory()`/`getVersion()` (data kept). Live
+  toggle invalidates the memoized resolution.
+- `boot()` / `mountOverlay()` cfg gains `historyControl` (embedded only); the overlay
+  renders the gear ⚙ when `runMode === 'embedded' && historyControl.available`.
+
 **Active** → the content script mounts the overlay. **Dormant** → injected but
 mounts nothing (no chip, launcher, or listeners); stored comments are untouched.
 The content script re-evaluates live on `chrome.storage.onChanged`, so popup
 toggles take effect without a page reload. `NOTEBACK_PING` reports
-`{ booted, dormant, originType, origin }` so the popup distinguishes "off by
-settings" from "no file access". The embedded canvas is unaffected — it has no
-settings and always shows its UI.
+`{ booted, dormant, originType, origin, historyDocId }` so the popup distinguishes
+"off by settings" from "no file access" and scopes the per-page history opt-out. The
+embedded canvas is unaffected — it has no settings and always shows its UI.
 
 ### 1.4 Click-to-activate on unsupported origins (extension mode only)
 
@@ -373,6 +392,7 @@ Mode-agnostic UI: floating "💬 Comment" button, comment popover, sidebar.
  * @param {StorageAdapter} cfg.adapter    Persistence (see §1).
  * @param {Object} cfg.exporter           Export hooks (see §3.6); may be partial in embedded mode.
  * @param {Object} [cfg.history]          Snapshot-history adapter (see §1, §8); null/absent → timeline hidden.
+ * @param {Object} [cfg.historyControl]   Embedded-only history opt-out control (§1.3); drives the gear ⚙ (`available/globalOff/docOff/enabled/setGlobal/setDoc`). Null/absent → no gear.
  * @param {string} [cfg.mode]             'extension' | 'embedded' — drives the info-dialog run-mode
  *                                        indicator. Defaults to 'embedded' (the canvas is the common case);
  *                                        the extension content script passes 'extension'.
@@ -487,6 +507,7 @@ Single entry point used by **both** modes.
  * @param {StorageAdapter} cfg.adapter
  * @param {Object} [cfg.exporter]
  * @param {Object} [cfg.history]   Snapshot-history adapter (see §1, §8); forwarded to the overlay.
+ * @param {Object} [cfg.historyControl] Embedded-only history opt-out control (§1.3); forwarded to the overlay (gear ⚙).
  * @returns {Promise<{ destroy: () => void }>}
  */
 async function boot(cfg) { ... }

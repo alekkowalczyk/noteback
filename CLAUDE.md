@@ -186,6 +186,20 @@ the code, that have already bitten us once.
   `<title>` never lands in the output; (2) `{{DOC_STYLE}}` is replaced **last** of all
   tokens, so a CSS rule like `content:"{{x}}"` in the carried stylesheet isn't eaten by
   an earlier token pass. Covered by the head-carry tests in `test/exporter.test.js`.
+- **History opt-out is a SUBTRACT layer, and the two surfaces go live differently.**
+  `origin-policy.historyAllowed` subtracts `historyDisabledGlobal` /
+  `historyDisabledSites` / `historyDisabledDocs` (keyed on the resolved history
+  doc-id, passed as `info.docKey`) above the base rule. The **extension** can't gate
+  in place (it picks adapter TYPE at mount), so a live opt-out **re-mounts**
+  (`content-script.js` `applySettings` compares `lastHistoryOk` and unmount+mounts on
+  a flip; the gate is computed once via `historyOkFor`) — the "gate read once at
+  mount" invariant still holds (a re-mount is a new mount). The **embedded** canvas
+  always builds the history adapter, so it gates **in place** via
+  `createHistoryStateAdapter`'s `isEnabled()` (fed by `historyControl` over
+  `nb:nohist:global` / `nb:nohist:doc:<docId>`, read/written with **guarded** raw
+  localStorage). Opt-out HIDES the timeline and stops recording but KEEPS stored
+  snapshots; re-enabling the gear re-saves the live draft (`persist(getState())`) so
+  the now-enabled version adopts comments added while off.
 
 ## Live verification (Playwright)
 

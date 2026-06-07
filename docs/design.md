@@ -426,3 +426,29 @@ Captured during execution (the value of two-stage + whole-branch review):
   asserts all three agree so it can't recur. (`chrome-kv-store.js` is intentionally
   excluded from canvas lists — it's extension-only; the canvas builds an inline
   `localStorage` kv.)
+
+### 14.9 Opting out of history (2026-06-07)
+
+History records automatically wherever it can run; this gives the user a way to say
+"don't keep history here." Two surfaces, default-on, **purely subtractive** — there is
+no new opt-*in* (the `historySites` path is untouched). The **extension popup** carries
+three cascading scopes for the active tab: **global** (every page), **this site**
+(the origin — `file://` for local files, scheme+host+port otherwise), and **this page**
+(the resolved history doc-id, not `location.href`). The **embedded canvas** adds a
+gear ⚙ beside the ⓘ with two toggles: **this document** and **all docs here**, where
+"here" is the shared `localStorage` bucket (for `file://`, every local canvas in the
+browser).
+
+Opting out at any scope **stops recording and hides** the timeline (and the "Save ·
+with comments and history" item), but **keeps** the already-stored snapshots — no
+purge. Re-enabling brings the timeline and data straight back; comments made while off
+persist normally and get adopted into the version when history resumes. Both surfaces
+go live without a reload, but by **asymmetric** mechanisms dictated by how each builds
+its adapter. The extension picks the adapter *type* at mount (history engine vs.
+comments-only), so a live flip **re-mounts** (unmount + mount) to rebuild it — keeping
+the "gate read once at mount" rule literally true, since a re-mount is a new mount.
+The embedded canvas always builds the history adapter, so it gates **in place** via the
+adapter's `isEnabled()` predicate (no re-boot). Extension scopes live in
+`nb:settings` (`historyDisabledGlobal` / `historyDisabledSites` / `historyDisabledDocs`,
+subtracted inside `historyAllowed`); embedded flags live in `localStorage`
+(`nb:nohist:global` / `nb:nohist:doc:<docId>`).
