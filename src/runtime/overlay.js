@@ -216,6 +216,16 @@
     '  color:var(--nb-ink-faint);white-space:nowrap;}',
     '.nb-info-mode::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--nb-accent);flex:none;}',
 
+    /* gear dialog (history opt-out) — reuses .nb-info-dialog/.nb-info-card styling */
+    '.nb-gear-btn[hidden]{display:none;}',
+    '.nb-gear-row{display:flex;align-items:center;justify-content:space-between;gap:12px;',
+    '  padding:9px 2px;font:500 12.5px/1.4 var(--nb-ui);color:var(--nb-ink);cursor:pointer;}',
+    '.nb-gear-row + .nb-gear-row{border-top:1px solid var(--nb-line);}',
+    '.nb-gear-label{flex:1;min-width:0;}',
+    '.nb-gear-row input[type=checkbox]{flex:none;width:16px;height:16px;cursor:pointer;accent-color:var(--nb-accent);}',
+    '.nb-gear-row input[type=checkbox]:disabled{opacity:.45;cursor:not-allowed;}',
+    '.nb-gear-hint{margin:9px 2px 0;font:400 11px/1.45 var(--nb-ui);color:var(--nb-ink-faint);}',
+
     /* list */
     '.nb-list{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:13px 14px 16px;scrollbar-width:thin;}',
     '.nb-group-label{font:700 10.5px/1 var(--nb-round);text-transform:uppercase;letter-spacing:.09em;',
@@ -512,6 +522,7 @@
     const getState = cfg.getState || (function () { return null; });
     const setState = cfg.setState || function () {};
     const history = cfg.history || null;
+    const historyControl = cfg.historyControl || null;
     // How Noteback is running on this page — 'extension' (content script) or
     // 'embedded' (inlined into a saved canvas). Surfaced as a small indicator in
     // the info dialog. Defaults to embedded (the self-contained canvas is the
@@ -719,6 +730,70 @@
         });
       });
     }
+
+    /* --- gear: history opt-out (EMBEDDED only) -------------------------- */
+    if (runMode === 'embedded' && historyControl && historyControl.available) {
+      const headCtrls = sidebar.querySelector('.nb-head-ctrls');
+      const gearBtn = doc.createElement('button');
+      gearBtn.type = 'button';
+      gearBtn.className = 'nb-info nb-gear-btn'; // reuse .nb-info button styling
+      gearBtn.setAttribute('title', 'Version history');
+      gearBtn.setAttribute('aria-label', 'Version history');
+      gearBtn.setAttribute('aria-expanded', 'false');
+      gearBtn.textContent = '⚙';
+      headCtrls.insertBefore(gearBtn, headCtrls.firstChild);
+
+      const gearDialog = doc.createElement('div');
+      gearDialog.className = 'nb-info-dialog nb-gear-dialog'; // reuse dialog styling
+      gearDialog.setAttribute('role', 'dialog');
+      gearDialog.setAttribute('aria-label', 'Version history');
+      gearDialog.hidden = true;
+      gearDialog.innerHTML =
+        '<div class="nb-info-card">' +
+        '  <div class="nb-info-head">' +
+        '    <span class="nb-info-title">Version history</span>' +
+        '    <button type="button" class="nb-info-x nb-gear-x" title="Close" aria-label="Close">×</button>' +
+        '  </div>' +
+        '  <label class="nb-gear-row"><span class="nb-gear-label">Record history for this document</span>' +
+        '    <input type="checkbox" class="nb-gear-doc" /></label>' +
+        '  <label class="nb-gear-row"><span class="nb-gear-label">Record history for all docs here</span>' +
+        '    <input type="checkbox" class="nb-gear-global" /></label>' +
+        '  <p class="nb-gear-hint">“Here” means documents this browser stores for this location.</p>' +
+        '</div>';
+      sidebar.appendChild(gearDialog);
+
+      const gearDocCb = gearDialog.querySelector('.nb-gear-doc');
+      const gearGlobalCb = gearDialog.querySelector('.nb-gear-global');
+      const syncGear = function () {
+        gearGlobalCb.checked = !historyControl.globalOff();
+        gearDocCb.checked = !historyControl.docOff();
+        gearDocCb.disabled = historyControl.globalOff(); // global off → per-doc is moot
+      };
+      let gearOpen = false;
+      const openGear = function () { syncGear(); gearDialog.hidden = false; gearOpen = true; gearBtn.setAttribute('aria-expanded', 'true'); };
+      const closeGear = function () { gearDialog.hidden = true; gearOpen = false; gearBtn.setAttribute('aria-expanded', 'false'); };
+      gearBtn.addEventListener('click', function (e) { e.stopPropagation(); if (gearOpen) closeGear(); else openGear(); });
+      gearDialog.querySelector('.nb-gear-x').addEventListener('click', closeGear);
+      gearDialog.addEventListener('click', function (e) { if (e.target === gearDialog) closeGear(); });
+
+      const onGearToggle = function (wasEnabled) {
+        syncGear();
+        const nowEnabled = historyControl.enabled();
+        if (!nowEnabled) {
+          closeVersionInline();        // leave any inline version view
+          renderSidebar();             // timeline hides (getHistory → [])
+        } else if (!wasEnabled) {
+          // re-enabled: re-save the live draft so the now-enabled version adopts the
+          // current comments (closes the divergence window), then repaint.
+          Promise.resolve(persist(getState())).then(function () { renderSidebar(); });
+        } else {
+          renderSidebar();
+        }
+      };
+      gearDocCb.addEventListener('change', function () { const was = historyControl.enabled(); historyControl.setDoc(!gearDocCb.checked); onGearToggle(was); });
+      gearGlobalCb.addEventListener('change', function () { const was = historyControl.enabled(); historyControl.setGlobal(!gearGlobalCb.checked); onGearToggle(was); });
+    }
+
     const onDocKeydownInfo = function (e) {
       if (e.key === 'Escape' && infoOpen) { closeInfo(); if (infoBtn && infoBtn.focus) infoBtn.focus(); }
     };

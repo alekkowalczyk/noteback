@@ -43,6 +43,8 @@
    * @param {Object} [cfg.exporter]        Export hooks (onCopyMarkdown/onSaveCanvas).
    * @param {string} [cfg.docId]           Identity key; defaults to location.href.
    * @param {string} [cfg.docTitle]        Human label; defaults to document.title.
+   * @param {Object} [cfg.historyControl]  Embedded-only history opt-out control
+   *   (available/globalOff/docOff/enabled/setGlobal/setDoc); drives the gear ⚙.
    * @returns {Promise<Object>} controller
    */
   async function boot(cfg) {
@@ -138,6 +140,7 @@
       adapter: adapter,
       exporter: cfg.exporter || {},
       history: cfg.history || null,
+      historyControl: cfg.historyControl || null,
       mode: cfg.mode, // 'extension' | 'embedded' — drives the info-dialog mode indicator
       getState: getState,
       setState: setState,
