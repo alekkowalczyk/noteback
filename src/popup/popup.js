@@ -32,10 +32,19 @@ document.addEventListener('DOMContentLoaded', function () {
     localhost: byId('nb-type-localhost'),
     '127.0.0.1': byId('nb-type-127')
   };
+  const histBlock = byId('nb-hist-block');
+  const histGlobal = byId('nb-hist-global');
+  const histSiteRow = byId('nb-hist-site-row');
+  const histSiteOrigin = byId('nb-hist-site-origin');
+  const histSite = byId('nb-hist-site');
+  const histDocRow = byId('nb-hist-doc-row');
+  const histDoc = byId('nb-hist-doc');
+  const histHint = byId('nb-hist-hint');
 
   let activeTab = null;
   let tabInfo = { type: 'other', origin: '' };
   let settings = null;
+  let lastPong = null;
 
   init();
 
@@ -82,6 +91,21 @@ document.addEventListener('DOMContentLoaded', function () {
       if (!tabInfo || tabInfo.type === 'other') return;
       settings = withSite(settings, tabInfo.origin, siteToggle.checked);
       saveSettings(settings).then(function () { refreshState(activeTab); });
+    });
+
+    histGlobal.addEventListener('change', function () {
+      settings = withHistoryGlobal(settings, !histGlobal.checked);
+      saveSettings(settings).then(function () { renderHistorySection(); });
+    });
+    histSite.addEventListener('change', function () {
+      if (!lastPong || !lastPong.origin) return;
+      settings = withHistoryList(settings, 'historyDisabledSites', lastPong.origin, !histSite.checked);
+      saveSettings(settings).then(function () { renderHistorySection(); });
+    });
+    histDoc.addEventListener('change', function () {
+      if (!lastPong || !lastPong.historyDocId) return;
+      settings = withHistoryList(settings, 'historyDisabledDocs', lastPong.historyDocId, !histDoc.checked);
+      saveSettings(settings).then(function () { renderHistorySection(); });
     });
 
     btnToggle.addEventListener('click', function () {
@@ -158,13 +182,16 @@ document.addEventListener('DOMContentLoaded', function () {
       // Content script is injected (PING answered).
       hideOnboarding();
       if (pong && pong.booted) {
+        lastPong = pong;
         disableActions(false);
         showSiteRow(true);              // no-ops for 'other' origins
+        renderHistorySection();
         setStatus(countLabel(pong));
       } else {
         // Injected but dormant by settings (file/localhost/127 only).
         disableActions(true);
         showSiteRow(false);
+        hideHistorySection();
         setStatus('Noteback is off on this site.');
       }
     }).catch(function () {
@@ -172,6 +199,7 @@ document.addEventListener('DOMContentLoaded', function () {
       // supported origins that didn't boot keep the existing path (file access
       // off, or page still loading).
       hideSiteRow();
+      hideHistorySection();
       if (tabInfo && tabInfo.type === 'other') return showAnnotatePrompt();
       return handleNotBooted(tabInfo && tabInfo.type === 'file');
     });
@@ -387,6 +415,54 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function hideSiteRow() { siteRow.setAttribute('hidden', ''); }
 
+  function historyBaseAllowed() {
+    // Mirrors origin-policy: base history runs for local types, or an other-origin
+    // that opted in via historySites. (We surface opt-OUT only; no opt-in UI.)
+    if (!lastPong) return false;
+    if ((policy ? policy.TYPES : ['file', 'localhost', '127.0.0.1']).indexOf(lastPong.originType) !== -1) return true;
+    const norm = policy ? policy.normalizeSettings(settings) : { historySites: [] };
+    return !!(lastPong.origin && norm.historySites.indexOf(lastPong.origin) !== -1);
+  }
+
+  function renderHistorySection() {
+    if (!lastPong) { hideHistorySection(); return; }
+    histBlock.removeAttribute('hidden');
+    const norm = policy ? policy.normalizeSettings(settings) : { historyDisabledGlobal: false, historyDisabledSites: [], historyDisabledDocs: [] };
+
+    if (!historyBaseAllowed()) {
+      // Off for this site type and not opted in: nothing to subtract. Show a hint,
+      // disable the toggles.
+      histGlobal.checked = false; histGlobal.disabled = true;
+      histSite.checked = false; histSite.disabled = true;
+      histDoc.checked = false; histDoc.disabled = true;
+      histSiteRow.setAttribute('hidden', ''); histDocRow.setAttribute('hidden', '');
+      histHint.textContent = 'Version history isn’t recorded on this site.';
+      histHint.hidden = false;
+      return;
+    }
+    histHint.hidden = true;
+    histSiteRow.removeAttribute('hidden');
+    histDocRow.removeAttribute('hidden');
+
+    const globalOff = norm.historyDisabledGlobal;
+    const siteOff = !!(lastPong.origin && norm.historyDisabledSites.indexOf(lastPong.origin) !== -1);
+    const docOff = !!(lastPong.historyDocId && norm.historyDisabledDocs.indexOf(lastPong.historyDocId) !== -1);
+
+    histGlobal.disabled = false;
+    histGlobal.checked = !globalOff;
+
+    histSiteOrigin.textContent = lastPong.origin || '';
+    histSite.disabled = globalOff;                 // cascade: global off → site moot
+    histSite.checked = !globalOff && !siteOff;
+
+    histDoc.disabled = globalOff || siteOff;        // cascade: global/site off → doc moot
+    histDoc.checked = !globalOff && !siteOff && !docOff;
+    // No historyDocId (page not a resolvable history doc): hide the per-page row.
+    if (!lastPong.historyDocId) histDocRow.setAttribute('hidden', '');
+  }
+
+  function hideHistorySection() { histBlock.setAttribute('hidden', ''); }
+
   function withType(s, type, on) {
     const norm = policy ? policy.normalizeSettings(s) : { origins: { file: true, localhost: true, '127.0.0.1': true }, disabledSites: [] };
     norm.origins[type] = !!on;
@@ -400,6 +476,22 @@ document.addEventListener('DOMContentLoaded', function () {
     if (on) { if (idx !== -1) list.splice(idx, 1); }   // enable site → remove from disabled
     else { if (idx === -1) list.push(origin); }        // disable site → add to disabled
     norm.disabledSites = list;
+    return norm;
+  }
+
+  function withHistoryGlobal(s, off) {
+    const norm = policy ? policy.normalizeSettings(s) : { historyDisabledGlobal: false, historyDisabledSites: [], historyDisabledDocs: [] };
+    norm.historyDisabledGlobal = !!off;
+    return norm;
+  }
+
+  function withHistoryList(s, listName, value, off) {
+    const norm = policy ? policy.normalizeSettings(s) : { historyDisabledSites: [], historyDisabledDocs: [] };
+    const list = (norm[listName] || []).slice();
+    const idx = list.indexOf(value);
+    if (off) { if (idx === -1) list.push(value); }   // opt OUT → add
+    else { if (idx !== -1) list.splice(idx, 1); }    // opt IN  → remove
+    norm[listName] = list;
     return norm;
   }
 
