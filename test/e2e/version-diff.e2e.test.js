@@ -173,12 +173,20 @@ test('inline diff view: toggle shows ins/del vs next version, keeps comment high
       return {
         legendText: legend ? legend.textContent.trim() : null,
         tagContent: block ? w.getComputedStyle(block, '::after').content : null,
-        badgeContent: block ? w.getComputedStyle(block, '::before').content : null
+        badgeContent: block ? w.getComputedStyle(block, '::before').content : null,
+        // Square corners (no rounding) on every diff-block type, and a tag filled
+        // with the SAME saturated colour as the gutter rail (not a pale wash that
+        // could read as document content).
+        blockRadius: block ? w.getComputedStyle(block).borderTopRightRadius : null,
+        tagBg: block ? w.getComputedStyle(block, '::after').backgroundColor : null,
+        railColor: block ? w.getComputedStyle(block).borderLeftColor : null
       };
     });
     assert.ok(chrome.legendText && /Comparing\s*v\d+\s*→\s*now/.test(chrome.legendText), 'a legend header frames the diff ("Comparing vN → now"), got: ' + chrome.legendText);
     assert.ok(chrome.tagContent && /Edited|Added|Removed/.test(chrome.tagContent), 'a changed block carries an Edited/Added/Removed tag via ::after, got: ' + chrome.tagContent);
     assert.ok(chrome.badgeContent && chrome.badgeContent !== 'none' && chrome.badgeContent !== 'normal', 'a changed block carries a gutter badge via ::before, got: ' + chrome.badgeContent);
+    assert.strictEqual(chrome.blockRadius, '0px', 'diff blocks have square (non-rounded) corners, got: ' + chrome.blockRadius);
+    assert.strictEqual(chrome.tagBg, chrome.railColor, 'the diff tag is filled with the saturated rail colour (not a pale wash); tag ' + chrome.tagBg + ' vs rail ' + chrome.railColor);
 
     // Toggle Diff OFF: the plain snapshot returns, no diff markup.
     await page.locator('.nb-diff-toggle').click();

@@ -111,36 +111,39 @@
     '.nb-diff-legend-title .nb-diff-swap{font-size:14px;opacity:.85;}' +
     '.nb-diff-key{display:inline-flex;align-items:center;gap:6px;color:#aebac7;font-weight:600;}' +
     '.nb-diff-key .nb-k-chip{display:inline-block;width:11px;height:11px;border-radius:3px;}' +
-    '.nb-diff-key.nb-k-add .nb-k-chip{background:#2faa63;}' +
-    '.nb-diff-key.nb-k-del .nb-k-chip{background:#d2473a;}' +
+    '.nb-diff-key.nb-k-add .nb-k-chip{background:#0a9d4e;}' +
+    '.nb-diff-key.nb-k-del .nb-k-chip{background:#db2c1c;}' +
     // Word-level changes: colour + a strong shape cue so single words stand out.
     'ins.nb-diff-ins{text-decoration:underline;text-decoration-color:#1f9d57;text-decoration-thickness:2px;' +
     '  text-underline-offset:2px;background:#d8f3e1;color:#0f7a3d;border-radius:3px;padding:0 2px;font-weight:600;}' +
     'del.nb-diff-del{text-decoration:line-through;text-decoration-color:#cf4335;text-decoration-thickness:2px;' +
     '  background:#fadbd7;color:#b3261e;border-radius:3px;padding:0 2px;}' +
     // Changed BLOCKS: left gutter rail (glyph badge + thick change-bar) + a tag.
+    // Square corners (no rounding) read as a deliberate diff frame, not a callout.
     '.nb-diff-ins-block,.nb-diff-del-block,.nb-diff-edit-block{position:relative;margin:5px 0;' +
-    '  padding:7px 78px 7px 32px;border-radius:0 7px 7px 0;}' +
+    '  padding:7px 80px 7px 32px;border-radius:0;}' +
     '.nb-diff-ins-block::before,.nb-diff-del-block::before,.nb-diff-edit-block::before{' +
-    '  content:"";position:absolute;left:7px;top:7px;width:18px;height:18px;border-radius:5px;color:#fff;' +
+    '  content:"";position:absolute;left:7px;top:7px;width:18px;height:18px;border-radius:3px;color:#fff;' +
     '  display:flex;align-items:center;justify-content:center;' +
     '  font:700 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;}' +
+    // Tag: a solid, saturated, square label so the change type registers instantly.
     '.nb-diff-ins-block::after,.nb-diff-del-block::after,.nb-diff-edit-block::after{' +
-    '  position:absolute;top:7px;right:8px;font:800 9px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;' +
-    '  letter-spacing:.08em;text-transform:uppercase;padding:3px 7px;border-radius:999px;}' +
-    // Added — green rail + "+" badge + Added tag.
-    '.nb-diff-ins-block{background:#eaf7ef;border-left:4px solid #2faa63;}' +
-    '.nb-diff-ins-block::before{content:"+";background:#2faa63;}' +
-    '.nb-diff-ins-block::after{content:"Added";background:#d4efde;color:#0f7a3d;}' +
-    // Removed — red rail + minus badge + Removed tag; struck through + muted text.
-    '.nb-diff-del-block{background:#fcebe9;border-left:4px solid #d2473a;color:#9c6660;' +
+    '  position:absolute;top:6px;right:7px;font:800 9.5px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;' +
+    '  letter-spacing:.09em;text-transform:uppercase;padding:3px 7px;border-radius:2px;' +
+    '  box-shadow:0 1px 2px rgba(0,0,0,.22);}' +
+    // Added — vivid green rail + "+" badge + solid green tag.
+    '.nb-diff-ins-block{background:#eaf7ef;border-left:4px solid #0a9d4e;}' +
+    '.nb-diff-ins-block::before{content:"+";background:#0a9d4e;}' +
+    '.nb-diff-ins-block::after{content:"Added";background:#0a9d4e;color:#fff;}' +
+    // Removed — vivid red rail + minus badge + solid red tag; struck + muted text.
+    '.nb-diff-del-block{background:#fcebe9;border-left:4px solid #db2c1c;color:#9c6660;' +
     '  text-decoration:line-through;text-decoration-color:rgba(178,38,30,.4);}' +
-    '.nb-diff-del-block::before{content:"\\2212";background:#d2473a;}' +
-    '.nb-diff-del-block::after{content:"Removed";background:#f7d9d5;color:#b3261e;text-decoration:none;}' +
-    // Edited — amber rail + pencil badge + Edited tag.
-    '.nb-diff-edit-block{background:#fff7e6;border-left:4px solid #d99a1f;}' +
-    '.nb-diff-edit-block::before{content:"\\270E";background:#d99a1f;font-size:11px;}' +
-    '.nb-diff-edit-block::after{content:"Edited";background:#f6e7c2;color:#8a6516;}' +
+    '.nb-diff-del-block::before{content:"\\2212";background:#db2c1c;}' +
+    '.nb-diff-del-block::after{content:"Removed";background:#db2c1c;color:#fff;text-decoration:none;}' +
+    // Edited — vivid amber rail + pencil badge + solid amber tag (dark text for contrast).
+    '.nb-diff-edit-block{background:#fff7e6;border-left:4px solid #ec9706;}' +
+    '.nb-diff-edit-block::before{content:"\\270E";background:#ec9706;color:#3f2a00;font-size:11px;}' +
+    '.nb-diff-edit-block::after{content:"Edited";background:#ec9706;color:#3f2a00;}' +
     // No-changes banner.
     '.nb-diff-nochange{margin:0 0 14px;padding:9px 13px;border-radius:8px;' +
     '  background:#eef1f4;color:#54606c;' +

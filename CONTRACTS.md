@@ -95,7 +95,9 @@ the opened tab's history sidebar empty.
   document content), the diff iframe gets a sticky legend header
   (`.nb-diff-legend` — "Comparing v{from} → {to}" + a colour key) and each changed
   block carries a left gutter rail (a `+`/`−`/`✎` badge + thick change-bar via
-  `::before`) and an `Added`/`Removed`/`Edited` tag (`::after`); word changes use a
+  `::before`) and an `Added`/`Removed`/`Edited` tag (`::after`) — a SOLID,
+  saturated, square label filled with the rail colour (not a pale wash), on a
+  square-cornered block, so the change type registers instantly. Word changes use a
   shape cue (underline for adds, strike-through for deletes) on top of colour.
   Comment highlights stay painted (layered on a separate visual channel). The
   toggle is sticky while switching version rows and
