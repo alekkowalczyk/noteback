@@ -587,7 +587,7 @@
       '      <span class="nb-info-title">Hand yourself annotatable docs</span>' +
       '      <button type="button" class="nb-info-x" title="Close" aria-label="Close">×</button>' +
       '    </div>' +
-      '    <p class="nb-info-note">Skill so that AI produces annotable HTML\'s.</p>' +
+      '    <p class="nb-info-note">Skill for AI to produce annotable html documents</p>' +
       '    <div class="nb-cmd"><code>npx skills add alekkowalczyk/noteback</code>' +
       '      <button type="button" class="nb-cmd-copy" data-cmd="npx skills add alekkowalczyk/noteback" title="Copy command">Copy</button></div>' +
       '    <div class="nb-cmd"><code>npx noteback install-skill</code>' +
