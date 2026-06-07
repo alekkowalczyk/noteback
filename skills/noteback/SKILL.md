@@ -96,6 +96,25 @@ plain original too, write the canvas to a separate file instead:
 npx noteback wrap plan.html -o plan.canvas.html
 ```
 
+**If you wrap to a separate `-o` file and intend to iterate, add `--bake-id`:**
+
+```
+npx noteback wrap plan.html -o plan.canvas.html --bake-id
+```
+
+Noteback keys each document's comments and **version history** to a stable
+*doc-id*. Wrapping **in place** (`wrap plan.html`) bakes that id into the file, so
+re-wrapping always keeps the same history. But with a separate `-o` output the id
+lives **only inside the generated canvas** — if that canvas is later deleted,
+moved, or regenerated from scratch, the next wrap mints a *new* id and the
+document's history (stored in the browser, keyed by the old id) is **orphaned**:
+the comments/timeline silently vanish. `--bake-id` stamps the id back into the
+**source** (`plan.html`, as an HTML comment marker), so every re-wrap resolves the
+same id and history follows the document across edits. Use it whenever the canvas
+is a regenerated build artifact rather than the file you keep — i.e. any time your
+loop is *edit `plan.html` → re-wrap → hand back*. (It's a no-op for in-place wraps,
+which already carry the id.)
+
 The wrapper reuses Noteback's tested canvas builder, so the embedded runtime is
 escaped correctly — **never assemble the canvas by hand** (the `</script>` / `<!--`
 escaping inside an inline `<script>` is exactly what breaks if you splice strings).
