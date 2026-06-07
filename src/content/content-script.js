@@ -203,6 +203,14 @@
   let active = false;
   let ready = Promise.resolve(null); // always resolves to the current controller (or null)
 
+  // The history gate for THIS page, computed identically wherever it's needed
+  // (buildAdapter chooses the adapter type; applySettings decides whether a live
+  // change must re-mount). Reads the module-level historyDocId at call time.
+  function historyOkFor(settings) {
+    return !!(policy && policy.historyAllowed &&
+      policy.historyAllowed({ type: originType, origin: origin, docKey: historyDocId }, settings));
+  }
+
   /**
    * Build the StorageAdapter (and optional history wiring) for this mount.
    * When history is allowed for the page's origin and the chrome-backed kv store
@@ -214,8 +222,7 @@
    * @returns {Promise<{adapter:Object, history:Object|null}>}
    */
   function buildAdapter(settings) {
-    const historyOk = !!(policy && policy.historyAllowed &&
-      policy.historyAllowed({ type: originType, origin: origin, docKey: historyDocId }, settings));
+    const historyOk = historyOkFor(settings);
     if (!historyOk || !RT.historyStateAdapter || !RT.chromeKvStore || !RT.snapshotCapture) {
       return Promise.resolve({
         adapter: RT.chromeStorageAdapter.createChromeStorageAdapter(docId),
@@ -291,14 +298,13 @@
     return policy.isActive({ type: originType, origin: origin }, settings);
   }
 
-  let lastHistoryOk = null;
+  let lastHistoryOk = null; // only meaningful on the settings-driven path (force-activate pages never re-mount)
 
   function applySettings(settings) {
     // History gate is decided at mount (the adapter TYPE differs). To honor a live
     // history opt-out we re-mount when the gate flips while active — comments survive
     // (they live in chrome.storage); the rebuilt adapter shows/hides the timeline.
-    const histOk = !!(policy && policy.historyAllowed &&
-      policy.historyAllowed({ type: originType, origin: origin, docKey: historyDocId }, settings));
+    const histOk = historyOkFor(settings);
     if (!shouldActivate(settings)) { unmount(); lastHistoryOk = histOk; return; }
     if (active && histOk !== lastHistoryOk) unmount(); // gate flipped → rebuild adapter
     lastHistoryOk = histOk;
