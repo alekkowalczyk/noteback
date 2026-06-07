@@ -15,6 +15,7 @@ test('module exposes its API and a stable settings key', () => {
   assert.strictEqual(typeof policy.originOf, 'function');
   assert.strictEqual(typeof policy.normalizeSettings, 'function');
   assert.strictEqual(typeof policy.isActive, 'function');
+  assert.strictEqual(typeof policy.overlayMounted, 'function');
 });
 
 test('classifyOrigin maps protocol/hostname to type', () => {
@@ -76,4 +77,30 @@ test('historyAllowed: an other-origin opts in via historySites', () => {
   const s = { historySites: ['https://example.com'] };
   assert.strictEqual(policy.historyAllowed({ type: 'other', origin: 'https://example.com' }, s), true);
   assert.strictEqual(policy.historyAllowed({ type: 'other', origin: 'https://evil.com' }, s), false);
+});
+
+// overlayMounted is the cross-world stand-down the extension content script uses:
+// it must report "an overlay is already here" purely from a [data-noteback-ui]
+// node in the supplied document (the canvas's main-world boot flag is invisible to
+// the isolated-world content script — only the shared DOM crosses).
+function fakeDoc(selectorMatches) {
+  return {
+    querySelector: function (sel) {
+      return selectorMatches[sel] || null;
+    }
+  };
+}
+
+test('overlayMounted: true when a [data-noteback-ui] node is present', () => {
+  assert.strictEqual(policy.overlayMounted(fakeDoc({ '[data-noteback-ui]': {} })), true);
+});
+
+test('overlayMounted: false when no Noteback UI node is present', () => {
+  assert.strictEqual(policy.overlayMounted(fakeDoc({})), false);
+});
+
+test('overlayMounted: false (never throws) for a missing/invalid document', () => {
+  assert.strictEqual(policy.overlayMounted(null), false);
+  assert.strictEqual(policy.overlayMounted(undefined), false);
+  assert.strictEqual(policy.overlayMounted({}), false); // no querySelector
 });

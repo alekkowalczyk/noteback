@@ -33,12 +33,11 @@
 (function () {
   'use strict';
 
-  // Stand down if an overlay is already mounted on this page — most importantly
-  // when the page is itself a Noteback *canvas*, whose embedded runtime booted
-  // first and set this flag. Mounting again would double the UI and split state
-  // between the canvas's in-file JSON and chrome.storage. boot.js OWNS this flag
-  // (sets it synchronously on mount); we only read it here. This also prevents a
-  // duplicate content-script injection from booting twice.
+  // Stand down if THIS isolated world already booted — a duplicate content-script
+  // injection. boot.js sets __notebackBooted on the global it sees; for us that is
+  // the ISOLATED world's global, so this catches a re-injection but NOT an embedded
+  // canvas that booted in the page's MAIN world (different globalThis). That
+  // cross-world case is handled just below, through the shared DOM.
   if (window.__notebackBooted) return;
 
   const RT = window.NotebackRuntime || {};
@@ -46,6 +45,18 @@
   // Defensive: if the shared runtime didn't load (unexpected), do nothing rather
   // than throw into the page.
   if (!RT.boot || !RT.chromeStorageAdapter) {
+    return;
+  }
+
+  // Stand down if the page is itself a Noteback *canvas*: its inlined runtime boots
+  // at DOMContentLoaded (before our document_idle) and mounts an overlay into the
+  // shared light DOM. Content scripts share the DOM but NOT JS globals with the
+  // page, so the canvas's main-world __notebackBooted is invisible above — we
+  // detect its overlay through the DOM instead (boot.js stamps a synchronous
+  // [data-noteback-ui] mount marker). Mounting again would show two launchers and
+  // split state between the canvas's localStorage/in-file history and chrome.storage.
+  if (RT.originPolicy && typeof RT.originPolicy.overlayMounted === 'function' &&
+      RT.originPolicy.overlayMounted(document)) {
     return;
   }
 

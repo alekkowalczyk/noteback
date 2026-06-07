@@ -48,15 +48,22 @@
   async function boot(cfg) {
     cfg = cfg || {};
 
-    // Single-mount guard. A page can carry BOTH an embedded canvas runtime and
-    // the installed extension's content script — e.g. opening a saved canvas (or
-    // an agent-wrapped doc) while the extension is on. Whichever calls boot first
-    // sets the flag (synchronously, before any await) and wins; a second call
-    // adopts that controller instead of mounting a duplicate overlay, which would
-    // show two launchers/sidebars and split state across two stores (the canvas's
-    // in-file JSON vs chrome.storage). The embedded canvas boots first — its inline
-    // script runs before the content script's document_idle — so a received
-    // canvas's own comments stay authoritative and the extension stands down.
+    // Single-mount guard (per JS world). This flag de-dupes calls WITHIN one
+    // world — a duplicate content-script injection, or a re-boot: whoever calls
+    // first sets it synchronously (before any await) and wins; a later call adopts
+    // that controller instead of mounting a duplicate overlay.
+    //
+    // It does NOT cross worlds. A page can carry BOTH an embedded canvas runtime
+    // and the installed extension's content script (e.g. opening a saved canvas
+    // while the extension is on), but the canvas boots in the page's MAIN world
+    // and the content script runs in an ISOLATED world — separate globalThis, so
+    // neither sees the other's flag. They DO share the DOM, so the cross-world
+    // stand-down rides the synchronous [data-noteback-ui] mount marker appended
+    // below (read by content-script.js via originPolicy.overlayMounted). The
+    // embedded canvas boots at DOMContentLoaded, before the content script's
+    // document_idle, so the marker is in place when the extension checks — and the
+    // canvas's own comments stay authoritative instead of splitting across the
+    // canvas's localStorage/in-file history and chrome.storage.
     const g = (typeof globalThis !== 'undefined') ? globalThis
       : (typeof window !== 'undefined' ? window : this);
     if (g && g.__notebackBooted) {
@@ -75,6 +82,20 @@
       (typeof document !== 'undefined' ? document : null);
     if (!doc) throw new Error('boot requires a DOM document');
     const rootNode = cfg.root || doc.body || doc.documentElement;
+
+    // Cross-world mount marker — see the single-mount-guard note above. Appended
+    // SYNCHRONOUSLY (before the first await, before the overlay's own host/fab) so
+    // a document_idle extension content script reliably sees that this page is
+    // already annotated and stands down. It rides [data-noteback-ui], so every
+    // export path (each strips that selector) drops it automatically; destroy()
+    // removes it too.
+    let mountMarker = null;
+    try {
+      mountMarker = doc.createElement('div');
+      mountMarker.setAttribute('data-noteback-ui', 'mount');
+      mountMarker.style.display = 'none';
+      (doc.body || doc.documentElement || rootNode).appendChild(mountMarker);
+    } catch (e) { mountMarker = null; }
 
     const docId = cfg.docId != null ? cfg.docId :
       (typeof location !== 'undefined' ? location.href : '');
@@ -133,6 +154,11 @@
         try { highlightApi.clearHighlights(rootNode); } catch (e) {}
       }
       if (controller && typeof controller.destroy === 'function') controller.destroy();
+      // Drop the cross-world mount marker so a later boot() (or the extension) can
+      // re-mount cleanly.
+      if (mountMarker && mountMarker.parentNode) {
+        try { mountMarker.parentNode.removeChild(mountMarker); } catch (e) {}
+      }
       // Release the single-mount guard so a later boot() can re-mount cleanly.
       if (g) { g.__notebackBooted = false; g.__notebackController = null; }
     }

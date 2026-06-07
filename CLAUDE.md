@@ -124,6 +124,23 @@ the code, that have already bitten us once.
   that exact list. Don't hard-code the file list in the popup — it would silently
   drift the next time a runtime file is added to the manifest, and the injected
   page would boot an incomplete runtime.
+- **The extension and an embedded canvas run in SEPARATE JS worlds — the
+  single-mount guard can't cross.** Open a saved canvas while the extension is
+  installed and BOTH want to annotate the page: the canvas's inlined runtime boots
+  in the page's MAIN world, the content script in an ISOLATED world. `boot.js`'s
+  `window.__notebackBooted` is a **per-world** global, so the content script never
+  sees the canvas's flag — without help both mount (two launchers) and the
+  extension routes comments to **chrome.storage** while the canvas's localStorage
+  history stays empty (comments appear, but no version is ever recorded — the
+  symptom that bit us). The hand-off rides the DOM, the only shared channel:
+  `boot.js` stamps a **synchronous** `<div data-noteback-ui="mount">` (before its
+  first `await`, so it's in place by the extension's `document_idle`), and
+  `content-script.js` stands down via `originPolicy.overlayMounted(document)`. The
+  marker rides `[data-noteback-ui]`, so every export strip drops it and `destroy()`
+  removes it. **Don't "simplify" the guard back to the JS flag alone** — it silently
+  does nothing across worlds. Covered by `test/e2e/extension-standdown.e2e.test.js`,
+  which loads the real unpacked extension (`channel: 'chromium'`) and reproduces
+  the double-mount.
 
 ## Live verification (Playwright)
 
