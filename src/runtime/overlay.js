@@ -276,10 +276,10 @@
 
     /* version timeline (docs/design.md §14.4) + snapshot peek popup */
     // Docked at the bottom of the sidebar, above .nb-foot: a bounded, self-scrolling
-    // band so the comment list (flex:1) keeps the room. Collapses (no border) when
-    // there are no earlier versions.
+    // band so the comment list (flex:1) keeps the room. Collapses entirely when
+    // there are no earlier versions. No top divider — it sits flush above .nb-foot.
     '.nb-versions-dock{flex:0 0 auto;max-height:34vh;overflow-y:auto;overflow-x:hidden;',
-    '  border-top:1px solid var(--nb-line);padding:2px 14px 8px;scrollbar-width:thin;}',
+    '  padding:2px 14px 8px;scrollbar-width:thin;}',
     '.nb-versions-dock:empty{display:none;}',
     '.nb-versions .nb-group-label{margin:11px 4px 4px;}',
     '.nb-ver-rest[hidden]{display:none;}',
