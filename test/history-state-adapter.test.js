@@ -41,6 +41,22 @@ test('save captures a full-doc snapshot at the first comment; getHistory/getVers
   assert.strictEqual(v.html, '<html>FIRST</html>');
 });
 
+test('exportHistory returns the doc + version records as a kv-key map; null when degraded', async () => {
+  const store = fakeStore();
+  const a = build(store, '<html>FIRST</html>');
+  await a.load();
+  await a.save({ schemaVersion: 1, docId: 'D1', docTitle: 'T', comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }] });
+  const exp = await a.exportHistory();
+  assert.ok(exp && exp.entries, 'returns an entries map');
+  assert.ok(Object.prototype.hasOwnProperty.call(exp.entries, 'nb:doc:D1'), 'includes the doc record');
+  const verKeys = Object.keys(exp.entries).filter((k) => k.indexOf('nb:ver:') === 0);
+  assert.strictEqual(verKeys.length, 1, 'includes the one version record');
+  assert.strictEqual(exp.entries[verKeys[0]].snapshotHtml, '<html>FIRST</html>', 'the version snapshot travels in the export');
+  // degraded (empty docId) → null.
+  const d = mod.createHistoryStateAdapter({ doc: { title: 'T' }, store: fakeStore(), inner: fakeInner(), docId: '', contentText: () => LONG, captureSnapshot: () => '<html>S</html>', draftHistory: core, codec: idCodec, now: () => 'x' });
+  assert.strictEqual(await d.exportHistory(), null);
+});
+
 test('getCurrentVersionKey returns the resolved version key; null when degraded', async () => {
   // usable: the key is the content hash of the (long-enough) content text.
   const a = build(fakeStore());

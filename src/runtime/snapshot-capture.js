@@ -59,6 +59,11 @@
     var st = clone.querySelector('#noteback-state');
     if (st && st.parentNode) st.parentNode.removeChild(st);
 
+    // Remove the embedded-history block ("save with comments and history") so a
+    // version snapshot never carries another doc's full history (no recursion/bloat).
+    var hist = clone.querySelector('#noteback-history');
+    if (hist && hist.parentNode) hist.parentNode.removeChild(hist);
+
     // Remove inline runtime scripts (no src attr, body contains NotebackRuntime)
     var scripts = clone.querySelectorAll('script');
     for (var k = 0; k < scripts.length; k++) {
@@ -82,6 +87,9 @@
 
     // Remove noteback-state script block (matched by id attribute)
     out = out.replace(/<script\b[^>]*\bid\s*=\s*["']noteback-state["'][^>]*>[\s\S]*?<\/script\s*>/gi, '');
+
+    // Remove the embedded-history script block (matched by id attribute)
+    out = out.replace(/<script\b[^>]*\bid\s*=\s*["']noteback-history["'][^>]*>[\s\S]*?<\/script\s*>/gi, '');
 
     // Remove inline runtime scripts (no src attribute, contains NotebackRuntime)
     // Pattern: <script with no src>, body contains NotebackRuntime, close </script>

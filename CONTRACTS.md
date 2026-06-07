@@ -65,7 +65,10 @@ Rules:
 `getHistory() -> Promise<Version[]>`, `getVersion({versionKey}) -> Promise<{html, comments, docTitle, contentHash}|null>`,
 `getCurrentVersionKey() -> Promise<string|null>` (THIS document's current version key
 — its content hash, or `null` when degraded; used by checkout to bake "which version
-is live" into an opened tab), and `clearCurrent() -> Promise<void>`. The overlay
+is live" into an opened tab), `exportHistory() -> Promise<{schemaVersion, entries}|null>`
+(this doc's full history as a kv-key → record map, snapshots included; used by "save
+with comments and history" to embed history in the file), and
+`clearCurrent() -> Promise<void>`. The overlay
 feature-detects these (via the `history` config passed to `boot`, §3.7) to drive the
 version timeline; the comments-only `ChromeStorageAdapter`/`InFileStateAdapter` don't
 have them and the timeline stays hidden. There is no per-comment "section" lookup —
@@ -426,13 +429,26 @@ Each receives the current `State`.
  * @property {(state: State) => void|Promise<void>}   [onCopyMarkdown] Copy feedback as Markdown.
  * @property {(state: State, opts: {clean?: boolean}) => Promise<string>} [onCopyHtml] Build HTML for the clipboard — the clean document (clean:true) or the full feedback canvas (clean:false). Returns the string; the overlay/popup writes it to the clipboard.
  * @property {(state: State) => void|Promise<void>}   [onSaveCanvas]   Save HTML *with* comments (re-shareable canvas).
+ * @property {(state: State) => void|Promise<void>}   [onSaveCanvasWithHistory] Save HTML with comments AND the embedded version history (a `#noteback-history` JSON block). Present only on the embedded canvas. The overlay shows the "with comments and history" item only when this hook exists AND `getHistory()` is non-empty.
  * @property {(state: State) => void|Promise<void>}   [onSaveClean]    Save HTML *without* Noteback (the original document).
  * @property {(state: State) => void}                 [onSavePdf]      Produce a PDF. Omit to use the overlay's default (`window.print()`).
  */
 ```
 
 Footer **Save…** menu → hooks: *HTML · with comments* → `onSaveCanvas`,
-*HTML · clean copy* → `onSaveClean`, *PDF/Print* → `onSavePdf` (default `window.print()`).
+*HTML · with comments and history* → `onSaveCanvasWithHistory` (hidden unless there's
+history), *HTML · clean copy* → `onSaveClean`, *PDF/Print* → `onSavePdf`
+(default `window.print()`).
+
+**Embedded history block.** `onSaveCanvasWithHistory` calls the adapter's
+`exportHistory()` (a `{schemaVersion, entries}` map of `nb:doc:*`/`nb:ver:*` kv keys →
+records, snapshots included) and writes it into a `<script id="noteback-history"
+type="application/json">` block (escaping `</script>` to `<\/script>` so a comment body
+can't close it). On reopen the embedded boot **synchronously** seeds `localStorage` from
+that block — **only keys not already present** (never clobber newer local data) — before
+the history adapter first resolves. The block is excluded from snapshots
+(`captureCleanDoc`), clean copies (`rebuildCleanHtml`), plain "with comments" saves
+(`rebuildHtml`), and checkouts (`buildVersionCanvasHtml`), so it never nests/recurses.
 
 Footer **Copy ▾** menu → `onCopyHtml`: *Copy html (with feedback)* →
 `onCopyHtml(state, {clean:false})` (same bytes as `onSaveCanvas`), *Copy html

@@ -130,9 +130,9 @@ test('the Versions timeline renders an earlier version row with working open + c
 
     // The Versions group + label is present.
     const versions = page.locator('.nb-versions');
-    assert.strictEqual(await versions.count(), 1, 'the Versions group is rendered');
+    assert.strictEqual(await versions.count(), 1, 'the History group is rendered');
     const groupLabel = await versions.locator('.nb-group-label').first().textContent();
-    assert.strictEqual((groupLabel || '').trim(), 'Versions', 'the group carries the "Versions" label');
+    assert.strictEqual((groupLabel || '').trim(), 'History', 'the group carries the "History" label');
 
     // The timeline docks at the BOTTOM (its own band above the action buttons), not
     // inside the scrolling comment list, so the comments keep the available room.

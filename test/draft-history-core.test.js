@@ -28,6 +28,35 @@ test('resolve creates a version and lists it under the doc', async () => {
   assert.deepStrictEqual(r.comments, []);
 });
 
+test('exportDoc returns the doc record + every version record as a kv-key map', async () => {
+  const dh = makeCore(fakeStore());
+  const r1 = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });
+  await dh.persist({ docId: 'D1', versionKey: r1.versionKey, comments: [{ id: 'c1', body: 'v1 note', anchor: null, createdAt: 'x', author: null }], snapshotHtml: '<html>ONE</html>' });
+  const r2 = await dh.resolve({ docId: 'D1', contentText: LONG + ' Now changed materially here.', fallbackComments: [], docTitle: 'T' });
+  await dh.persist({ docId: 'D1', versionKey: r2.versionKey, comments: [{ id: 'c2', body: 'v2 note', anchor: null, createdAt: 'x', author: null }], snapshotHtml: '<html>TWO</html>' });
+
+  const exp = await dh.exportDoc({ docId: 'D1' });
+  assert.strictEqual(exp.schemaVersion, 1);
+  const keys = Object.keys(exp.entries);
+  assert.ok(keys.indexOf('nb:doc:D1') !== -1, 'includes the doc record');
+  assert.ok(keys.indexOf('nb:ver:' + r1.versionKey) !== -1, 'includes version 1');
+  assert.ok(keys.indexOf('nb:ver:' + r2.versionKey) !== -1, 'includes version 2');
+  assert.strictEqual(keys.length, 3, 'exactly the doc + its two versions');
+  assert.strictEqual(exp.entries['nb:ver:' + r1.versionKey].snapshotHtml, '<html>ONE</html>');
+  // Round-trip: seeding a fresh store from the entries reproduces the history.
+  const store2 = fakeStore();
+  for (const k of keys) await store2.set(k, exp.entries[k]);
+  const dh2 = makeCore(store2);
+  const hist = await dh2.history({ docId: 'D1', exceptVersionKey: r2.versionKey });
+  assert.strictEqual(hist.length, 1);
+  assert.strictEqual(hist[0].comments[0].body, 'v1 note');
+});
+
+test('exportDoc returns null for an unknown doc', async () => {
+  const dh = makeCore(fakeStore());
+  assert.strictEqual(await dh.exportDoc({ docId: 'NOPE' }), null);
+});
+
 test('a content change makes a new version in the same doc; history shows the old one', async () => {
   const dh = makeCore(fakeStore());
   const r1 = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });

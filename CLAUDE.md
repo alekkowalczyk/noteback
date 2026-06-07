@@ -135,6 +135,26 @@ the code, that have already bitten us once.
   a `file://` blob may not, degrading to comments-only. The "viewing" now-row is rendered
   even when `getHistory()` is empty *in checkout mode* (so "you are here" always shows),
   but the rest of the timeline still depends on the shared store.
+- **"Save · with comments and history" embeds the timeline in the FILE; the block is
+  stripped everywhere else.** `onSaveCanvasWithHistory` → `adapter.exportHistory()` (core
+  `exportDoc`) gathers `nb:doc:<id>` + every `nb:ver:<key>` (snapshots included) into a
+  `<script id="noteback-history" type="application/json">` block (escaping `</script>` →
+  `<\/script>`, valid JSON). On reopen the `EMBEDDED_BOOT` **synchronously** seeds
+  `localStorage` from it BEFORE the adapter resolves, and **only for keys not already
+  present** (never clobber newer local data — so two machines with diverged history don't
+  merge their `nb:doc` version lists; a fresh machine rehydrates fully). The block must be
+  excluded from snapshots (`captureCleanDoc`), clean copies (`rebuildCleanHtml`), plain
+  "with comments" saves (`rebuildHtml` via `buildCanvasClone`), and checkouts
+  (`buildVersionCanvasHtml`) — else it nests/recurses. Do NOT mark it `data-noteback-ui`
+  to get free stripping: the cross-world stand-down keys off `[data-noteback-ui]`, so a
+  CSP-blocked canvas carrying the block would make the extension stand down and mount
+  nothing. Covered by `test/e2e/history-embed.e2e.test.js`.
+- **A `hidden` menu item needs `.nb-menu-item[hidden]{display:none}` — the `hidden`
+  attribute alone does NOTHING here.** `.nb-menu-item{display:block}` is an author rule of
+  equal specificity to the UA `[hidden]{display:none}`, and author wins — so an item with
+  the `hidden` attribute still renders (it bit the "with comments and history" visibility
+  toggle: the property was set, the item stayed visible). The explicit
+  `.nb-menu-item[hidden]{display:none}` (specificity class+attr) restores it.
 - **`wrap` PRESERVES an existing doc-id — don't make it re-mint.** The version history
   follows the baked `data-noteback-doc-id`, so re-wrapping a canvas must keep the same
   id or the history orphans. `bin/noteback.js`'s precedence is: explicit `--id` → the id

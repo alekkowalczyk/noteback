@@ -145,6 +145,21 @@
       });
     }
 
+    // Export this doc's FULL history (the doc record + every stored version record,
+    // snapshots included) as a flat map of kv-key → value. Used to embed history in
+    // a saved file ("save with comments and history") and rehydrate it on reopen.
+    function exportDoc(q) {
+      return store.get(docKey(q.docId)).then((doc) => {
+        if (!doc) return null;
+        const entries = {};
+        entries[docKey(q.docId)] = doc;
+        const keys = (doc.versions || []).slice();
+        return keys.reduce((chain, k) => chain.then(() => store.get(verKey(k)).then((ver) => {
+          if (ver) entries[verKey(k)] = ver;
+        })), Promise.resolve()).then(() => ({ schemaVersion: 1, entries: entries }));
+      });
+    }
+
     // Retention: snapshot window, metadata window, TTL, then a coarse global byte cap.
     function prune(docId, protectedKey) {
       return store.get(docKey(docId)).then((doc) => {
@@ -201,7 +216,7 @@
       });
     }
 
-    return { resolve, persist, history, version, clearCurrent };
+    return { resolve, persist, history, version, clearCurrent, exportDoc };
   }
 
   return { MIN_HASH_CHARS, normalizeText, contentHash, cyrb53, createDraftHistory };

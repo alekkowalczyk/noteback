@@ -302,14 +302,23 @@ A single panel adapts to where you are:
   received feedback is a timeline node below, newest first. Each past row offers
   **peek** (click the row — renders that version in context), **open** (checks it out
   as a full canvas tab), and **copy feedback** (that version's markdown).
-- **Collapse rule (keep the panel calm):** the Versions group is **hidden at 0**
-  earlier versions, shown **inline at exactly 1**, and at **2+** the most-recent
-  earlier version stays inline while the rest tuck under a "+N older versions"
-  disclosure. Last round of feedback is always zero-click; deeper history is one click;
-  the current draft is never buried.
+- **Collapse rule (keep the panel calm):** the **History** group (the label the user
+  sees) is **hidden at 0** earlier versions, shown **inline at exactly 1**, and at **2+**
+  the most-recent earlier version stays inline while the rest tuck under a "+N older
+  versions" disclosure. Last round of feedback is always zero-click; deeper history is
+  one click; the current draft is never buried.
 - **Layout:** the live comments (or the "No notes yet" empty state) own the scrollable
-  space; the Versions timeline **docks at the bottom** — a bounded, self-scrolling band
+  space; the History timeline **docks at the bottom** — a bounded, self-scrolling band
   above the action buttons — so it never pushes the current draft's notes out of view.
+- **History travels with the file (opt-in).** History normally lives only in the
+  browser's `localStorage`, so a saved canvas opened on another machine shows comments
+  but an empty timeline. The Save menu gains **"HTML · with comments and history"**
+  (shown only when there IS history) which embeds the doc's full history — every version
+  record + gzipped snapshot — into a `#noteback-history` JSON block in the file. On
+  reopen the embedded runtime seeds `localStorage` from that block (**only keys not
+  already present** — never clobber newer local data), so the timeline rehydrates from
+  the file itself. The block is excluded from snapshots, clean copies, and checkouts, so
+  it never nests or recurses.
 - **Peek** renders that version full-bleed in a modal: the snapshot **fills the panel**
   (it's an `<iframe>`, a replaced element, so it needs an explicit height — top+bottom
   alone collapse it to a thin strip), with highlights **styled exactly like the live

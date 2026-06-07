@@ -281,6 +281,9 @@
     '  transition:transform var(--dropdown-close-dur) var(--dropdown-ease),opacity var(--dropdown-close-dur) var(--dropdown-ease);}',
     '.nb-menu-item{display:block;width:100%;text-align:left;border:none;background:none;cursor:pointer;',
     '  padding:9px 11px;border-radius:10px;transition:background .14s ease;}',
+    /* explicit display:block above beats the UA [hidden]{display:none} (equal
+       specificity, author wins), so restore it for hidden menu items. */
+    '.nb-menu-item[hidden]{display:none;}',
     '.nb-menu-item:hover,.nb-menu-item:focus-visible{background:var(--nb-accent-wash);outline:none;}',
     '.nb-mi-label{display:block;font:700 13px/1.25 var(--nb-round);color:var(--nb-ink);}',
     '.nb-menu-item:hover .nb-mi-label,.nb-menu-item:focus-visible .nb-mi-label{color:var(--nb-accent-deep);}',
@@ -326,12 +329,15 @@
     /* per-row actions live behind a chevron next to the version name; clicking it
        opens .nb-ver-menu (a portaled .nb-menu positioned in JS, since the dock
        clips overflow) with Open + Copy feedback. */
-    '.nb-ver-menu-btn{flex:none;border:none;background:none;cursor:pointer;color:var(--nb-ink-faint);',
-    '  display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;',
-    '  font-size:10px;line-height:1;padding:0;margin-left:-3px;',
-    '  transition:background .14s ease,color .14s ease,transform .18s var(--dropdown-ease);}',
-    '.nb-ver-menu-btn:hover{background:#ececea;color:var(--nb-ink);}',
-    '.nb-ver-menu-btn[aria-expanded="true"]{color:var(--nb-accent-deep);transform:rotate(180deg);}',
+    /* icon-only chevron styled like the secondary "Copy feedback" button: white
+       card surface + a line border (no text). */
+    '.nb-ver-menu-btn{flex:none;cursor:pointer;background:var(--nb-card);color:var(--nb-accent-ink);',
+    '  border:1px solid var(--nb-line-strong);',
+    '  display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;',
+    '  font-size:10px;line-height:1;padding:0;',
+    '  transition:background .14s ease,color .14s ease,border-color .14s ease,transform .18s var(--dropdown-ease);}',
+    '.nb-ver-menu-btn:hover{background:var(--nb-accent-wash);border-color:var(--nb-accent);color:var(--nb-accent-deep);}',
+    '.nb-ver-menu-btn[aria-expanded="true"]{background:var(--nb-accent-wash);border-color:var(--nb-accent);color:var(--nb-accent-deep);transform:rotate(180deg);}',
     '.nb-ver-menu{position:fixed;left:0;top:auto;right:auto;bottom:auto;width:214px;transform-origin:bottom left;}',
     '.nb-ver-menu .nb-mi-sub{text-transform:none;letter-spacing:normal;}',
     '.nb-ver-menu .nb-menu-item:disabled{opacity:.42;cursor:default;}',
@@ -623,6 +629,9 @@
       '      <button type="button" class="nb-menu-item nb-save-comments" role="menuitem">' +
       '        <span class="nb-mi-label">HTML · with comments</span>' +
       '        <span class="nb-mi-sub">highlights &amp; notes, re-shareable</span></button>' +
+      '      <button type="button" class="nb-menu-item nb-save-history" role="menuitem" hidden>' +
+      '        <span class="nb-mi-label">HTML · with comments and history</span>' +
+      '        <span class="nb-mi-sub">embeds version history in the file</span></button>' +
       '      <div class="nb-menu-sep" role="none"></div>' +
       '      <button type="button" class="nb-menu-item nb-save-clean" role="menuitem">' +
       '        <span class="nb-mi-label">HTML · clean copy</span>' +
@@ -672,6 +681,11 @@
     sidebar.querySelector('.nb-copy-clean').addEventListener('click', function () { closeCopyMenu(); copyHtmlClean(); });
     saveBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleSaveMenu(); });
     sidebar.querySelector('.nb-save-comments').addEventListener('click', function () { closeSaveMenu(); saveCanvas(); });
+    // "with comments and history" — hidden until there's history AND the mode can
+    // embed it (the embedded canvas exposes onSaveCanvasWithHistory). Toggled in
+    // renderVersions; see refreshSaveHistoryItem.
+    const saveHistoryItem = sidebar.querySelector('.nb-save-history');
+    saveHistoryItem.addEventListener('click', function () { closeSaveMenu(); saveCanvasWithHistory(); });
     sidebar.querySelector('.nb-save-clean').addEventListener('click', function () { closeSaveMenu(); saveClean(); });
     sidebar.querySelector('.nb-save-pdf').addEventListener('click', function () { closeSaveMenu(); savePdf(); });
     const clearBtn = sidebar.querySelector('.nb-clear-comments');
@@ -1400,7 +1414,7 @@
     }
 
     /**
-     * The "Versions" timeline group (docs/design.md \u00A714.4). It shows the
+     * The "History" timeline group (docs/design.md \u00A714.4). It shows the
      * document's version history when there is earlier feedback:
      *   - 0 earlier versions  \u2192 render nothing (the group is hidden entirely).
      *   - exactly 1 earlier   \u2192 show it inline.
@@ -1427,6 +1441,12 @@
       if (checkoutCurrentKey) wrap.appendChild(renderCheckoutBar());
       Promise.resolve(history.getHistory()).then(function (versions) {
         versions = versions || [];
+        // The "save with comments and history" option only makes sense when there IS
+        // history to embed AND the mode can embed it (the embedded canvas exposes
+        // onSaveCanvasWithHistory). Toggle it here, where we already have the count.
+        if (saveHistoryItem) {
+          saveHistoryItem.hidden = !(versions.length >= 1 && exporter && typeof exporter.onSaveCanvasWithHistory === 'function');
+        }
         // Collapse rule: 0 earlier versions \u2192 the group is not rendered at all. In a
         // checkout we still render the group (label + "viewing" row + the "open
         // current" banner) even with no OTHER versions, so "you are here" is always
@@ -1435,7 +1455,7 @@
 
         const label = doc.createElement('div');
         label.className = 'nb-group-label';
-        label.textContent = 'Versions';
+        label.textContent = 'History';
         wrap.appendChild(label);
 
         // The "now" row: the live draft (or, in a checkout, the opened version),
@@ -1591,7 +1611,6 @@
       line.appendChild(dot);
       line.appendChild(name);
       line.appendChild(menuBtn);
-      line.appendChild(meta);
       line.appendChild(spacer);
       if (isCurrent) {
         const cur = doc.createElement('span');
@@ -1599,6 +1618,7 @@
         cur.textContent = 'current';
         line.appendChild(cur);
       }
+      line.appendChild(meta); // date — right-aligned (after the flex spacer)
       line.appendChild(cnt);
       row.appendChild(line);
 
@@ -1780,6 +1800,10 @@
       for (let i = 0; i < ui.length; i++) {
         if (ui[i].parentNode) ui[i].parentNode.removeChild(ui[i]);
       }
+      // Drop any embedded-history block — a checked-out version is a fresh canvas and
+      // must not carry the source doc's full history (it would re-seed on open).
+      const histBlk = clone.querySelector('#noteback-history');
+      if (histBlk && histBlk.parentNode) histBlk.parentNode.removeChild(histBlk);
       // Unwrap any live highlight <mark>s left in the clone so we start clean
       // (the snapshot content we inject below replaces the doc-root anyway, but
       // be defensive in case the clone's root is reused).
@@ -2105,6 +2129,24 @@
         return;
       }
       toast('Saving the canvas is only available with the extension here.');
+    }
+
+    // "HTML · with comments and history" — like saveCanvas, but the exporter also
+    // embeds this doc's full version history (snapshots included) into the file, so
+    // reopening rehydrates the timeline even on a machine with no localStorage copy.
+    async function saveCanvasWithHistory() {
+      const s = getState();
+      if (exporter && typeof exporter.onSaveCanvasWithHistory === 'function') {
+        try {
+          await exporter.onSaveCanvasWithHistory(s);
+          toast('Saving HTML with comments + history…');
+        } catch (e) {
+          toast('Save failed');
+        }
+        return;
+      }
+      // No embed capability here — fall back to the comments-only save.
+      return saveCanvas();
     }
 
     // "HTML · clean copy" — the original document with all Noteback stripped.

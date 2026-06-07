@@ -103,6 +103,14 @@
         return ensureResolved().then((r) => r.degraded ? null : r.versionKey);
       },
 
+      // This doc's full history (doc record + every version record, snapshots
+      // included) as a kv-key → value map, so "save with comments and history" can
+      // embed it in the file. null when degraded or there's nothing stored.
+      exportHistory: function () {
+        if (!usable) return Promise.resolve(null);
+        return ensureResolved().then((r) => (r.degraded || !dh.exportDoc) ? null : dh.exportDoc({ docId: docId }));
+      },
+
       getVersion: function (ref) {
         if (!usable) return Promise.resolve(null);
         return dh.version({ versionKey: ref.versionKey });
