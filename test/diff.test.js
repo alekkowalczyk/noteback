@@ -68,3 +68,59 @@ test('diffWords: word-level edit coalesces runs and rejoins text', () => {
   assert.strictEqual(runs.filter((r) => r.op !== 'del').map((r) => r.text).join(''), 'the slow brown fox');
   assert.strictEqual(runs.filter((r) => r.op !== 'ins').map((r) => r.text).join(''), 'the quick brown fox');
 });
+
+test('similarity: identical=1, disjoint=0, partial in between, empty-empty=1', () => {
+  assert.strictEqual(diff.similarity('alpha beta gamma', 'alpha beta gamma'), 1);
+  assert.strictEqual(diff.similarity('alpha beta', 'x y z'), 0);
+  assert.strictEqual(diff.similarity('', ''), 1);
+  assert.strictEqual(diff.similarity('alpha', ''), 0);
+  const partial = diff.similarity('the quick brown fox', 'the quick red fox');
+  assert.ok(partial > 0.5 && partial < 1, 'a one-word change is highly similar (got ' + partial + ')');
+});
+
+test('planBlocks: unchanged blocks are all eq', () => {
+  const steps = diff.planBlocks(['A', 'B'], ['A', 'B']);
+  assert.deepStrictEqual(steps, [
+    { type: 'eq', baseIndex: 0, targetIndex: 0 },
+    { type: 'eq', baseIndex: 1, targetIndex: 1 }
+  ]);
+});
+
+test('planBlocks: a pure insert and a pure delete', () => {
+  assert.deepStrictEqual(diff.planBlocks(['A'], ['A', 'B']), [
+    { type: 'eq', baseIndex: 0, targetIndex: 0 },
+    { type: 'ins', targetIndex: 1 }
+  ]);
+  assert.deepStrictEqual(diff.planBlocks(['A', 'B'], ['A']), [
+    { type: 'eq', baseIndex: 0, targetIndex: 0 },
+    { type: 'del', baseIndex: 1 }
+  ]);
+});
+
+test('planBlocks: a similar replaced block becomes an edit', () => {
+  const steps = diff.planBlocks(
+    ['Ship in Q2 and early Q3 with a small team'],
+    ['Ship in Q2 and late Q3 with a small team']
+  );
+  assert.deepStrictEqual(steps, [{ type: 'edit', baseIndex: 0, targetIndex: 0 }]);
+});
+
+test('planBlocks: a dissimilar replaced block stays del + ins', () => {
+  const steps = diff.planBlocks(['totally unrelated alpha'], ['completely different beta']);
+  assert.deepStrictEqual(steps, [
+    { type: 'del', baseIndex: 0 },
+    { type: 'ins', targetIndex: 0 }
+  ]);
+});
+
+test('planBlocks: edit in the middle keeps surrounding eq blocks aligned', () => {
+  const steps = diff.planBlocks(
+    ['intro para', 'the quick brown fox', 'outro para'],
+    ['intro para', 'the quick red fox', 'outro para']
+  );
+  assert.deepStrictEqual(steps, [
+    { type: 'eq', baseIndex: 0, targetIndex: 0 },
+    { type: 'edit', baseIndex: 1, targetIndex: 1 },
+    { type: 'eq', baseIndex: 2, targetIndex: 2 }
+  ]);
+});
