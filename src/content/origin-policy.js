@@ -55,9 +55,12 @@
     const o = s.origins || {};
     return {
       origins: {
+        // file:// auto-activates by default; localhost / 127.0.0.1 are OPT-IN —
+        // off until the user enables them in the popup (so a dev server doesn't
+        // get the overlay unasked-for). Only an explicit `true` turns them on.
         file: o.file !== false,
-        localhost: o.localhost !== false,
-        '127.0.0.1': o['127.0.0.1'] !== false
+        localhost: o.localhost === true,
+        '127.0.0.1': o['127.0.0.1'] === true
       },
       disabledSites: Array.isArray(s.disabledSites) ? s.disabledSites.slice() : [],
       historySites: Array.isArray(s.historySites) ? s.historySites.slice() : [],

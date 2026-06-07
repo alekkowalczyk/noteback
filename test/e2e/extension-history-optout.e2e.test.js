@@ -98,23 +98,29 @@ test('extension: live history opt-out stops recording new versions', { timeout: 
       });
     } catch (e) { t.skip('could not launch Chromium with an unpacked extension: ' + (e && e.message)); return; }
 
+    // localhost / 127.0.0.1 are opt-in now: enable 127.0.0.1 in the extension's
+    // settings (as the popup's per-type toggle would) BEFORE the content script
+    // mounts, so the extension activates on this dev-server origin at all.
+    const sw = await getWorker(ctx);
+    if (!sw) { t.skip('extension service worker unavailable'); return; }
+    await sw.evaluate(() => new Promise((res) => chrome.storage.local.set({ 'nb:settings': { origins: { '127.0.0.1': true } } }, res)));
+
     const page = await ctx.newPage();
     await page.goto(baseURL + '/');
     let injected = false;
     try { await page.locator('[data-noteback-ui="panel"]').first().waitFor({ state: 'attached', timeout: 6000 }); injected = true; } catch (e) {}
     if (!injected) { t.skip('the unpacked extension did not inject in this environment'); return; }
 
-    const sw = await getWorker(ctx);
-    if (!sw) { t.skip('extension service worker unavailable'); return; }
-
-    // History on by default for localhost: a comment records exactly one version.
+    // History on by default once the origin is active: a comment records one version.
     await createComment(page, 'recorded while history on', 0);
     let v = await readVerCount(sw);
     assert.strictEqual(v.records, 1, 'a version record exists while history is on');
     assert.strictEqual(v.comments, 1, 'the comment is in history');
 
-    // Opt out globally (as the popup would) and wait for the live re-mount.
-    await sw.evaluate(() => new Promise((res) => chrome.storage.local.set({ 'nb:settings': { historyDisabledGlobal: true } }, res)));
+    // Opt out globally (as the popup would) and wait for the live re-mount. Keep
+    // the 127.0.0.1 origin opt-in, else this whole-object write would deactivate
+    // the extension here instead of re-mounting it comments-only.
+    await sw.evaluate(() => new Promise((res) => chrome.storage.local.set({ 'nb:settings': { origins: { '127.0.0.1': true }, historyDisabledGlobal: true } }, res)));
     await page.waitForTimeout(1200);
     // Exactly one overlay remains (re-mount, not a double-mount).
     assert.strictEqual(await page.evaluate(() => document.querySelectorAll('[data-noteback-ui="panel"]').length), 1, 'still exactly one overlay after re-mount');

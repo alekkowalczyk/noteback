@@ -54,7 +54,8 @@ The agent then runs `npx noteback wrap doc.html` to turn any HTML into a canvas.
 3. Click **Load unpacked** and select the repo root (the folder with
    `manifest.json`).
 4. To annotate `file://` docs, open the extension's **Details** page and enable
-   **"Allow access to file URLs."** (`localhost` / `127.0.0.1` need no toggle.)
+   **"Allow access to file URLs."** (`localhost` / `127.0.0.1` are opt-in — switch
+   them on from the extension popup; they're off by default.)
 
 ## Docs
 
