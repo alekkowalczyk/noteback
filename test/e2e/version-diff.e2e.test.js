@@ -36,7 +36,7 @@ before(async () => {
     res.setHeader('content-type', 'text/html; charset=utf-8');
     let body = canvasHtml;
     if (serveMode === 'd2') body = body.split('Technical Spec').join('Technical Spec — Revision 2');
-    else if (serveMode === 'd3') body = body.split('Technical Spec').join('Technical Spec — Revision 3');
+    else if (serveMode === 'd3') body = body.split('Technical Spec').join('Technical Spec — Revision 3').split('load balancer').join('service mesh');
     res.end(body);
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -74,6 +74,50 @@ async function createComment(page, body) {
   await page.waitForTimeout(500);
 }
 
+/** Seed three versions (d1→d2→d3) under one doc-id, each with a comment, then open
+ *  the sidebar. Leaves the live draft = d3 ("now"); v2 and v1 are earlier versions.
+ *  d3 carries two block-level changes vs d2 (the eyebrow + the "service mesh" edit). */
+async function seedThreeDraftsAndOpenSidebar(page) {
+  serveMode = 'd1';
+  await page.goto(baseURL + '?v=d1');
+  await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
+  await page.reload();
+  await page.waitForTimeout(300);
+  await createComment(page, 'Note on draft 1');
+
+  serveMode = 'd2';
+  await page.goto(baseURL + '?v=d2');
+  await page.waitForTimeout(400);
+  await createComment(page, 'Note on draft 2');
+
+  serveMode = 'd3';
+  await page.goto(baseURL + '?v=d3');
+  await page.waitForTimeout(400);
+  await createComment(page, 'Note on draft 3 (current)');
+  await page.locator('.nb-launcher').click();
+  await page.waitForTimeout(300);
+}
+
+/** Locate the diff iframe (it lives inside the overlay shadow root) and run `read`
+ *  against its contentDocument, returning whatever `read` returns. */
+function inDiffFrame(page, read) {
+  return page.evaluate((readSrc) => {
+    function findFrame(node) {
+      if (node.shadowRoot) {
+        const f = node.shadowRoot.querySelector('iframe.nb-hist-frame');
+        if (f) return f;
+        for (const c of node.shadowRoot.querySelectorAll('*')) { const r = findFrame(c); if (r) return r; }
+      }
+      for (const c of node.children || []) { const r = findFrame(c); if (r) return r; }
+      return null;
+    }
+    const f = findFrame(document.documentElement);
+    if (!f) return null;
+    // eslint-disable-next-line no-new-func
+    return (new Function('return (' + readSrc + ')')())(f.contentDocument);
+  }, read.toString());
+}
+
 /** Read diff-relevant facts out of the inline view iframe (it lives in a shadow root). */
 function readDiffFrame(page) {
   return page.evaluate(() => {
@@ -104,24 +148,7 @@ test('inline diff view: toggle shows ins/del vs next version, keeps comment high
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
   try {
-    serveMode = 'd1';
-    await page.goto(baseURL + '?v=d1');
-    await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
-    await page.reload();
-    await page.waitForTimeout(300);
-    await createComment(page, 'Note on draft 1');
-
-    serveMode = 'd2';
-    await page.goto(baseURL + '?v=d2');
-    await page.waitForTimeout(400);
-    await createComment(page, 'Note on draft 2');
-
-    serveMode = 'd3';
-    await page.goto(baseURL + '?v=d3');
-    await page.waitForTimeout(400);
-    await createComment(page, 'Note on draft 3 (current)');
-    await page.locator('.nb-launcher').click();
-    await page.waitForTimeout(300);
+    await seedThreeDraftsAndOpenSidebar(page);
 
     // Open the newest earlier version (v2) inline.
     const earlierRows = page.locator('.nb-ver-row[data-version-key]');
@@ -200,6 +227,86 @@ test('inline diff view: toggle shows ins/del vs next version, keeps comment high
     await page.locator('.nb-backbar').click();
     await page.waitForTimeout(200);
     assert.strictEqual(await page.locator('.nb-hist-view').count(), 0, '"Back to current" closes the inline view');
+  } finally {
+    await context.close();
+  }
+});
+
+test('now-row "Show diff" opens the latest version → now diff directly', { timeout: 120000 }, async () => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  try {
+    await seedThreeDraftsAndOpenSidebar(page);
+
+    // The live "now" row carries a right-aligned "Show diff" shortcut while history exists.
+    const showDiff = page.locator('.nb-ver-row[data-noteback-ui="version-now"] .nb-ver-diff');
+    assert.strictEqual(await showDiff.count(), 1, 'the now row has a Show diff button when earlier versions exist');
+    assert.match((await showDiff.textContent()) || '', /Show diff/, 'the button is labelled "Show diff"');
+
+    await showDiff.click();
+    await page.waitForTimeout(500);
+
+    // Same result as clicking the latest version row and enabling Diff: an inline
+    // diff of the latest earlier version → now, with the toggle already ON.
+    assert.strictEqual(await page.locator('.nb-hist-view').count(), 1, 'the inline diff view opened');
+    assert.strictEqual(await page.locator('.nb-diff-toggle').getAttribute('aria-pressed'), 'true', 'diff mode is on');
+    assert.ok(/Diff:\s*v\d+\s*→\s*now/.test((await page.locator('.nb-diff-toggle .nb-diff-label').textContent()) || ''), 'shows the "Diff: vN → now" label');
+    const frame = await readDiffFrame(page);
+    assert.ok(frame && (frame.editBlock + frame.insBlock + frame.delBlock) >= 1, 'diff markup is rendered');
+  } finally {
+    await context.close();
+  }
+});
+
+test('diff legend Prev/Next change navigates, focuses each changed block, and wraps', { timeout: 120000 }, async () => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  try {
+    await seedThreeDraftsAndOpenSidebar(page);
+
+    // Open v2 inline and turn Diff on (d3 has two block changes vs v2).
+    await page.locator('.nb-ver-row[data-version-key]').nth(0).locator('.nb-ver-line').first().click();
+    await page.waitForTimeout(400);
+    await page.locator('.nb-diff-toggle').click();
+    await page.waitForTimeout(500);
+
+    const readNav = () => inDiffFrame(page, function (cd) {
+      const blocks = Array.prototype.slice.call(cd.querySelectorAll('.nb-diff-ins-block,.nb-diff-del-block,.nb-diff-edit-block'));
+      const focused = cd.querySelector('.nb-diff-focus');
+      const pos = cd.querySelector('.nb-diff-nav-pos');
+      return {
+        hasPrev: !!cd.querySelector('.nb-diff-nav-prev'),
+        hasNext: !!cd.querySelector('.nb-diff-nav-next'),
+        pos: pos ? pos.textContent.replace(/\s+/g, ' ').trim() : null,
+        total: blocks.length,
+        focusedIndex: focused ? blocks.indexOf(focused) : -1
+      };
+    });
+    const clickNext = async () => { await inDiffFrame(page, function (cd) { cd.querySelector('.nb-diff-nav-next').click(); return 1; }); await page.waitForTimeout(150); };
+    const clickPrev = async () => { await inDiffFrame(page, function (cd) { cd.querySelector('.nb-diff-nav-prev').click(); return 1; }); await page.waitForTimeout(150); };
+
+    let nav = await readNav();
+    assert.ok(nav.hasPrev && nav.hasNext, 'the legend has Prev/Next change buttons');
+    assert.ok(nav.total >= 2, 'this diff has at least two changed blocks (got ' + nav.total + ')');
+    assert.strictEqual(nav.pos, '1 / ' + nav.total, 'counter starts at "1 / N"');
+    assert.strictEqual(nav.focusedIndex, 0, 'the first change is focused on load');
+
+    await clickNext();
+    nav = await readNav();
+    assert.strictEqual(nav.pos, '2 / ' + nav.total, 'Next advances the counter');
+    assert.strictEqual(nav.focusedIndex, 1, 'Next moves the focus to the second change');
+
+    // From the last change, Next wraps back to the first.
+    while (nav.focusedIndex < nav.total - 1) { await clickNext(); nav = await readNav(); }
+    await clickNext();
+    nav = await readNav();
+    assert.strictEqual(nav.focusedIndex, 0, 'Next wraps from the last change back to the first');
+    assert.strictEqual(nav.pos, '1 / ' + nav.total, 'counter wraps to "1 / N"');
+
+    // Prev from the first change wraps to the last.
+    await clickPrev();
+    nav = await readNav();
+    assert.strictEqual(nav.focusedIndex, nav.total - 1, 'Prev wraps from the first change back to the last');
   } finally {
     await context.close();
   }

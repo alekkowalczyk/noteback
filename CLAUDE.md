@@ -113,6 +113,17 @@ the code, that have already bitten us once.
   Comment highlights are painted AFTER the diff wraps words, so a comment whose
   quote straddles a changed region may not re-anchor — unchanged-region highlights
   always do.
+- **The diff's Prev/Next change navigator runs INSIDE the iframe, not from the
+  overlay.** The legend (and its `‹ Prev · n/N · Next ›` cluster) lives in the diff
+  `<iframe srcdoc>`, a separate document — so its buttons CANNOT be wired with
+  overlay `addEventListener`; the click handling, `.nb-diff-focus` stepping (ring +
+  intensified fill, wrapping both ends), scroll-to-centre, and counter are all an
+  injected static `<script>` (`buildDiffNavScript`, same pattern as the peek
+  script). It replaced the old one-shot "scroll to first change" script and keeps
+  its no-changes fallback (scroll the first highlight into view). The separate
+  **"Show diff"** shortcut on the live `now` timeline row IS overlay-side
+  (`renderNowRow`): it sets `diffMode=true` and calls `openVersionInline(latestKey)`
+  — shown only off the live draft and only when a latest earlier version exists.
 - **The version chevron menu SAVES via download, not a tab.** A version row's `▾`
   menu has **Copy feedback** + **Save HTML with comments** + **Save clean HTML**
   (both saves disabled when the version's snapshot is pruned). "Save HTML with

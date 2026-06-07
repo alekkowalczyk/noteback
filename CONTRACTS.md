@@ -100,6 +100,13 @@ the opened tab's history sidebar empty.
   square-cornered block, so the change type registers instantly. Word changes use a
   shape cue (underline for adds, strike-through for deletes) on top of colour.
   Comment highlights stay painted (layered on a separate visual channel). The
+  legend also carries a right-aligned **Prev/Next change navigator** (a `n / N`
+  counter between two buttons) driven by an in-iframe script (`buildDiffNavScript`):
+  it steps a `.nb-diff-focus` pointer through the changed blocks in document order,
+  scrolling each to centre with a colour ring + intensified fill, wrapping at both
+  ends. A **"Show diff"** shortcut on the live `now` timeline row
+  (`.nb-ver-diff`) opens the latest-version → now diff directly (diff toggle
+  pre-armed) — equivalent to opening that version's row and enabling Diff. The
   toggle is sticky while switching version rows and
   resets on "Back to current". Pure diff logic lives in `NotebackRuntime.diff`
   (`src/runtime/diff.js`); DOM rendering in `NotebackRuntime.diffRender`
