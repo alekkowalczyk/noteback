@@ -115,7 +115,7 @@ test('file://: editing the doc in place moves the comment to an earlier version 
 
     // --- edit the SAME file in place: "Draft v0.3" -> "Draft v0.31" ---
     const before = fs.readFileSync(canvasFile, 'utf8');
-    const edited = before.replace('Draft v0.3 ', 'Draft v0.31 ');
+    const edited = before.replace('Draft v0.3', 'Draft v0.31');
     assert.notStrictEqual(edited, before, 'sanity: the "Draft v0.3" token was found and edited');
     fs.writeFileSync(canvasFile, edited);
 

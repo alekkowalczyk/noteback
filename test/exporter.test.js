@@ -183,6 +183,51 @@ test('buildCanvasHtml strips injected UI, highlight marks, stale state + runtime
   assert.ok(!html.includes('old inlined runtime'), 'prior inlined runtime removed');
 });
 
+test('buildCanvasHtml carries the original <head> styling into the canvas head', () => {
+  const docHtml =
+    '<!DOCTYPE html><html><head><title>spec</title>' +
+    '<link rel="stylesheet" href="theme.css">' +
+    '<style>.lead{color:#0f766e}</style>' +
+    '<style data-noteback-ui="fab">.noteback-fab{display:none}</style>' +
+    '</head><body><h1>Hi</h1></body></html>';
+
+  const html = exporter.buildCanvasHtml({
+    docHtml: docHtml,
+    state: mkState([]),
+    templateHtml: TEMPLATE,
+    inlinedRuntime: ''
+  });
+
+  // The document's own styling survives, in the canvas <head> (before the body).
+  const headEnd = html.indexOf('</head>');
+  const bodyStart = html.indexOf('<body');
+  assert.ok(headEnd !== -1 && bodyStart > headEnd, 'has a head that precedes the body');
+  const head = html.slice(0, headEnd);
+  assert.ok(head.includes('.lead{color:#0f766e}'), 'inline <style> carried into head');
+  assert.ok(head.includes('<link rel="stylesheet" href="theme.css">'), 'stylesheet <link> carried into head');
+
+  // Noteback's own injected UI styles are NOT carried (the runtime re-adds them).
+  assert.ok(!html.includes('.noteback-fab{display:none}'), 'data-noteback-ui style excluded');
+  // The original <title> is still left behind (the template owns the canvas title).
+  assert.strictEqual(html.indexOf('<title>spec</title>'), -1, 'original head <title> not carried');
+});
+
+test('extractHeadStyles returns only document styling, excluding UI styles', () => {
+  const out = exporter.extractHeadStyles(
+    '<head><title>t</title><meta charset="utf-8">' +
+    '<style>body{margin:0}</style>' +
+    '<style data-noteback-ui="panel">.nb-sidebar{}</style>' +
+    '<link rel="stylesheet" href="a.css"><link rel="icon" href="f.ico">' +
+    '</head>'
+  );
+  assert.ok(out.includes('body{margin:0}'), 'inline style kept');
+  assert.ok(out.includes('<link rel="stylesheet" href="a.css">'), 'stylesheet link kept');
+  assert.ok(!out.includes('.nb-sidebar'), 'ui style dropped');
+  assert.ok(!out.includes('f.ico'), 'non-stylesheet link dropped');
+  assert.ok(!/<title>|<meta/i.test(out), 'title and meta not carried');
+  assert.strictEqual(exporter.extractHeadStyles('<body>no head</body>'), '', 'no head -> empty');
+});
+
 test('buildCanvasHtml state block round-trips as valid State JSON', () => {
   const state = mkState([
     mkComment('c_1', 'a queue which decouples', 'use a stream'),

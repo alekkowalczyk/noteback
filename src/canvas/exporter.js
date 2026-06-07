@@ -247,7 +247,9 @@
     cfg = cfg || {};
     const template = String(cfg.templateHtml == null ? '' : cfg.templateHtml);
     const state = cfg.state || {};
-    const docBody = extractBodyMarkup(String(cfg.docHtml == null ? '' : cfg.docHtml));
+    const rawDocHtml = String(cfg.docHtml == null ? '' : cfg.docHtml);
+    const docBody = extractBodyMarkup(rawDocHtml);
+    const docStyle = extractHeadStyles(rawDocHtml);
     const docTitle = String(state.docTitle || 'document');
 
     const stateJson = safeStringify(state);
@@ -268,6 +270,10 @@
     out = replaceToken(out, 'DOC_BODY', docBody);
     out = replaceToken(out, 'STATE_JSON', escapeForJsonScript(stateJson));
     out = replaceToken(out, 'INLINED_RUNTIME', inlined);
+    // DOC_STYLE is replaced LAST: the carried CSS is opaque text we don't want
+    // re-scanned for any other {{TOKEN}} (a rule like `content: "{{x}}"` would
+    // otherwise be eaten by an earlier pass).
+    out = replaceToken(out, 'DOC_STYLE', docStyle);
     return out;
   }
 
@@ -307,6 +313,52 @@
 
     body = stripInjectedUi(body);
     return body.trim();
+  }
+
+  /**
+   * Pull the original document's STYLING out of its <head> so the wrapped canvas
+   * keeps it. `extractBodyMarkup` deliberately drops the whole <head> (title,
+   * meta, scripts), which would otherwise leave a styled source rendering as raw
+   * unstyled HTML inside the canvas. We re-carry only what styles the document:
+   * inline <style> blocks and <link rel="stylesheet"> references.
+   *
+   * Noteback's OWN injected styles (any element carrying data-noteback-ui — e.g.
+   * the fab/overlay <style data-noteback-ui>) are excluded: they belong to the
+   * runtime, not the document, and the runtime re-injects them itself. The
+   * <title> is also left behind (the template owns the canvas title).
+   *
+   * String-based (no DOM) so the pure builder runs under Node. Returns '' when
+   * there is no <head> or no document styling to carry.
+   *
+   * @param {string} html  full captured document (or a fragment with a <head>).
+   * @returns {string} concatenated <style>/<link> markup, or ''.
+   */
+  function extractHeadStyles(html) {
+    const s = String(html == null ? '' : html);
+    const headMatch = /<head\b[^>]*>([\s\S]*?)<\/head\s*>/i.exec(s);
+    if (!headMatch) return '';
+    const head = headMatch[1];
+    const out = [];
+
+    // Inline <style> blocks, excluding Noteback's own injected UI styles.
+    const styleRe = /<style\b([^>]*)>[\s\S]*?<\/style\s*>/gi;
+    let m;
+    while ((m = styleRe.exec(head)) !== null) {
+      if (new RegExp('\\b' + UI_ATTR + '\\b', 'i').test(m[1])) continue;
+      out.push(m[0]);
+    }
+
+    // <link rel="stylesheet"> references (best-effort: external/relative hrefs
+    // resolve against the canvas's location, same as any saved HTML document).
+    const linkRe = /<link\b[^>]*>/gi;
+    let lm;
+    while ((lm = linkRe.exec(head)) !== null) {
+      if (!/\brel\s*=\s*["']?\s*stylesheet/i.test(lm[0])) continue;
+      if (new RegExp('\\b' + UI_ATTR + '\\b', 'i').test(lm[0])) continue;
+      out.push(lm[0]);
+    }
+
+    return out.join('\n  ');
   }
 
   /**
@@ -636,6 +688,7 @@
     EMBEDDED_BOOT,
     buildCanvasHtml,
     extractBodyMarkup,
+    extractHeadStyles,
     escapeForInlineScript,
     escapeForJsonScript,
     downloadCanvas,

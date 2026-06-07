@@ -194,6 +194,18 @@ the code, that have already bitten us once.
   does nothing across worlds. Covered by `test/e2e/extension-standdown.e2e.test.js`,
   which loads the real unpacked extension (`channel: 'chromium'`) and reproduces
   the double-mount.
+- **`extractBodyMarkup` drops the WHOLE `<head>` — so the canvas re-carries the doc's
+  styling separately.** A styled source (inline `<style>` in `<head>`) wrapped naively
+  rendered as raw unstyled HTML in the canvas (the body markup survived, the `<head>`
+  `<style>` didn't). `exporter.extractHeadStyles` pulls the original head's inline
+  `<style>` blocks **and** `<link rel="stylesheet">` refs (EXCLUDING any
+  `[data-noteback-ui]` style — the runtime re-injects its own), and `buildCanvasHtml`
+  substitutes them into the template's `{{DOC_STYLE}}` head token. Two constraints:
+  (1) the `<title>` is deliberately NOT carried — the template owns the canvas title
+  (`<title>… — Noteback feedback canvas</title>`), and a test asserts the original
+  `<title>` never lands in the output; (2) `{{DOC_STYLE}}` is replaced **last** of all
+  tokens, so a CSS rule like `content:"{{x}}"` in the carried stylesheet isn't eaten by
+  an earlier token pass. Covered by the head-carry tests in `test/exporter.test.js`.
 
 ## Live verification (Playwright)
 

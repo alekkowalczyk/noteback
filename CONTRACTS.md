@@ -620,6 +620,11 @@ exact string is the contract (the exporter writes it; tests may assert it):
    `src/canvas/canvas-template.html` with:
    - the guiding HTML comment (§6),
    - the original document markup,
+   - the original document's `<head>` styling (`{{DOC_STYLE}}`): its inline
+     `<style>` blocks + `<link rel="stylesheet">` refs, **excluding** Noteback's own
+     `data-noteback-ui` styles — so a styled source keeps its look in the canvas
+     instead of rendering as raw HTML. Extracted by `exporter.extractHeadStyles`
+     and substituted **last** so the carried CSS is never re-scanned for `{{…}}` tokens.
    - the state block (§5),
    - one inline `<script>` containing the concatenated runtime + a boot call that uses
      `InFileStateAdapter`.
