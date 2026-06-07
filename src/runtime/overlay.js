@@ -399,7 +399,6 @@
     '.nb-diff-switch::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;',
     '  border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .16s ease;}',
     '.nb-diff-toggle.nb-on .nb-diff-switch{background:var(--nb-accent);}',
-    '.nb-diff-toggle.nb-on:hover .nb-diff-switch{background:#fff;}',
     '.nb-diff-toggle.nb-on .nb-diff-switch::after{transform:translateX(14px);}',
     // The iframe is a REPLACED element; as a column-flex child with flex:1 +
     // min-height:0 it resolves to a definite height and fills below the back bar.
@@ -1695,7 +1694,7 @@
         const target = res[1];
         if (!baseV || !baseV.html) { toast('This version has no saved snapshot'); diffMode = false; openVersionInline(versionKey); return; }
         if (!target || !target.html) { toast('No snapshot to diff against'); diffMode = false; openVersionInline(versionKey); return; }
-        const cmpLabel = 'v' + target.baseOrdinal + ' → ' + target.label;
+        const cmpLabel = 'v' + target.fromOrdinal + ' → ' + target.label;
         mountInlineView(versionKey, buildDiffSrcdoc(baseV, target), cmpLabel);
       });
     }
@@ -1704,7 +1703,7 @@
      * Resolve the diff TARGET for a viewed version: the next chronological version.
      * For the most-recent earlier version (index 0, newest-first), the target is
      * the LIVE current draft (captured clean) labelled "now"; otherwise it is the
-     * next-newer stored snapshot. Returns { html, comments, label, baseOrdinal }.
+     * next-newer stored snapshot. Returns { html, comments, label, fromOrdinal }.
      */
     function resolveTargetSnapshot(versionKey) {
       return Promise.resolve(history.getHistory()).then(function (versions) {
@@ -1713,18 +1712,18 @@
         let idx = -1;
         for (let i = 0; i < total; i++) { if (versions[i].versionKey === versionKey) { idx = i; break; } }
         if (idx === -1) return null;
-        const baseOrdinal = total - idx;
+        const fromOrdinal = total - idx;
         if (idx === 0) {
           let html = '';
           try { html = snapshotApi ? snapshotApi.captureCleanDoc(doc) : ''; } catch (e) { html = ''; }
           const s = getState();
           const comments = (s && Array.isArray(s.comments)) ? s.comments.slice() : [];
-          return { html: html, comments: comments, label: 'now', baseOrdinal: baseOrdinal };
+          return { html: html, comments: comments, label: 'now', fromOrdinal: fromOrdinal };
         }
         const targetKey = versions[idx - 1].versionKey;
         const targetOrdinal = total - (idx - 1);
         return Promise.resolve(history.getVersion({ versionKey: targetKey })).then(function (tv) {
-          return { html: (tv && tv.html) || '', comments: (tv && tv.comments) || [], label: 'v' + targetOrdinal, baseOrdinal: baseOrdinal };
+          return { html: (tv && tv.html) || '', comments: (tv && tv.comments) || [], label: 'v' + targetOrdinal, fromOrdinal: fromOrdinal };
         });
       });
     }
