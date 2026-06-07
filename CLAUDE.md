@@ -97,6 +97,22 @@ the code, that have already bitten us once.
   origin whose `localStorage` is denied, leaving the opened tab's history sidebar
   empty (the bug). The `.nb-hist-frame` iframe fills the panel as a column-flex child
   (`flex:1;min-height:0`), not via absolute `height:calc(...)`.
+- **The diff view diffs THIS version against the NEXT one, not the previous.**
+  `overlay.openVersionDiff` resolves the target via `resolveTargetSnapshot`: the
+  most-recent earlier version (index 0 of `getHistory`, newest-first) diffs against
+  the LIVE current draft (`snapshotCapture.captureCleanDoc(document)`, labelled
+  "now"); any older version diffs against the next-newer stored snapshot. The pure
+  diff brain is `src/runtime/diff.js` (DOM-free, Node-tested); the DOM renderer is
+  `src/runtime/diff-render.js` (browser-only, e2e-tested, like `highlight.js`).
+  BOTH new files must be registered in the parity-locked runtime lists
+  (`bin/noteback.js`, `examples/build-canvas.js`,
+  `src/background/service-worker.js` — guarded by
+  `test/canvas-runtime-parity.test.js`) AND in `manifest.json` (its `content_scripts`
+  AND `web_accessible_resources` runtime-file arrays), ordered `diff.js` after
+  `markdown.js` and `diff-render.js` after `highlight.js` (before `overlay.js`).
+  Comment highlights are painted AFTER the diff wraps words, so a comment whose
+  quote straddles a changed region may not re-anchor — unchanged-region highlights
+  always do.
 - **The version chevron menu SAVES via download, not a tab.** A version row's `▾`
   menu has **Copy feedback** + **Save HTML with comments** + **Save clean HTML**
   (both saves disabled when the version's snapshot is pruned). "Save HTML with

@@ -85,6 +85,18 @@ document. There is no new-tab checkout: `openVersionTab` and the
 from a `file://` canvas gets an opaque origin whose `localStorage` is denied, leaving
 the opened tab's history sidebar empty.
 
+- **Diff view.** While viewing an earlier version inline, a "Diff" toggle in the
+  panel header re-renders the document as an inline, formatting-preserving diff of
+  the viewed version (base) against the **next chronological version** (target):
+  the most-recent earlier version diffs against the live current draft ("now").
+  Added runs are green `<ins class="nb-diff-ins">` / `.nb-diff-ins-block`, removed
+  runs red `<del class="nb-diff-del">` / `.nb-diff-del-block`, edited paragraphs
+  `.nb-diff-edit-block` (word-level). Comment highlights stay painted (layered on a
+  separate visual channel). The toggle is sticky while switching version rows and
+  resets on "Back to current". Pure diff logic lives in `NotebackRuntime.diff`
+  (`src/runtime/diff.js`); DOM rendering in `NotebackRuntime.diffRender`
+  (`src/runtime/diff-render.js`).
+
 **Version save actions.** A version row's `▾` actions menu offers **Copy feedback**,
 **Save HTML with comments**, and **Save clean HTML** (both saves disabled when the
 version's snapshot is pruned). "Save HTML with comments" rebuilds a re-openable canvas
