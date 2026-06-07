@@ -199,6 +199,50 @@ test('isEnabled defaults to true (omitted → unchanged behavior)', async () => 
   assert.strictEqual(verKeys.length, 1, 'history records normally when isEnabled is omitted');
 });
 
+test('flipping isEnabled ON→OFF stops recording live and hides history (data kept)', async () => {
+  const store = fakeStore();
+  let on = true; // start ENABLED
+  const a = mod.createHistoryStateAdapter({
+    doc: { title: 'T', getElementById: () => ({ textContent: LONG }) },
+    store, inner: fakeInner(), docId: 'D1',
+    contentText: () => LONG, captureSnapshot: () => '<html>SNAP</html>',
+    draftHistory: core, codec: idCodec, now: () => '2026-06-05T00:00:00Z',
+    isEnabled: () => on
+  });
+  // Enabled: a comment records a version (populates the resolved cache + a nb:ver record).
+  await a.load();
+  await a.save({ schemaVersion: 1, docId: 'D1', docTitle: 'T', comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }] });
+  const beforeOff = (await store.keys()).filter((k) => k.indexOf('nb:ver:') === 0);
+  assert.strictEqual(beforeOff.length, 1, 'a version record exists while enabled');
+
+  // Flip OFF: the populated (non-degraded) cache must be invalidated → degrade live.
+  on = false;
+  assert.deepStrictEqual(await a.getHistory(), [], 'history hidden once disabled');
+  // A further save records NO new version (recording stopped); the kept record stays.
+  await a.save({ schemaVersion: 1, docId: 'D1', docTitle: 'T', comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }, { id: 'c2', body: 'b2', anchor: null, createdAt: 'y', author: null }] });
+  const afterOff = (await store.keys()).filter((k) => k.indexOf('nb:ver:') === 0);
+  assert.strictEqual(afterOff.length, 1, 'no NEW version recorded while disabled (data kept, recording stopped)');
+});
+
+test('getVersion returns null while disabled (data kept, just not surfaced)', async () => {
+  const store = fakeStore();
+  // First, record a version while ENABLED so there is a real versionKey to query.
+  const a = build(store, '<html>SNAP</html>'); // build() passes no isEnabled → on
+  await a.load();
+  await a.save({ schemaVersion: 1, docId: 'D1', docTitle: 'T', comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }] });
+  const key = await a.getCurrentVersionKey();
+  assert.ok(key, 'a version key resolved while enabled');
+  // A disabled adapter over the SAME store must not surface that snapshot.
+  const off = mod.createHistoryStateAdapter({
+    doc: { title: 'T', getElementById: () => ({ textContent: LONG }) },
+    store, inner: fakeInner(), docId: 'D1',
+    contentText: () => LONG, captureSnapshot: () => '<html>SNAP</html>',
+    draftHistory: core, codec: idCodec, now: () => '2026-06-05T00:00:00Z',
+    isEnabled: () => false
+  });
+  assert.strictEqual(await off.getVersion({ versionKey: key }), null, 'getVersion is null while disabled');
+});
+
 test('makeCodec gzip roundtrip (when CompressionStream is available)', async () => {
   if (typeof CompressionStream === 'undefined') return; // Node without CompressionStream: skip
   const c = mod.makeCodec();
