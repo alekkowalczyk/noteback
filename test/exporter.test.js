@@ -171,7 +171,7 @@ test('buildCanvasHtml strips injected UI, highlight marks, stale state + runtime
   });
 
   // Inner doc-root markup only (between the doc-root div and the state comment).
-  const docRoot = /<div id="noteback-doc-root">([\s\S]*?)<\/div>\s*<!-- Machine-readable/.exec(html);
+  const docRoot = /<div id="noteback-doc-root"[^>]*>([\s\S]*?)<\/div>\s*<!-- Machine-readable/.exec(html);
   assert.ok(docRoot, 'doc root region found');
   const inner = docRoot[1];
 
@@ -181,6 +181,51 @@ test('buildCanvasHtml strips injected UI, highlight marks, stale state + runtime
   assert.ok(!/noteback-fab/.test(inner), 'floating button removed');
   assert.ok(!html.includes('"stale":true'), 'stale state block removed');
   assert.ok(!html.includes('old inlined runtime'), 'prior inlined runtime removed');
+});
+
+test('buildCanvasHtml carries the original <head> styling into the canvas head', () => {
+  const docHtml =
+    '<!DOCTYPE html><html><head><title>spec</title>' +
+    '<link rel="stylesheet" href="theme.css">' +
+    '<style>.lead{color:#0f766e}</style>' +
+    '<style data-noteback-ui="fab">.noteback-fab{display:none}</style>' +
+    '</head><body><h1>Hi</h1></body></html>';
+
+  const html = exporter.buildCanvasHtml({
+    docHtml: docHtml,
+    state: mkState([]),
+    templateHtml: TEMPLATE,
+    inlinedRuntime: ''
+  });
+
+  // The document's own styling survives, in the canvas <head> (before the body).
+  const headEnd = html.indexOf('</head>');
+  const bodyStart = html.indexOf('<body');
+  assert.ok(headEnd !== -1 && bodyStart > headEnd, 'has a head that precedes the body');
+  const head = html.slice(0, headEnd);
+  assert.ok(head.includes('.lead{color:#0f766e}'), 'inline <style> carried into head');
+  assert.ok(head.includes('<link rel="stylesheet" href="theme.css">'), 'stylesheet <link> carried into head');
+
+  // Noteback's own injected UI styles are NOT carried (the runtime re-adds them).
+  assert.ok(!html.includes('.noteback-fab{display:none}'), 'data-noteback-ui style excluded');
+  // The original <title> is still left behind (the template owns the canvas title).
+  assert.strictEqual(html.indexOf('<title>spec</title>'), -1, 'original head <title> not carried');
+});
+
+test('extractHeadStyles returns only document styling, excluding UI styles', () => {
+  const out = exporter.extractHeadStyles(
+    '<head><title>t</title><meta charset="utf-8">' +
+    '<style>body{margin:0}</style>' +
+    '<style data-noteback-ui="panel">.nb-sidebar{}</style>' +
+    '<link rel="stylesheet" href="a.css"><link rel="icon" href="f.ico">' +
+    '</head>'
+  );
+  assert.ok(out.includes('body{margin:0}'), 'inline style kept');
+  assert.ok(out.includes('<link rel="stylesheet" href="a.css">'), 'stylesheet link kept');
+  assert.ok(!out.includes('.nb-sidebar'), 'ui style dropped');
+  assert.ok(!out.includes('f.ico'), 'non-stylesheet link dropped');
+  assert.ok(!/<title>|<meta/i.test(out), 'title and meta not carried');
+  assert.strictEqual(exporter.extractHeadStyles('<body>no head</body>'), '', 'no head -> empty');
 });
 
 test('buildCanvasHtml state block round-trips as valid State JSON', () => {
@@ -309,4 +354,25 @@ test('sanitizeFilename keeps ordinary names and forces an .html suffix', () => {
   assert.strictEqual(exporter.sanitizeFilename(''), 'noteback.html');
   assert.strictEqual(exporter.sanitizeFilename('a/b\\c.htm'), 'a_b_c.htm');
   assert.match(exporter.sanitizeFilename('My Doc'), /^My_Doc\.html$/);
+});
+
+test('buildCanvasHtml bakes data-noteback-doc-id onto #noteback-doc-root', () => {
+  const html = exporter.buildCanvasHtml({
+    docHtml: '<html><body><p>hello world this is the body</p></body></html>',
+    state: { schemaVersion: 1, docId: 'D7a', docTitle: 'x', comments: [] },
+    templateHtml: '<div id="noteback-doc-root" data-noteback-doc-id="{{DOC_ID}}">{{DOC_BODY}}</div>',
+    inlinedRuntime: ''
+  });
+  assert.ok(html.includes('data-noteback-doc-id="D7a"'), 'baked id present');
+  assert.ok(!html.includes('{{DOC_ID}}'), 'token consumed');
+});
+
+test('EMBEDDED_BOOT wires historyControl + isEnabled for the live opt-out gear', () => {
+  const boot = exporter.EMBEDDED_BOOT;
+  assert.ok(/nb:nohist:global/.test(boot), 'reads the global opt-out flag key');
+  assert.ok(/nb:nohist:doc:/.test(boot), 'reads the per-doc opt-out flag key');
+  assert.ok(/var historyControl =/.test(boot), 'builds a historyControl object');
+  assert.ok(/isEnabled:\s*function/.test(boot), 'passes isEnabled into the history adapter');
+  assert.ok(/historyControl:\s*historyControl/.test(boot), 'passes historyControl into boot()');
+  assert.ok(/available:/.test(boot), 'historyControl exposes an availability flag');
 });

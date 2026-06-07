@@ -239,3 +239,216 @@ A saved HTML file **cannot silently overwrite itself** (browser security boundar
 - Markdown default: confirmed clean/neutral format above; revisit whether to include an optional heading-context line by default.
 - Canvas size budget: target max inlined runtime size (keep the self-contained file lean).
 - Build tooling: plain JS modules vs. a light bundler (needed to inline the runtime into the canvas template) — decide in the plan.
+
+---
+
+## 14. Snapshot-based document history (2026-06-06)
+
+**Status:** implemented (PR #4). **Supersedes** the per-fragment "earlier feedback"
+model and refines §5 (data model) and §8.3 (re-sharing): a document now owns an
+ordered list of whole-document **versions**, and the canvas and extension share one
+history engine. The enforced runtime contract for this lives in `CONTRACTS.md` §8;
+the non-obvious gotchas live in `CLAUDE.md`. This section records the *design
+decisions and rationale* so they aren't lost when the planning artifacts are removed.
+
+### 14.1 The problem — two stories, one of them blank
+
+There used to be two unrelated persistence stories, and only one had any history:
+
+| | Extension | Embedded canvas |
+|---|---|---|
+| Identity | full URL (`location.href`) | content hash + normalized URL |
+| Backend | `chrome.storage.local` | in-file JSON + `localStorage` |
+| History | **none at all** | yes — but stored as padded fragments |
+
+The embedded "earlier feedback" stored padded *sections* around each selection,
+re-highlighted across text nodes with whitespace-loose matching, then trimmed to a
+byte cap. That subsystem (`snapshot.js`, ~311 lines) is where several shipped bugs
+lived: empty captures, first-mark-only unions, a paint-before-persist trap. Meanwhile
+the extension — where the author's real iterate-and-re-comment loop happens — had no
+history at all.
+
+### 14.2 Mental model — one timeline of versions
+
+Collapse "current comments" and "earlier feedback" into a single concept: **a
+document owns an ordered list of versions, and each version is a complete, openable
+document with its comments attached.** "Current" is just the newest node, not a
+separate category. The per-version key is the **content hash**, or a minted id when
+the content is too short to hash (`h0:<docId>`). A history entry is therefore the
+*same kind of thing* as the live document — a whole doc you open and read in context,
+not a clipped fragment that must be reconstructed. That equivalence is what removes
+the complexity.
+
+### 14.3 Identity — baked when we own the HTML, URL-mapped when we don't
+
+Identity is one concept with two acquisition paths:
+
+- **`wrap` / "Save as canvas"** bakes a stable `data-noteback-doc-id` onto
+  `#noteback-doc-root`. It travels with the file, survives renames/moves, and `wrap`
+  **preserves** it on re-export (precedence: explicit `--id` → the id baked in the
+  `-o` target → the id baked in the input → mint).
+- **Extension on a page it didn't author** looks up (or mints) a doc-id in a
+  `chrome.storage` `nb:url:<href>` → doc-id map.
+
+A baked id always **wins** over a URL lookup, so landing on a wrapped canvas chains
+its history correctly; saving a bare page as a canvas is where a URL-keyed page first
+gets a baked id minted into the output.
+
+### 14.4 One sidebar, every stage of the doc's life
+
+A single panel adapts to where you are:
+
+- **Working state** — live comments pinned at top; every earlier version that
+  received feedback is a timeline node below, newest first. Each past row offers
+  **peek** (click the row — renders that version in context), **open** (checks it out
+  as a full canvas tab), and **copy feedback** (that version's markdown).
+- **Collapse rule (keep the panel calm):** the **History** group (the label the user
+  sees) is **hidden at 0** earlier versions, shown **inline at exactly 1**, and at **2+**
+  the most-recent earlier version stays inline while the rest tuck under a "+N older
+  versions" disclosure. Last round of feedback is always zero-click; deeper history is
+  one click; the current draft is never buried.
+- **Layout:** the live comments (or the "No notes yet" empty state) own the scrollable
+  space; the History timeline **docks at the bottom** — a bounded, self-scrolling band
+  above the action buttons — so it never pushes the current draft's notes out of view.
+- **History travels with the file (opt-in).** History normally lives only in the
+  browser's `localStorage`, so a saved canvas opened on another machine shows comments
+  but an empty timeline. The Save menu gains **"HTML · with comments and history"**
+  (shown only when there IS history) which embeds the doc's full history — every version
+  record + gzipped snapshot — into a `#noteback-history` JSON block in the file. On
+  reopen the embedded runtime seeds `localStorage` from that block (**only keys not
+  already present** — never clobber newer local data), so the timeline rehydrates from
+  the file itself. The block is excluded from snapshots, clean copies, and plain
+  "with comments" saves, so it never nests or recurses.
+- **Inline view** opens the snapshot as a read-only side panel beside the sidebar —
+  NOT a centered modal, NOT a new tab. The panel (`.nb-hist-view`) fills the document
+  area left of the 360px sidebar so the live timeline stays visible. The snapshot
+  **fills the panel** as a column-flex `<iframe>` child (`flex:1;min-height:0` — as a
+  replaced element an iframe can't be stretched by `top`+`bottom` alone; the flex model
+  gives it a definite height), with highlights **styled exactly like the live document**
+  (the shared `HIGHLIGHT_CSS` is re-injected into the clean snapshot). A slim
+  **"← Back to current draft"** bar spans the top. Clicking a highlight **inside** the
+  view pops that comment in place (the id→comment map is serialized into the iframe by
+  `buildPeekPopoverScript`; bodies render via `textContent`, never parsed as HTML, and
+  any literal `</script>` is escaped so it can't break out of the inline script block).
+  Inline viewing stays same-origin, so the `localStorage`-backed history adapter remains
+  reachable. (This replaced the old `window.open(blob:)` model: a `file://` canvas's
+  blob tab gets an opaque origin whose `localStorage` is denied — the opened tab's
+  history sidebar was empty.)
+- **Per-row actions live behind a chevron** next to the v-label (same dropdown
+  affordance as Save/Copy): **Copy feedback**, **Save HTML with comments** (a re-openable
+  canvas of the version, via `buildVersionCanvasHtml` → `onSaveHtml` download), and **Save
+  clean HTML** (the raw snapshot); both saves disable when the snapshot is pruned. The menu
+  is portaled to `uiRoot` and fixed-positioned in JS because the versions dock clips
+  overflow. Clicking the row body opens the inline view.
+- **Viewing-aware timeline.** An in-tab `viewingKey` (null = live draft) drives the
+  sidebar: the viewed version's row is the active `nb-ver-viewing` row (active dot +
+  highlight, no text label), a "Back to current" bar (`renderBackToCurrentBar` →
+  `closeVersionInline`) is shown above the timeline, and every other row remains clickable
+  to switch the inline view.
+  When `viewingKey` is null the timeline renders exactly as normal (live-draft "now"
+  row, no bar).
+- **Edge states:** first read (Versions list hidden until there's something in it);
+  history unavailable (storage blocked or content too short to fingerprint — comments
+  still save, only the timeline steps aside); a site you haven't opted into (no
+  timeline until opted in); a version old enough to have been pruned (peek is a no-op).
+
+### 14.5 How it works
+
+- **One engine, two backends.** `draft-history-core.js` is storage-agnostic (it takes
+  an injected kv store). Embedded uses an inline `localStorage` kv; the extension uses
+  a thin `chrome.storage` kv shim (`chrome-kv-store.js`) feeding the *same* engine. The
+  mode divergence disappears.
+- **Snapshot trigger: first comment of a version.** When a version's comment count
+  goes 0 → 1, capture the **clean full-doc HTML** (`snapshot-capture.captureCleanDoc`:
+  clone the document, strip `[data-noteback-ui]`, unwrap `<mark>`, drop the runtime
+  `<script>` + state block), gzip, and store. A version's content is fixed, so it's
+  captured **once**; later comments only update the list.
+- **Rendering history = the live painter.** Because we store the clean doc plus comment
+  anchors (not painted marks), showing a historical version just runs the normal
+  highlight painter against the snapshot. No cross-node whitespace-loose re-highlighter;
+  no padded-section reconstruction.
+- **Key spaces:** `nb:doc:<doc-id>` (lineage: title + ordered version list),
+  `nb:ver:<version>` (one version: doc-id, contentHash, comments, gzipped clean
+  snapshot, timestamps), `nb:url:<url>` → doc-id (extension only, when no baked id).
+
+### 14.6 What it retired
+
+- Most of `snapshot.js` (~311 lines): `extractSections`, `padContext`, `trimToCap`,
+  section union/dedupe — deleted, along with `localstorage-state-adapter.js`.
+- The cross-node, whitespace-loose `nbHistHighlight` re-highlighter — replaced by the
+  normal painter.
+- The **"paint before persist" bug class** — structurally impossible now; snapshots no
+  longer read painted marks from the DOM.
+- The embedded-vs-extension behavioral gap — one engine, one behavior.
+
+### 14.7 Locked decisions
+
+- **Version view — inline read-only:** side panel beside the sidebar + copy feedback. No new-tab checkout.
+- **Re-wrap continuity — yes:** `wrap` preserves the baked doc-id (reuse from the `-o`
+  target, plus a `--id` escape hatch). Worst case it mints a new lineage — graceful.
+- **"Return to live" wording — "Back"** (one full-width banner; the redundant ✕ is gone).
+- **Sequencing — both modes at once:** one cutover to the shared engine + both kv
+  backends.
+- **Collapsed history:** most-recent earlier version inline; rest under "+N older
+  versions".
+- **Retention:** reuse existing limits (≈5 full snapshots · 15 metadata · 90-day TTL ·
+  ~3 MB cap). The embedded `file://` path shares one `localStorage` bucket across all
+  local canvases, so the cap matters most there; the extension's `chrome.storage` is
+  per-extension (no shared-bucket pressure). `unlimitedStorage` deferred.
+- **Migration — clean break:** no migration code. Embedded current comments still load
+  from the in-file block; extension per-URL comments reset on upgrade.
+- **Extension snapshot scope:** on by default for `file://`/`localhost`/wrapped
+  canvases; **opt-in per site** for arbitrary http(s) pages, riding the existing
+  `origin-policy` / `nb:settings` per-origin mechanism (no new settings system).
+
+### 14.8 Implementation learnings
+
+Captured during execution (the value of two-stage + whole-branch review):
+
+- **Snapshot suppression bug.** `hasSnapshot` must be seeded from the *real stored
+  snapshot* (`!!ver.snapshotHtml`), **not** `comments.length > 0`. Seeding from the
+  comment count wrongly suppressed capture for a version pre-seeded with in-file
+  comments. Now regression-tested.
+- **Inline view script injection.** `buildPeekPopoverScript` serializes the version's
+  comment map into an inline `<script>` block inside the `<iframe srcdoc>`. A comment
+  body containing `</script>` must be escaped (`.replace(/<\/(script)/gi, '<\\/$1')`,
+  the same escape the canonical exporter uses) so it can't break out of the block.
+  e2e-guarded by the `</script>`-breakout payload test in
+  `version-timeline.e2e.test.js`. *(A pre-existing twin in `exporter.js`'s `rebuildHtml`
+  was noted as a separate follow-up.)*
+- **Runtime-list drift (cross-task gap).** There are **three** hardcoded "canvas
+  inline file" lists that must stay identical: `bin/noteback.js` `RUNTIME_FILES`,
+  `examples/build-canvas.js`, and `src/background/service-worker.js`
+  `CANVAS_RUNTIME_FILES` (the extension's "Save as HTML canvas" path). Only the first
+  two were updated for the new modules; the service-worker list drifted, so
+  extension-saved canvases booted without history. Every single-task review passed —
+  this only surfaced in whole-branch review. `test/canvas-runtime-parity.test.js` now
+  asserts all three agree so it can't recur. (`chrome-kv-store.js` is intentionally
+  excluded from canvas lists — it's extension-only; the canvas builds an inline
+  `localStorage` kv.)
+
+### 14.9 Opting out of history (2026-06-07)
+
+History records automatically wherever it can run; this gives the user a way to say
+"don't keep history here." Two surfaces, default-on, **purely subtractive** — there is
+no new opt-*in* (the `historySites` path is untouched). The **extension popup** carries
+three cascading scopes for the active tab: **global** (every page), **this site**
+(the origin — `file://` for local files, scheme+host+port otherwise), and **this page**
+(the resolved history doc-id, not `location.href`). The **embedded canvas** adds a
+gear ⚙ beside the ⓘ with two toggles: **this document** and **all docs here**, where
+"here" is the shared `localStorage` bucket (for `file://`, every local canvas in the
+browser).
+
+Opting out at any scope **stops recording and hides** the timeline (and the "Save ·
+with comments and history" item), but **keeps** the already-stored snapshots — no
+purge. Re-enabling brings the timeline and data straight back; comments made while off
+persist normally and get adopted into the version when history resumes. Both surfaces
+go live without a reload, but by **asymmetric** mechanisms dictated by how each builds
+its adapter. The extension picks the adapter *type* at mount (history engine vs.
+comments-only), so a live flip **re-mounts** (unmount + mount) to rebuild it — keeping
+the "gate read once at mount" rule literally true, since a re-mount is a new mount.
+The embedded canvas always builds the history adapter, so it gates **in place** via the
+adapter's `isEnabled()` predicate (no re-boot). Extension scopes live in
+`nb:settings` (`historyDisabledGlobal` / `historyDisabledSites` / `historyDisabledDocs`,
+subtracted inside `historyAllowed`); embedded flags live in `localStorage`
+(`nb:nohist:global` / `nb:nohist:doc:<docId>`).

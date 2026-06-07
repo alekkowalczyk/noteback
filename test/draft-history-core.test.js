@@ -1,360 +1,150 @@
-'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert');
 const core = require('../src/runtime/draft-history-core.js');
 
-test('normalizeText trims and collapses whitespace, preserves case', () => {
-  assert.strictEqual(core.normalizeText('  Hello\n\n  World  '), 'Hello World');
-  assert.strictEqual(core.normalizeText('A\tB\r\nC'), 'A B C');
-});
-
-test('contentHash is stable and whitespace-insensitive', () => {
-  const a = core.contentHash('The system uses a single Redis instance.');
-  const b = core.contentHash('The   system uses a single   Redis instance.');
-  assert.strictEqual(a, b, 'whitespace differences do not change the hash');
-  assert.strictEqual(typeof a, 'string');
-  assert.ok(a.length > 0);
-});
-
-test('contentHash differs when visible text changes', () => {
-  const a = core.contentHash('The plan says use a single Redis instance to coordinate workers.');
-  const b = core.contentHash('The plan says use a Redis cluster to coordinate workers instead.');
-  assert.notStrictEqual(a, b);
-});
-
-test('contentHash returns null below the small-content guard', () => {
-  assert.strictEqual(core.contentHash('tiny'), null);
-  assert.strictEqual(core.contentHash('x'.repeat(core.MIN_HASH_CHARS - 1)), null, '31 chars → null');
-  assert.strictEqual(typeof core.contentHash('x'.repeat(core.MIN_HASH_CHARS)), 'string', '32 chars → hash');
-});
-
-/** Map-backed async store implementing the core's store interface. */
-function fakeStore(seed) {
-  const m = new Map(Object.entries(seed || {}));
+const idCodec = { compress: (s) => Promise.resolve(String(s)), decompress: (s) => Promise.resolve(String(s)) };
+function fakeStore() {
+  const m = new Map();
   return {
     get: (k) => Promise.resolve(m.has(k) ? m.get(k) : null),
     set: (k, v) => { m.set(k, v); return Promise.resolve(); },
     remove: (k) => { m.delete(k); return Promise.resolve(); },
-    keys: () => Promise.resolve(Array.from(m.keys())),
-    _dump: () => m
+    keys: () => Promise.resolve(Array.from(m.keys()))
   };
 }
-const idCodec = { compress: (s) => Promise.resolve(s), decompress: (s) => Promise.resolve(s) };
 function makeCore(store) {
   let n = 0;
-  return core.createDraftHistory({
-    store,
-    now: () => '2026-06-05T00:00:0' + (n % 10) + 'Z',
-    mintId: () => 'lin_' + (++n),
-    codec: idCodec,
-    limits: { snapshotDrafts: 5, metaDrafts: 15, ttlDays: 99999, maxBytes: 1e9 }
-  });
+  return core.createDraftHistory({ store, now: () => '2026-06-05T00:00:0' + (n++ % 10) + 'Z', codec: idCodec,
+    limits: { snapshotDrafts: 5, metaDrafts: 15, ttlDays: 99999, maxBytes: 1e9 } });
 }
+const LONG = 'The design uses a single Redis instance to coordinate the workers.';
 
-test('resolve seeds a fresh draft from fallback comments and mints a lineage', async () => {
-  const store = fakeStore();
-  const dh = makeCore(store);
-  const r = await dh.resolve({
-    contentText: 'x'.repeat(40), attachKey: 'file:///a.html',
-    fallbackComments: [], docTitle: 'A'
-  });
-  assert.strictEqual(r.degraded, false);
-  assert.ok(r.contentHash);
-  assert.ok(r.lineageId);
-  assert.deepStrictEqual(r.comments, []);
-  const lin = await store.get('nb:lin:' + r.lineageId);
-  assert.deepStrictEqual(lin.generations, [r.contentHash]);
-  assert.deepStrictEqual(lin.attachKeys, ['file:///a.html']);
-});
-
-test('resolve degrades below the content guard', async () => {
+test('resolve creates a version and lists it under the doc', async () => {
   const dh = makeCore(fakeStore());
-  const r = await dh.resolve({ contentText: 'tiny', attachKey: 'k', fallbackComments: [] });
+  const r = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });
+  assert.strictEqual(r.degraded, false);
+  assert.strictEqual(r.docId, 'D1');
+  assert.ok(r.versionKey);
+  assert.deepStrictEqual(r.comments, []);
+});
+
+test('exportDoc returns the doc record + every version record as a kv-key map', async () => {
+  const dh = makeCore(fakeStore());
+  const r1 = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });
+  await dh.persist({ docId: 'D1', versionKey: r1.versionKey, comments: [{ id: 'c1', body: 'v1 note', anchor: null, createdAt: 'x', author: null }], snapshotHtml: '<html>ONE</html>' });
+  const r2 = await dh.resolve({ docId: 'D1', contentText: LONG + ' Now changed materially here.', fallbackComments: [], docTitle: 'T' });
+  await dh.persist({ docId: 'D1', versionKey: r2.versionKey, comments: [{ id: 'c2', body: 'v2 note', anchor: null, createdAt: 'x', author: null }], snapshotHtml: '<html>TWO</html>' });
+
+  const exp = await dh.exportDoc({ docId: 'D1' });
+  assert.strictEqual(exp.schemaVersion, 1);
+  const keys = Object.keys(exp.entries);
+  assert.ok(keys.indexOf('nb:doc:D1') !== -1, 'includes the doc record');
+  assert.ok(keys.indexOf('nb:ver:' + r1.versionKey) !== -1, 'includes version 1');
+  assert.ok(keys.indexOf('nb:ver:' + r2.versionKey) !== -1, 'includes version 2');
+  assert.strictEqual(keys.length, 3, 'exactly the doc + its two versions');
+  assert.strictEqual(exp.entries['nb:ver:' + r1.versionKey].snapshotHtml, '<html>ONE</html>');
+  // Round-trip: seeding a fresh store from the entries reproduces the history.
+  const store2 = fakeStore();
+  for (const k of keys) await store2.set(k, exp.entries[k]);
+  const dh2 = makeCore(store2);
+  const hist = await dh2.history({ docId: 'D1', exceptVersionKey: r2.versionKey });
+  assert.strictEqual(hist.length, 1);
+  assert.strictEqual(hist[0].comments[0].body, 'v1 note');
+});
+
+test('exportDoc returns null for an unknown doc', async () => {
+  const dh = makeCore(fakeStore());
+  assert.strictEqual(await dh.exportDoc({ docId: 'NOPE' }), null);
+});
+
+test('a content change makes a new version in the same doc; history shows the old one', async () => {
+  const dh = makeCore(fakeStore());
+  const r1 = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });
+  await dh.persist({ docId: 'D1', versionKey: r1.versionKey, comments: [{ id: 'c1', body: 'old', anchor: { quote: 'Redis', prefix: '', suffix: '', occurrence: 0 }, createdAt: 'x', author: null }], snapshotHtml: '<html>OLD</html>' });
+  const r2 = await dh.resolve({ docId: 'D1', contentText: LONG + ' Now changed materially here.', fallbackComments: [], docTitle: 'T' });
+  assert.notStrictEqual(r2.versionKey, r1.versionKey);
+  const hist = await dh.history({ docId: 'D1', exceptVersionKey: r2.versionKey });
+  assert.strictEqual(hist.length, 1);
+  assert.strictEqual(hist[0].comments[0].body, 'old');
+  assert.strictEqual(hist[0].hasSnapshot, true);
+});
+
+test('resolve reports hasSnapshot reflecting the version\'s stored snapshot state', async () => {
+  const dh = makeCore(fakeStore());
+  const r1 = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });
+  assert.strictEqual(r1.hasSnapshot, false, 'a brand-new version has no snapshot yet');
+  await dh.persist({ docId: 'D1', versionKey: r1.versionKey, comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }], snapshotHtml: '<html>SNAP</html>' });
+  const r2 = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });
+  assert.strictEqual(r2.versionKey, r1.versionKey, 'same content resolves the same version');
+  assert.strictEqual(r2.hasSnapshot, true, 'after a snapshot is persisted, resolve reports it');
+});
+
+test('resolve seeds a pre-existing version that has comments but NO snapshot as hasSnapshot:false', async () => {
+  const store = fakeStore();
+  const dh = makeCore(store);
+  // First resolve seeds a version with fallback comments but an empty snapshot
+  // (the embedded re-shared-canvas case): comments present, snapshotHtml ''.
+  const r1 = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [{ id: 'c1', body: 'b' }], docTitle: 'T' });
+  assert.deepStrictEqual(r1.comments, [{ id: 'c1', body: 'b' }]);
+  // Re-resolving the SAME content must NOT report hasSnapshot just because comments exist.
+  const r2 = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });
+  assert.strictEqual(r2.versionKey, r1.versionKey);
+  assert.deepStrictEqual(r2.comments, [{ id: 'c1', body: 'b' }], 'stored comments survive');
+  assert.strictEqual(r2.hasSnapshot, false, 'comments without a snapshot must not look snapshotted');
+});
+
+test('version() decompresses the stored full-doc snapshot + comments', async () => {
+  const dh = makeCore(fakeStore());
+  const r = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });
+  await dh.persist({ docId: 'D1', versionKey: r.versionKey, comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }], snapshotHtml: '<html>SNAP</html>' });
+  const v = await dh.version({ versionKey: r.versionKey });
+  assert.strictEqual(v.html, '<html>SNAP</html>');
+  assert.strictEqual(v.comments.length, 1);
+});
+
+test('snapshot is captured once; a later persist without snapshot keeps it', async () => {
+  const dh = makeCore(fakeStore());
+  const r = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });
+  await dh.persist({ docId: 'D1', versionKey: r.versionKey, comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }], snapshotHtml: '<html>FIRST</html>' });
+  await dh.persist({ docId: 'D1', versionKey: r.versionKey, comments: [{ id: 'c1' }, { id: 'c2' }], snapshotHtml: '<html>SECOND</html>' });
+  const v = await dh.version({ versionKey: r.versionKey });
+  assert.strictEqual(v.html, '<html>FIRST</html>', 'first snapshot is immutable');
+});
+
+test('short content still gets a stable deterministic version key (no degrade)', async () => {
+  const dh = makeCore(fakeStore());
+  const a = await dh.resolve({ docId: 'D1', contentText: 'hi', fallbackComments: [], docTitle: 'T' });
+  const b = await dh.resolve({ docId: 'D1', contentText: 'hi', fallbackComments: [], docTitle: 'T' });
+  assert.strictEqual(a.degraded, false);
+  assert.strictEqual(a.versionKey, b.versionKey);
+  assert.strictEqual(a.versionKey, 'h0:D1');
+});
+
+test('no docId → degraded, returns fallback comments, no history', async () => {
+  const dh = makeCore(fakeStore());
+  const r = await dh.resolve({ docId: '', contentText: LONG, fallbackComments: [{ id: 'c1' }] });
   assert.strictEqual(r.degraded, true);
+  assert.deepStrictEqual(r.comments, [{ id: 'c1' }]);
 });
 
-test('persist then resolve again (refresh) returns the saved comments', async () => {
-  const store = fakeStore();
-  const dh = makeCore(store);
-  const text = 'The system uses a single Redis instance to coordinate.';
-  const r1 = await dh.resolve({ contentText: text, attachKey: 'file:///a.html', fallbackComments: [] });
-  await dh.persist({ contentHash: r1.contentHash, comments: [{ id: 'c1', body: 'hi', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
-  const r2 = await dh.resolve({ contentText: text, attachKey: 'file:///a.html', fallbackComments: [] });
-  assert.strictEqual(r2.contentHash, r1.contentHash);
-  assert.strictEqual(r2.comments.length, 1);
-  assert.strictEqual(r2.comments[0].body, 'hi');
+test('clearCurrent empties the current version but keeps history', async () => {
+  const dh = makeCore(fakeStore());
+  const r = await dh.resolve({ docId: 'D1', contentText: LONG, fallbackComments: [], docTitle: 'T' });
+  await dh.persist({ docId: 'D1', versionKey: r.versionKey, comments: [{ id: 'c1', body: 'b', anchor: null, createdAt: 'x', author: null }], snapshotHtml: '<html>S</html>' });
+  await dh.clearCurrent({ docId: 'D1', versionKey: r.versionKey });
+  const v = await dh.version({ versionKey: r.versionKey });
+  assert.deepStrictEqual(v.comments, []);
 });
 
-test('a content change makes a new draft in the same lineage; history shows the old one', async () => {
-  const store = fakeStore();
-  const dh = makeCore(store);
-  const key = 'file:///a.html';
-  const r1 = await dh.resolve({ contentText: 'The design uses a single Redis instance to coordinate the workers.', attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: r1.contentHash, comments: [{ id: 'c1', body: 'old note', anchor: { quote: 'Redis', prefix: '', suffix: '', occurrence: 0 }, createdAt: 'x', author: null }], sections: [], styles: '' });
-  const r2 = await dh.resolve({ contentText: 'The design uses a Redis cluster to coordinate the workers instead.', attachKey: key, fallbackComments: [] });
-  assert.notStrictEqual(r2.contentHash, r1.contentHash);
-  assert.strictEqual(r2.lineageId, r1.lineageId, 'same lineage via attach key');
-  assert.deepStrictEqual(r2.comments, [], 'new draft starts clean');
-  const hist = await dh.history({ lineageId: r2.lineageId, exceptHash: r2.contentHash });
-  assert.strictEqual(hist.length, 1);
-  assert.strictEqual(hist[0].comments[0].body, 'old note');
-});
-
-test('move (same content, new attach key) keeps comments and history', async () => {
-  const store = fakeStore();
-  const dh = makeCore(store);
-  const text = 'The system uses a single Redis instance to coordinate workers.';
-  const r1 = await dh.resolve({ contentText: text, attachKey: 'file:///old.html', fallbackComments: [] });
-  await dh.persist({ contentHash: r1.contentHash, comments: [{ id: 'c1', body: 'kept', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
-  const r2 = await dh.resolve({ contentText: text, attachKey: 'file:///new.html', fallbackComments: [] });
-  assert.strictEqual(r2.comments.length, 1, 'comments found by content hash after move');
-  const lin = await store.get('nb:lin:' + r2.lineageId);
-  assert.ok(lin.attachKeys.indexOf('file:///new.html') !== -1, 'new path recorded');
-});
-
-test('history lists only drafts with >=1 comment, newest first', async () => {
-  const store = fakeStore();
-  const dh = makeCore(store);
-  const key = 'file:///a.html';
-  const r1 = await dh.resolve({ contentText: 'Draft one has plenty of body text here for hashing.', attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: r1.contentHash, comments: [{ id: 'c1', body: 'one', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
-  const r2 = await dh.resolve({ contentText: 'Draft two has plenty of body text here for hashing.', attachKey: key, fallbackComments: [] });
-  // r2 has no comments → not in history
-  const r3 = await dh.resolve({ contentText: 'Draft three has plenty of body text here for hashing.', attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: r3.contentHash, comments: [{ id: 'c3', body: 'three', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
-  const hist = await dh.history({ lineageId: r3.lineageId, exceptHash: r3.contentHash });
-  assert.deepStrictEqual(hist.map((d) => d.comments[0].body), ['one']);
-});
-
-test('history returns comment-bearing drafts newest-first', async () => {
-  const store = fakeStore();
-  const dh = makeCore(store);
-  const key = 'file:///a.html';
-  const rA = await dh.resolve({ contentText: 'Alpha draft has plenty of body text for hashing here.', attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: rA.contentHash, comments: [{ id: 'a', body: 'alpha', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
-  const rB = await dh.resolve({ contentText: 'Beta draft has plenty of body text for hashing here too.', attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: rB.contentHash, comments: [{ id: 'b', body: 'beta', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
-  const rC = await dh.resolve({ contentText: 'Gamma draft has plenty of body text for hashing here now.', attachKey: key, fallbackComments: [] });
-  const hist = await dh.history({ lineageId: rC.lineageId, exceptHash: rC.contentHash });
-  assert.deepStrictEqual(hist.map((d) => d.comments[0].body), ['beta', 'alpha']);
-});
-
-test('section returns the decompressed snapshot html + styles', async () => {
-  const store = fakeStore();
-  const dh = makeCore(store);
-  const r = await dh.resolve({ contentText: 'A draft with enough body text to clear the guard.', attachKey: 'file:///a.html', fallbackComments: [] });
-  await dh.persist({ contentHash: r.contentHash, comments: [{ id: 'c1', body: 'n', anchor: { quote: 'q', prefix: '', suffix: '', occurrence: 0 }, createdAt: 'x', author: null }], sections: [{ id: 's1', html: '<p>frag</p>' }], styles: 'body{color:red}', sectionByCommentId: { c1: 's1' } });
-  const sec = await dh.section({ contentHash: r.contentHash, sectionId: 's1' });
-  assert.deepStrictEqual(sec, { html: '<p>frag</p>', styles: 'body{color:red}' });
-});
-
-test('history surfaces hasSnapshot + per-comment sectionId (the overlay clickability gate)', async () => {
-  const store = fakeStore();
-  const dh = makeCore(store);
-  const key = 'file:///a.html';
-  // Draft 1: a comment WITH a captured section snapshot, plus one withOUT a mapping.
-  // The overlay enables the "open snapshot" popup only when hasSnapshot && sectionId.
-  const r1 = await dh.resolve({ contentText: 'Draft one has plenty of body text here for hashing.', attachKey: key, fallbackComments: [] });
-  await dh.persist({
-    contentHash: r1.contentHash,
-    comments: [
-      { id: 'withSnap', body: 'has snapshot', anchor: { quote: 'plenty', prefix: '', suffix: '', occurrence: 0 }, createdAt: 'x', author: null },
-      { id: 'noSnap', body: 'no snapshot', anchor: { quote: 'body', prefix: '', suffix: '', occurrence: 0 }, createdAt: 'x', author: null }
-    ],
-    sections: [{ id: 's1', html: '<p>frag</p>' }],
-    styles: '',
-    sectionByCommentId: { withSnap: 's1' }
-  });
-  const r2 = await dh.resolve({ contentText: 'Draft two has plenty of body text here for hashing.', attachKey: key, fallbackComments: [] });
-  const hist = await dh.history({ lineageId: r2.lineageId, exceptHash: r2.contentHash });
-  assert.strictEqual(hist.length, 1);
-  assert.strictEqual(hist[0].hasSnapshot, true, 'a captured section => hasSnapshot true');
-  const byId = {};
-  hist[0].comments.forEach((c) => { byId[c.id] = c; });
-  assert.strictEqual(byId.withSnap.sectionId, 's1', 'mapped comment carries its sectionId (clickable)');
-  assert.strictEqual(byId.noSnap.sectionId, null, 'unmapped comment has sectionId null (not clickable)');
-});
-
-test('history reports hasSnapshot false when no section was captured (the pre-fix bug shape)', async () => {
-  const store = fakeStore();
-  const dh = makeCore(store);
-  const key = 'file:///a.html';
-  // Exactly the broken pre-fix persist: an anchored comment stored with NO
-  // sections/sectionByCommentId (snapshot ran before the highlight was painted).
-  // Such a history entry must report hasSnapshot:false and sectionId:null so the
-  // overlay disables it rather than opening an empty popup.
-  const r1 = await dh.resolve({ contentText: 'Draft one has plenty of body text here for hashing.', attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: r1.contentHash, comments: [{ id: 'c1', body: 'orphan', anchor: { quote: 'plenty', prefix: '', suffix: '', occurrence: 0 }, createdAt: 'x', author: null }], sections: [], styles: '' });
-  const r2 = await dh.resolve({ contentText: 'Draft two has plenty of body text here for hashing.', attachKey: key, fallbackComments: [] });
-  const hist = await dh.history({ lineageId: r2.lineageId, exceptHash: r2.contentHash });
-  assert.strictEqual(hist[0].hasSnapshot, false, 'no captured section => not clickable');
-  assert.strictEqual(hist[0].comments[0].sectionId, null);
-});
-
-test('clearCurrent empties the draft (kept out of history) but leaves siblings', async () => {
-  const store = fakeStore();
-  const dh = makeCore(store);
-  const key = 'file:///a.html';
-  const r1 = await dh.resolve({ contentText: 'The first draft has plenty of body text for hashing.', attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: r1.contentHash, comments: [{ id: 'c1', body: 'one', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
-  const r2 = await dh.resolve({ contentText: 'The second draft has plenty of body text for hashing.', attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: r2.contentHash, comments: [{ id: 'c2', body: 'two', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
-  await dh.clearCurrent({ contentHash: r2.contentHash });
-  const gen = await store.get('nb:gen:' + r2.contentHash);
-  assert.deepStrictEqual(gen.comments, []);
-  const hist = await dh.history({ lineageId: r2.lineageId, exceptHash: r2.contentHash });
-  assert.deepStrictEqual(hist.map((d) => d.comments[0].body), ['one']);
-});
-
-function coreWithLimits(store, limits) {
-  return core.createDraftHistory({
-    store,
-    now: () => '2026-06-05T00:00:00Z',
-    mintId: () => 'lin_fixed',
-    codec: idCodec,
-    limits
-  });
-}
-
-test('GC drops snapshots beyond snapshotDrafts but keeps metadata', async () => {
-  const store = fakeStore();
-  const dh = coreWithLimits(store, { snapshotDrafts: 1, metaDrafts: 10, ttlDays: 99999, maxBytes: 1e9 });
-  const key = 'file:///a.html';
-  const texts = ['Alpha draft body has plenty of text for the hash.', 'Beta draft body has plenty of text for the hash.', 'Gamma draft body has plenty of text for the hash.'];
-  const hashes = [];
-  for (const t of texts) {
-    const r = await dh.resolve({ contentText: t, attachKey: key, fallbackComments: [] });
-    hashes.push(r.contentHash);
-    await dh.persist({ contentHash: r.contentHash, comments: [{ id: 'c', body: t, anchor: null, createdAt: 'x', author: null }], sections: [{ id: 's1', html: 'frag' }], styles: 'css' });
+test('prune drops versions beyond metaDrafts, never the newest/protected', async () => {
+  const dh = core.createDraftHistory({ store: fakeStore(), now: () => '2026-06-05T00:00:00Z', codec: idCodec,
+    limits: { snapshotDrafts: 1, metaDrafts: 2, ttlDays: 99999, maxBytes: 1e9 } });
+  let last;
+  for (let i = 0; i < 5; i++) {
+    const r = await dh.resolve({ docId: 'D1', contentText: LONG + ' rev ' + i + ' padding padding padding', fallbackComments: [], docTitle: 'T' });
+    await dh.persist({ docId: 'D1', versionKey: r.versionKey, comments: [{ id: 'c' + i }], snapshotHtml: '<html>S' + i + '</html>' });
+    last = r.versionKey;
   }
-  const oldest = await store.get('nb:gen:' + hashes[0]);
-  assert.deepStrictEqual(oldest.sections, [], 'oldest snapshot pruned');
-  assert.strictEqual(oldest.comments.length, 1, 'oldest metadata kept');
-  const newest = await store.get('nb:gen:' + hashes[2]);
-  assert.strictEqual(newest.sections.length, 1, 'newest snapshot kept');
-});
-
-test('GC removes drafts beyond metaDrafts entirely', async () => {
-  const store = fakeStore();
-  const dh = coreWithLimits(store, { snapshotDrafts: 1, metaDrafts: 2, ttlDays: 99999, maxBytes: 1e9 });
-  const key = 'file:///a.html';
-  const texts = ['Alpha draft body has plenty of text for the hash.', 'Beta draft body has plenty of text for the hash.', 'Gamma draft body has plenty of text for the hash.'];
-  const hashes = [];
-  for (const t of texts) {
-    const r = await dh.resolve({ contentText: t, attachKey: key, fallbackComments: [] });
-    hashes.push(r.contentHash);
-    await dh.persist({ contentHash: r.contentHash, comments: [{ id: 'c', body: t, anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
-  }
-  assert.strictEqual(await store.get('nb:gen:' + hashes[0]), null, 'oldest draft removed');
-  const lin = await store.get('nb:lin:lin_fixed');
-  assert.strictEqual(lin.generations.indexOf(hashes[0]), -1, 'removed from lineage list');
-  assert.strictEqual(lin.generations.length, 2);
-});
-
-test('reopening an aged-out draft does not delete it (current draft protected from TTL)', async () => {
-  const store = fakeStore();
-  let clock = '2026-01-01T00:00:00Z';
-  const dh = core.createDraftHistory({ store, now: () => clock, mintId: () => 'lin_a', codec: idCodec, limits: { snapshotDrafts: 9, metaDrafts: 9, ttlDays: 30, maxBytes: 1e9 } });
-  const key = 'file:///a.html';
-  const text = 'An aging draft body with plenty of text to clear the guard.';
-  const r1 = await dh.resolve({ contentText: text, attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: r1.contentHash, comments: [{ id: 'c1', body: 'keep me', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
-  clock = '2026-06-01T00:00:00Z'; // far beyond ttlDays:30
-  const r2 = await dh.resolve({ contentText: text, attachKey: key, fallbackComments: [] }); // refresh same content
-  assert.strictEqual(r2.contentHash, r1.contentHash);
-  assert.ok(await store.get('nb:gen:' + r1.contentHash), 'current draft NOT deleted by its own resolve');
-  assert.strictEqual(r2.comments.length, 1, 'comments still present after refresh');
-  await dh.persist({ contentHash: r2.contentHash, comments: [{ id: 'c1', body: 'keep me', anchor: null, createdAt: 'x', author: null }, { id: 'c2', body: 'added', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
-  assert.strictEqual((await store.get('nb:gen:' + r2.contentHash)).comments.length, 2, 'persist after refresh is not silently lost');
-});
-
-test('TTL removes an aged-out OLDER draft in the lineage but keeps the current one', async () => {
-  const store = fakeStore();
-  let clock = '2026-01-01T00:00:00Z';
-  const dh = core.createDraftHistory({ store, now: () => clock, mintId: () => 'lin_b', codec: idCodec, limits: { snapshotDrafts: 9, metaDrafts: 9, ttlDays: 30, maxBytes: 1e9 } });
-  const key = 'file:///b.html';
-  const rOld = await dh.resolve({ contentText: 'The very first old draft body text for hashing here.', attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: rOld.contentHash, comments: [{ id: 'o', body: 'old', anchor: null, createdAt: 'x', author: null }], sections: [], styles: '' });
-  clock = '2026-06-01T00:00:00Z';
-  const rNew = await dh.resolve({ contentText: 'A brand new current draft body text for hashing now.', attachKey: key, fallbackComments: [] });
-  assert.strictEqual(await store.get('nb:gen:' + rOld.contentHash), null, 'aged-out older draft removed');
-  assert.ok(await store.get('nb:gen:' + rNew.contentHash), 'current draft kept');
-});
-
-test('byte cap strips other drafts snapshots but never the active drafts snapshot', async () => {
-  const store = fakeStore();
-  let clock = '2026-01-01T00:00:00Z';
-  const dh = core.createDraftHistory({ store, now: () => clock, mintId: () => 'lin_s', codec: idCodec, limits: { snapshotDrafts: 99, metaDrafts: 99, ttlDays: 99999, maxBytes: 1000 } });
-  const key = 'file:///s.html';
-  const big = 'Z'.repeat(300);
-  // Draft 1 (older) with a snapshot.
-  const r1 = await dh.resolve({ contentText: 'First older draft body with enough text for hashing here.', attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: r1.contentHash, comments: [{ id: 'a', body: 'a', anchor: null, createdAt: 'x', author: null }], sections: [{ id: 's1', html: big }], styles: '' });
-  // Draft 2 (newer, becomes the ACTIVE draft) with a snapshot.
-  clock = '2026-01-02T00:00:00Z';
-  const r2 = await dh.resolve({ contentText: 'Second newer active draft body with enough text here.', attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: r2.contentHash, comments: [{ id: 'b', body: 'b', anchor: null, createdAt: 'x', author: null }], sections: [{ id: 's2', html: big }], styles: '' });
-  // Active draft (r2 — last persisted, also protectedHash) keeps its snapshot...
-  const g2 = await store.get('nb:gen:' + r2.contentHash);
-  assert.ok(g2, 'active draft survives');
-  assert.strictEqual(g2.sections.length, 1, 'active drafts snapshot NOT stripped');
-  // ...while the older draft survives as metadata but had its snapshot stripped to reclaim space.
-  const g1 = await store.get('nb:gen:' + r1.contentHash);
-  assert.ok(g1, 'older draft survives (comments protected)');
-  assert.strictEqual(g1.sections.length, 0, 'older drafts snapshot stripped for byte cap');
-  assert.strictEqual(g1.comments.length, 1, 'older drafts comments preserved');
-});
-
-test('byte cap evicts oldest drafts but never the newest of each lineage', async () => {
-  const store = fakeStore();
-  let clock = '2026-01-01T00:00:00Z';
-  const dh = core.createDraftHistory({ store, now: () => clock, mintId: () => 'lin_c', codec: idCodec, limits: { snapshotDrafts: 99, metaDrafts: 99, ttlDays: 99999, maxBytes: 600 } });
-  const key = 'file:///c.html';
-  const hashes = [];
-  for (let i = 0; i < 4; i++) {
-    clock = '2026-01-0' + (i + 1) + 'T00:00:00Z';
-    const r = await dh.resolve({ contentText: 'Draft variant ' + i + ' with plenty of body text for hashing here.', attachKey: key, fallbackComments: [] });
-    hashes.push(r.contentHash);
-    await dh.persist({ contentHash: r.contentHash, comments: [{ id: 'c' + i, body: 'body' + i, anchor: null, createdAt: 'x', author: null }], sections: [{ id: 's1', html: 'Z'.repeat(300) }], styles: '' });
-  }
-  assert.ok(await store.get('nb:gen:' + hashes[3]), 'newest draft of the lineage survives');
-  assert.strictEqual((await store.get('nb:gen:' + hashes[3])).comments.length, 1, 'newest keeps its comment');
-  // Active draft snapshot is protected from pass-1 stripping; older snapshots are stripped.
-  assert.strictEqual((await store.get('nb:gen:' + hashes[3])).sections.length, 1, 'newest keeps its snapshot (protected)');
-  let total = 0;
-  const keys = await store.keys();
-  for (const k of keys) { if (k.indexOf('nb:gen:') === 0) { const g = await store.get(k); if (g) total += JSON.stringify(g).length; } }
-  // GC reduced total significantly from pre-GC (4 full snapshots ≈ 2500 bytes); active snapshot is preserved.
-  assert.ok(total <= 700, 'total within byte cap after GC, got ' + total);
-});
-
-test('history attaches sectionId from the persisted map', async () => {
-  const store = fakeStore();
-  const dh = makeCore(store);
-  const key = 'file:///a.html';
-  const r1 = await dh.resolve({ contentText: 'This draft has plenty of body text here for hashing.', attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: r1.contentHash, comments: [{ id: 'c1', body: 'n', anchor: { quote: 'x', prefix: '', suffix: '', occurrence: 0 }, createdAt: 'x', author: null }], sections: [{ id: 's1', html: 'f' }], styles: '', sectionByCommentId: { c1: 's1' } });
-  const r2 = await dh.resolve({ contentText: 'A different draft body with plenty of text for hashing.', attachKey: key, fallbackComments: [] });
-  const hist = await dh.history({ lineageId: r2.lineageId, exceptHash: r2.contentHash });
-  assert.strictEqual(hist[0].comments[0].sectionId, 's1');
-});
-
-test('TTL prune protects the newest draft of a lineage even when an older draft is reopened as current', async () => {
-  const store = fakeStore();
-  let clock = '2026-01-01T00:00:00Z';
-  const dh = core.createDraftHistory({ store, now: () => clock, mintId: () => 'lin_ttl', codec: idCodec, limits: { snapshotDrafts: 9, metaDrafts: 9, ttlDays: 60, maxBytes: 1e9 } });
-  const key = 'file:///doc.html';
-  const textA = 'Draft A body text that is long enough to clear the content guard.';
-  const textB = 'Draft B body text that is also long enough to clear the guard now.';
-  const rA = await dh.resolve({ contentText: textA, attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: rA.contentHash, comments: [{ id:'a', body:'a', anchor:null, createdAt:'x', author:null }], sections: [], styles: '' });
-  clock = '2026-02-01T00:00:00Z';
-  const rB = await dh.resolve({ contentText: textB, attachKey: key, fallbackComments: [] });
-  await dh.persist({ contentHash: rB.contentHash, comments: [{ id:'b', body:'b', anchor:null, createdAt:'x', author:null }], sections: [], styles: '' });
-  clock = '2026-05-01T00:00:00Z'; // both past ttlDays:60 relative to their lastEditedAt
-  const rA2 = await dh.resolve({ contentText: textA, attachKey: key, fallbackComments: [] });
-  assert.strictEqual(rA2.contentHash, rA.contentHash, 'reopening A keeps the same content hash');
-  const survivedB = await store.get('nb:gen:' + rB.contentHash);
-  assert.ok(survivedB, 'newest draft B survives TTL prune while older A is current');
-  assert.strictEqual(survivedB.comments.length, 1, 'B keeps its comment');
+  const hist = await dh.history({ docId: 'D1', exceptVersionKey: last });
+  assert.ok(hist.length <= 2, 'metadata window enforced');
 });

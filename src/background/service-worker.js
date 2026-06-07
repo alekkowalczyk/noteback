@@ -39,9 +39,14 @@ const CANVAS_RUNTIME_FILES = [
   'src/runtime/anchor.js',
   'src/runtime/state.js',
   'src/runtime/markdown.js',
+  'src/runtime/diff.js',
   'src/runtime/highlight.js',
+  'src/runtime/diff-render.js',
   'src/runtime/overlay.js',
+  'src/runtime/draft-history-core.js',
+  'src/runtime/snapshot-capture.js',
   'src/adapters/infile-state-adapter.js',
+  'src/adapters/history-state-adapter.js',
   'src/canvas/exporter.js',
   'src/runtime/boot.js'
 ];

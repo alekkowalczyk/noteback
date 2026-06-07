@@ -7,6 +7,11 @@
   appear below (token names are a contract between this file and exporter.js):
 
     DOC_TITLE        - document title text (HTML-escaped)
+    DOC_ID           - document id (HTML-escaped, may be empty)
+    DOC_STYLE        - the original document's <head> styling carried forward:
+                       its inline <style> blocks + <link rel="stylesheet"> refs,
+                       EXCLUDING Noteback's own data-noteback-ui styles (so a
+                       styled source doesn't render as raw HTML in the canvas)
     GUIDING_COMMENT  - the one-line guiding HTML comment (CONTRACTS.md §6)
     DOC_BODY         - the original document markup (injected UI stripped)
     STATE_JSON       - JSON.stringify(state) for the noteback-state block (§5)
@@ -25,12 +30,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{{DOC_TITLE}} — Noteback feedback canvas</title>
+  <!-- Original document styling, carried forward so the wrapped doc keeps its look. -->
+  {{DOC_STYLE}}
 </head>
 <body>
   {{GUIDING_COMMENT}}
 
   <!-- Original document markup -->
-  <div id="noteback-doc-root">
+  <div id="noteback-doc-root" data-noteback-doc-id="{{DOC_ID}}">
     {{DOC_BODY}}
   </div>
 

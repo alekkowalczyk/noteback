@@ -55,9 +55,116 @@
    * head for the floating light-DOM button).                                *
    * ----------------------------------------------------------------------- */
 
+  // The painted highlight — a filled honey swatch with rounded corners and a 1px
+  // darker-yellow ring; the passage being actively commented gets a teal ring.
+  // Shared so the inline version-view iframe paints highlights identically to the
+  // live document (openVersionInline injects this into the snapshot's <head>).
+  const HIGHLIGHT_CSS =
+    'mark.noteback-highlight{' +
+    '  background:#ffe7a3;color:inherit;border-radius:4px;padding:0 1.5px;cursor:pointer;' +
+    '  box-shadow:0 0 0 1px rgba(210,158,40,.55);' +
+    '  -webkit-box-decoration-break:clone;box-decoration-break:clone;' +
+    '  transition:background .2s ease,box-shadow .2s ease;' +
+    '}' +
+    'mark.noteback-highlight:hover{background:#ffdd83;box-shadow:0 0 0 1px rgba(198,148,34,.8);}' +
+    /* the passage being commented in the open editor — teal-ringed to stand out */
+    'mark.noteback-highlight[data-noteback-id="__nb_preview"]{' +
+    '  background:#ffdd83;box-shadow:0 0 0 2px rgba(18,122,114,.6);}' +
+    'mark.noteback-highlight-flash{' +
+    '  background:#ffd166 !important;border-radius:4px !important;' +
+    '  box-shadow:0 0 0 2px rgba(18,122,114,.6) !important;' +
+    '  transition:background .25s ease,box-shadow .25s ease;' +
+    '}';
+
+  // Styles for the popover shown INSIDE a version peek iframe when a highlight is
+  // clicked (openVersionInline injects this into the snapshot's <head>). It lives in
+  // the snapshot's own document, so it must be self-contained (no shadow vars).
+  const PEEK_POP_CSS =
+    '.nb-peek-pop{position:fixed;z-index:2147483647;max-width:320px;min-width:190px;' +
+    '  background:#ffffff;border:1px solid #e6e5e2;border-radius:12px;' +
+    '  box-shadow:0 18px 40px -20px rgba(40,40,38,.5),0 2px 6px rgba(20,30,20,.08);' +
+    '  padding:11px 13px;color:#2b2b29;' +
+    '  font:400 13.5px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;' +
+    '  opacity:0;transform:translateY(4px);transition:opacity .14s ease,transform .14s ease;pointer-events:none;}' +
+    '.nb-peek-pop.nb-show{opacity:1;transform:translateY(0);pointer-events:auto;}' +
+    '.nb-peek-pop-quote{display:block;border-left:2px solid #ffd166;padding-left:8px;margin-bottom:7px;' +
+    '  font:italic 400 12px/1.45 ui-serif,Georgia,"Times New Roman",serif;color:#6c6c68;' +
+    '  max-height:56px;overflow:hidden;}' +
+    '.nb-peek-pop-body{white-space:pre-wrap;word-break:break-word;}' +
+    '.nb-peek-pop-empty{color:#a2a09b;font-style:italic;}' +
+    '@media (prefers-reduced-motion: reduce){.nb-peek-pop{transition:none;}}';
+
+  // Diff styling injected INTO the version-view iframe when diff mode is on.
+  // Goal: make it unmistakably a COMPARISON, not part of the document — a sticky
+  // legend header frames the panel; each changed block carries a left gutter rail
+  // (a +/-/edit glyph badge + a thick change-bar) and an Added/Removed/Edited tag,
+  // so a tinted block can't be misread as a document callout; and word-level
+  // changes use SHAPE cues (underline for adds, strike-through for deletes) on top
+  // of colour, so a single-word edit pops and stays legible without relying on hue.
+  const DIFF_CSS =
+    // Legend header — sticky banner that frames everything below as a diff.
+    '.nb-diff-legend{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:7px 14px;flex-wrap:wrap;' +
+    '  margin:0 0 16px;padding:10px 15px;border-radius:0 0 11px 11px;background:#1f2a37;color:#eef2f7;' +
+    '  font:600 12.5px/1.3 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;' +
+    '  box-shadow:0 7px 20px -12px rgba(18,26,36,.7);}' +
+    '.nb-diff-legend-title{display:inline-flex;align-items:center;gap:7px;font-weight:700;letter-spacing:.01em;}' +
+    '.nb-diff-legend-title .nb-diff-swap{font-size:14px;opacity:.85;}' +
+    '.nb-diff-key{display:inline-flex;align-items:center;gap:6px;color:#aebac7;font-weight:600;}' +
+    '.nb-diff-key .nb-k-chip{display:inline-block;width:11px;height:11px;border-radius:3px;}' +
+    '.nb-diff-key.nb-k-add .nb-k-chip{background:#0a9d4e;}' +
+    '.nb-diff-key.nb-k-del .nb-k-chip{background:#db2c1c;}' +
+    // Word-level changes: colour + a strong shape cue so single words stand out.
+    'ins.nb-diff-ins{text-decoration:underline;text-decoration-color:#1f9d57;text-decoration-thickness:2px;' +
+    '  text-underline-offset:2px;background:#d8f3e1;color:#0f7a3d;border-radius:3px;padding:0 2px;font-weight:600;}' +
+    'del.nb-diff-del{text-decoration:line-through;text-decoration-color:#cf4335;text-decoration-thickness:2px;' +
+    '  background:#fadbd7;color:#b3261e;border-radius:3px;padding:0 2px;}' +
+    // Changed BLOCKS: left gutter rail (glyph badge + thick change-bar) + a tag.
+    // Square corners (no rounding) read as a deliberate diff frame, not a callout.
+    '.nb-diff-ins-block,.nb-diff-del-block,.nb-diff-edit-block{position:relative;margin:5px 0;' +
+    '  padding:7px 80px 7px 32px;border-radius:0;}' +
+    '.nb-diff-ins-block::before,.nb-diff-del-block::before,.nb-diff-edit-block::before{' +
+    '  content:"";position:absolute;left:7px;top:7px;width:18px;height:18px;border-radius:3px;color:#fff;' +
+    '  display:flex;align-items:center;justify-content:center;' +
+    '  font:700 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;}' +
+    // Tag: a solid, saturated, square label so the change type registers instantly.
+    '.nb-diff-ins-block::after,.nb-diff-del-block::after,.nb-diff-edit-block::after{' +
+    '  position:absolute;top:6px;right:7px;font:800 9.5px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;' +
+    '  letter-spacing:.09em;text-transform:uppercase;padding:3px 7px;border-radius:2px;' +
+    '  box-shadow:0 1px 2px rgba(0,0,0,.22);}' +
+    // Added — vivid green rail + "+" badge + solid green tag.
+    '.nb-diff-ins-block{background:#eaf7ef;border-left:4px solid #0a9d4e;}' +
+    '.nb-diff-ins-block::before{content:"+";background:#0a9d4e;}' +
+    '.nb-diff-ins-block::after{content:"Added";background:#0a9d4e;color:#fff;}' +
+    // Removed — vivid red rail + minus badge + solid red tag; struck + muted text.
+    '.nb-diff-del-block{background:#fcebe9;border-left:4px solid #db2c1c;color:#9c6660;' +
+    '  text-decoration:line-through;text-decoration-color:rgba(178,38,30,.4);}' +
+    '.nb-diff-del-block::before{content:"\\2212";background:#db2c1c;}' +
+    '.nb-diff-del-block::after{content:"Removed";background:#db2c1c;color:#fff;text-decoration:none;}' +
+    // Edited — vivid amber rail + pencil badge + solid amber tag (dark text for contrast).
+    '.nb-diff-edit-block{background:#fff7e6;border-left:4px solid #ec9706;}' +
+    '.nb-diff-edit-block::before{content:"\\270E";background:#ec9706;color:#3f2a00;font-size:11px;}' +
+    '.nb-diff-edit-block::after{content:"Edited";background:#ec9706;color:#3f2a00;}' +
+    // Prev/Next change navigator (right-aligned in the legend) + the focused-change
+    // emphasis it drives: a colour ring, an intensified fill, and a brief pop.
+    '.nb-diff-nav{margin-left:auto;display:inline-flex;align-items:center;gap:4px;}' +
+    '.nb-diff-nav button{font:700 10.5px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;cursor:pointer;' +
+    '  color:#eef2f7;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);' +
+    '  border-radius:6px;padding:4px 9px;transition:background .14s ease;}' +
+    '.nb-diff-nav button:hover{background:rgba(255,255,255,.26);}' +
+    '.nb-diff-nav-pos{min-width:40px;text-align:center;color:#cdd6e0;' +
+    '  font:700 10.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace;}' +
+    '.nb-diff-focus{position:relative;z-index:2;animation:nb-diff-pop .35s ease-out 1;}' +
+    '.nb-diff-ins-block.nb-diff-focus{background:#d3f0de;box-shadow:0 0 0 3px rgba(10,157,78,.55);}' +
+    '.nb-diff-del-block.nb-diff-focus{background:#fbdcd8;box-shadow:0 0 0 3px rgba(219,44,28,.55);}' +
+    '.nb-diff-edit-block.nb-diff-focus{background:#fdeecb;box-shadow:0 0 0 3px rgba(236,151,6,.6);}' +
+    '@keyframes nb-diff-pop{0%{transform:scale(.992);}55%{transform:scale(1.012);}100%{transform:scale(1);}}' +
+    // No-changes banner.
+    '.nb-diff-nochange{margin:0 0 14px;padding:9px 13px;border-radius:8px;' +
+    '  background:#eef1f4;color:#54606c;' +
+    '  font:600 13px/1.4 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}';
+
   // Light-DOM styles: the floating "Comment" chip that appears on selection, and
-  // the painted highlight — a filled honey swatch with rounded corners and a 1px
-  // darker-yellow ring. The passage being actively commented gets a teal ring.
+  // the painted highlight (HIGHLIGHT_CSS, shared with the peek).
   const BUTTON_CSS = [
     '.noteback-fab{',
     '  position:absolute;z-index:2147483646;',
@@ -77,22 +184,8 @@
     '@keyframes nb-fab-pop{0%{opacity:0;transform:scale(.8) translateY(3px);}',
     '  55%{opacity:1;}100%{opacity:1;transform:scale(1) translateY(0);}}',
     '.noteback-fab:hover{background:#0e6960;}',
-    '.noteback-fab:active{transform:scale(.96);}',
-    'mark.noteback-highlight{',
-    '  background:#ffe7a3;color:inherit;border-radius:4px;padding:0 1.5px;cursor:pointer;',
-    '  box-shadow:0 0 0 1px rgba(210,158,40,.55);',
-    '  -webkit-box-decoration-break:clone;box-decoration-break:clone;',
-    '  transition:background .2s ease,box-shadow .2s ease;',
-    '}',
-    'mark.noteback-highlight:hover{background:#ffdd83;box-shadow:0 0 0 1px rgba(198,148,34,.8);}',
-    /* the passage being commented in the open editor — teal-ringed to stand out */
-    'mark.noteback-highlight[data-noteback-id="__nb_preview"]{',
-    '  background:#ffdd83;box-shadow:0 0 0 2px rgba(18,122,114,.6);}',
-    'mark.noteback-highlight-flash{',
-    '  background:#ffd166 !important;border-radius:4px !important;',
-    '  box-shadow:0 0 0 2px rgba(18,122,114,.6) !important;',
-    '  transition:background .25s ease,box-shadow .25s ease;',
-    '}',
+    '.noteback-fab:active{transform:scale(.96);}'
+  ].join('') + HIGHLIGHT_CSS + [
     '@media (prefers-reduced-motion: reduce){',
     '  .noteback-fab,mark.noteback-highlight,mark.noteback-highlight-flash{transition:none !important;animation:none !important;}',
     '  .noteback-fab,.noteback-fab.nb-in{opacity:1;transform:none;animation:none !important;}',
@@ -182,9 +275,25 @@
     '.nb-cmd-copy{flex:none;border:1px solid var(--nb-line);background:#fff;cursor:pointer;border-radius:8px;',
     '  font:600 11px/1 var(--nb-ui);padding:6px 9px;color:var(--nb-ink-soft);transition:background .15s ease,color .15s ease;}',
     '.nb-cmd-copy:hover{background:#f3f2ef;color:var(--nb-ink);}',
-    '.nb-info-link{display:inline-block;margin-top:13px;font:600 12px/1 var(--nb-ui);',
+    '.nb-info-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:14px;}',
+    '.nb-info-link{display:inline-block;font:600 12px/1 var(--nb-ui);',
     '  color:#2563eb;text-decoration:none;}',
     '.nb-info-link:hover{text-decoration:underline;}',
+    /* small mode indicator (bottom-right of the info card): extension vs embedded */
+    '.nb-info-mode{display:inline-flex;align-items:center;gap:5px;flex:none;',
+    '  font:700 9.5px/1 var(--nb-round);letter-spacing:.07em;text-transform:uppercase;',
+    '  color:var(--nb-ink-faint);white-space:nowrap;}',
+    '.nb-info-mode::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--nb-accent);flex:none;}',
+
+    /* gear dialog (history opt-out) — reuses .nb-info-dialog/.nb-info-card styling */
+    '.nb-gear-btn[hidden]{display:none;}',
+    '.nb-gear-row{display:flex;align-items:center;justify-content:space-between;gap:12px;',
+    '  padding:9px 2px;font:500 12.5px/1.4 var(--nb-ui);color:var(--nb-ink);cursor:pointer;}',
+    '.nb-gear-row + .nb-gear-row{border-top:1px solid var(--nb-line);}',
+    '.nb-gear-label{flex:1;min-width:0;}',
+    '.nb-gear-row input[type=checkbox]{flex:none;width:16px;height:16px;cursor:pointer;accent-color:var(--nb-accent);}',
+    '.nb-gear-row input[type=checkbox]:disabled{opacity:.45;cursor:not-allowed;}',
+    '.nb-gear-hint{margin:9px 2px 0;font:400 11px/1.45 var(--nb-ui);color:var(--nb-ink-faint);}',
 
     /* list */
     '.nb-list{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:13px 14px 16px;scrollbar-width:thin;}',
@@ -224,7 +333,7 @@
     '.nb-empty b{font-weight:600;color:var(--nb-accent-ink);}',
 
     /* footer + buttons */
-    '.nb-foot{border-top:1px solid var(--nb-line);padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;',
+    '.nb-foot{border-top:1px solid var(--nb-line);padding:12px 14px 14px;display:flex;flex-direction:row;align-items:stretch;gap:8px;',
     '  background:linear-gradient(180deg,rgba(245,245,243,0),#eeeeec);}',
     '.nb-btn{font:700 13px/1 var(--nb-round);border:1px solid var(--nb-accent);background:var(--nb-accent);color:#fffdf8;',
     '  border-radius:11px;padding:11px 12px;cursor:pointer;text-align:center;display:inline-flex;align-items:center;justify-content:center;gap:7px;',
@@ -234,8 +343,9 @@
     '.nb-btn.nb-secondary{background:var(--nb-card);color:var(--nb-accent-ink);border-color:var(--nb-line-strong);box-shadow:none;}',
     '.nb-btn.nb-secondary:hover{background:var(--nb-accent-wash);border-color:var(--nb-accent);}',
 
+    /* footer is one row: Copy feedback (left) + Save (right), each 50% wide. */
     /* save menu — a dropdown that grows upward from the footer "Save" button */
-    '.nb-save-wrap{position:relative;}',
+    '.nb-save-wrap{position:relative;flex:1 1 0;min-width:0;}',
     '.nb-save-btn{width:100%;}',
     '.nb-save-btn .nb-caret{margin-left:6px;font-size:10px;line-height:1;opacity:.85;transition:transform .18s var(--dropdown-ease);}',
     '.nb-save-wrap.nb-menu-open .nb-save-btn .nb-caret{transform:rotate(180deg);}',
@@ -250,28 +360,121 @@
     '  transition:transform var(--dropdown-close-dur) var(--dropdown-ease),opacity var(--dropdown-close-dur) var(--dropdown-ease);}',
     '.nb-menu-item{display:block;width:100%;text-align:left;border:none;background:none;cursor:pointer;',
     '  padding:9px 11px;border-radius:10px;transition:background .14s ease;}',
+    /* explicit display:block above beats the UA [hidden]{display:none} (equal
+       specificity, author wins), so restore it for hidden menu items. */
+    '.nb-menu-item[hidden]{display:none;}',
     '.nb-menu-item:hover,.nb-menu-item:focus-visible{background:var(--nb-accent-wash);outline:none;}',
     '.nb-mi-label{display:block;font:700 13px/1.25 var(--nb-round);color:var(--nb-ink);}',
     '.nb-menu-item:hover .nb-mi-label,.nb-menu-item:focus-visible .nb-mi-label{color:var(--nb-accent-deep);}',
     '.nb-mi-sub{display:block;font:400 11.5px/1.3 var(--nb-ui);color:var(--nb-ink-soft);margin-top:2px;}',
     '.nb-menu-sep{height:1px;background:var(--nb-line);margin:4px 9px;}',
     /* copy split-button — main keeps its action; the caret opens this menu */
-    '.nb-copy-wrap{position:relative;display:flex;}',
-    '.nb-copy-wrap .nb-copy{flex:1;border-top-right-radius:0;border-bottom-right-radius:0;}',
+    '.nb-copy-wrap{position:relative;display:flex;flex:1 1 0;min-width:0;}',
+    '.nb-copy-wrap .nb-copy{flex:1;min-width:0;border-top-right-radius:0;border-bottom-right-radius:0;}',
     '.nb-copy-caret-btn{flex:none;padding:0 10px;border-left:none;border-top-left-radius:0;border-bottom-left-radius:0;}',
     '.nb-copy-caret-btn .nb-caret{font-size:10px;line-height:1;opacity:.85;transition:transform .18s var(--dropdown-ease);}',
     '.nb-copy-wrap.nb-menu-open .nb-copy-caret-btn .nb-caret{transform:rotate(180deg);}',
+    /* Each half is now ~50% of the sidebar, too narrow for the two-line menu items.
+       Give the footer dropdowns a comfortable min-width and anchor each to its own
+       outer edge so it expands inward (staying within the sidebar): the copy menu
+       (left half) opens to the right, the save menu (right half) to the left. */
+    '.nb-foot .nb-menu{min-width:228px;}',
+    '.nb-copy-wrap .nb-menu{left:0;right:auto;transform-origin:bottom left;}',
+    '.nb-save-wrap .nb-menu{left:auto;right:0;transform-origin:bottom right;}',
 
-    /* earlier-feedback history + snapshot popup */
-    '.nb-history{margin-top:10px;border-top:1px solid var(--nb-line);padding-top:8px;}',
-    '.nb-hist-draft{font-size:12px;color:var(--nb-ink-soft,#6b7280);margin:8px 0 4px;}',
-    '.nb-hist-item{display:block;width:100%;text-align:left;border:none;background:none;cursor:pointer;padding:6px 8px;border-radius:8px;font:inherit;color:inherit;}',
-    '.nb-hist-item:hover:not(:disabled){background:var(--nb-accent-wash);}',
-    '.nb-hist-item:disabled{opacity:.55;cursor:default;}',
-    '.nb-hist-backdrop{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;}',
-    '.nb-hist-panel{position:relative;width:min(820px,92vw);height:min(80vh,720px);background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35);}',
-    '.nb-hist-close{position:absolute;top:8px;right:8px;z-index:2;border:none;background:#0001;border-radius:50%;width:28px;height:28px;cursor:pointer;}',
-    '.nb-hist-frame{width:100%;height:100%;border:0;background:#fff;}',
+    /* version timeline (docs/design.md §14.4) + snapshot peek popup */
+    // Docked at the bottom of the sidebar, above .nb-foot: a bounded, self-scrolling
+    // band so the comment list (flex:1) keeps the room. Collapses entirely when
+    // there are no earlier versions. No top divider — it sits flush above .nb-foot.
+    '.nb-versions-dock{flex:0 0 auto;max-height:34vh;overflow-y:auto;overflow-x:hidden;',
+    '  padding:2px 14px 8px;scrollbar-width:thin;}',
+    '.nb-versions-dock:empty{display:none;}',
+    '.nb-versions .nb-group-label{margin:11px 4px 4px;}',
+    '.nb-ver-rest[hidden]{display:none;}',
+    '.nb-ver-row{padding:9px 4px;border-top:1px solid var(--nb-line);}',
+    '.nb-ver-row:first-of-type{border-top:none;}',
+    '.nb-ver-row.active{background:var(--nb-accent-wash);border-radius:10px;border-top:none;margin-top:2px;}',
+    '.nb-ver-line{display:flex;align-items:center;gap:9px;font:500 13px/1.3 var(--nb-ui);color:var(--nb-ink);cursor:pointer;}',
+    '.nb-ver-row.active .nb-ver-line{cursor:default;}',
+    '.nb-ver-dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--nb-ink-faint);flex:none;box-sizing:border-box;}',
+    '.nb-ver-row.active .nb-ver-dot{background:var(--nb-accent);border-color:var(--nb-accent);}',
+    '.nb-ver-name{font:700 13px/1.2 var(--nb-round);color:var(--nb-ink);}',
+    '.nb-ver-meta{font:400 11.5px/1.2 var(--nb-ui);color:var(--nb-ink-soft);}',
+    '.nb-ver-spacer{flex:1;}',
+    '.nb-ver-count{font:600 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;background:#efe7d6;',
+    '  border:1px solid var(--nb-line);border-radius:999px;padding:2px 9px;color:var(--nb-ink-soft);}',
+    '.nb-ver-row.active .nb-ver-count{background:#fff;}',
+    /* "Show diff" shortcut on the now row: a small accent pill, right-aligned by
+       the .nb-ver-spacer, opening the latest-version → now diff. */
+    '.nb-ver-diff{flex:none;display:inline-flex;align-items:center;gap:5px;cursor:pointer;',
+    '  background:var(--nb-accent-wash);color:var(--nb-accent-deep);border:1px solid var(--nb-accent);',
+    '  border-radius:999px;padding:3px 10px;font:700 11px/1 var(--nb-round);',
+    '  transition:background .14s ease,box-shadow .2s ease;}',
+    '.nb-ver-diff:hover{background:#dcebe8;box-shadow:0 6px 16px -12px rgba(15,98,89,.7);}',
+    '.nb-ver-diff-ico{font-size:12px;line-height:1;}',
+    /* per-row actions live behind a chevron next to the version name; clicking it
+       opens .nb-ver-menu (a portaled .nb-menu positioned in JS, since the dock
+       clips overflow) with Open + Copy feedback. */
+    /* icon-only chevron styled like the secondary "Copy feedback" button: white
+       card surface + a line border (no text). */
+    '.nb-ver-menu-btn{flex:none;cursor:pointer;background:var(--nb-card);color:var(--nb-accent-ink);',
+    '  border:1px solid var(--nb-line-strong);',
+    '  display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;',
+    '  font-size:10px;line-height:1;padding:0;',
+    '  transition:background .14s ease,color .14s ease,border-color .14s ease,transform .18s var(--dropdown-ease);}',
+    '.nb-ver-menu-btn:hover{background:var(--nb-accent-wash);border-color:var(--nb-accent);color:var(--nb-accent-deep);}',
+    '.nb-ver-menu-btn[aria-expanded="true"]{background:var(--nb-accent-wash);border-color:var(--nb-accent);color:var(--nb-accent-deep);transform:rotate(180deg);}',
+    '.nb-ver-menu{position:fixed;left:0;top:auto;right:auto;bottom:auto;width:214px;transform-origin:bottom left;}',
+    '.nb-ver-menu .nb-mi-sub{text-transform:none;letter-spacing:normal;}',
+    '.nb-ver-menu .nb-menu-item:disabled{opacity:.42;cursor:default;}',
+    '.nb-ver-menu .nb-menu-item:disabled .nb-mi-label{color:var(--nb-ink);}',
+    /* "Back to current" bar: shown atop the timeline while viewing an earlier
+       version inline; one click returns to the live current draft. */
+    '.nb-backbar{display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;',
+    '  margin:2px 0 4px;padding:8px 11px;border:1px solid var(--nb-accent);border-radius:10px;',
+    '  background:var(--nb-accent-wash);transition:background .14s ease,box-shadow .2s ease;}',
+    '.nb-backbar:hover{background:#dcebe8;box-shadow:0 6px 16px -12px rgba(15,98,89,.7);}',
+    '.nb-backbar-txt{font:600 11.5px/1.3 var(--nb-ui);color:var(--nb-ink-soft);}',
+    '.nb-backbar-cta{margin-left:auto;font:700 12px/1 var(--nb-round);color:var(--nb-accent-deep);white-space:nowrap;}',
+    '.nb-disclose{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:none;background:none;cursor:pointer;',
+    '  padding:11px 4px;border-top:1px solid var(--nb-line);border-radius:0;}',
+    '.nb-disclose:hover .nb-disclose-label{color:var(--nb-accent-deep);}',
+    '.nb-disclose-chev{display:inline-flex;color:var(--nb-ink-faint);font-size:14px;line-height:1;transition:transform .16s ease;}',
+    '.nb-disclose.nb-open .nb-disclose-chev{transform:rotate(90deg);}',
+    '.nb-disclose-label{font:700 10px/1 var(--nb-round);letter-spacing:.08em;text-transform:uppercase;color:var(--nb-ink-soft);}',
+    /* inline version view: a read-only side panel filling the doc area BESIDE the
+       sidebar (which stays at right:0 with the live timeline). z-index sits JUST
+       BELOW the sidebar (2147483647) and the panel insets by the sidebar width, so
+       the active viewing row + back-to-current + switch stay reachable while viewing. */
+    '.nb-hist-view{position:fixed;top:0;left:0;right:360px;bottom:0;z-index:2147483646;',
+    '  background:#fff;display:flex;flex-direction:column;box-shadow:0 0 44px -20px rgba(40,40,38,.5);}',
+    '.nb-hist-back{flex:0 0 auto;display:flex;align-items:center;gap:6px;border:none;',
+    '  border-bottom:1px solid var(--nb-line);background:var(--nb-accent-wash);color:var(--nb-accent-deep);',
+    '  font:700 12px/1 var(--nb-round);letter-spacing:.01em;padding:11px 14px;cursor:pointer;text-align:left;',
+    '  transition:background .14s ease,color .14s ease;}',
+    '.nb-hist-back:hover{background:var(--nb-accent);color:#fffdf8;}',
+    /* the inline-view header is now a flex bar holding the back button (left) and
+       the diff toggle (right); the bar owns the bottom border. */
+    '.nb-hist-bar{flex:0 0 auto;display:flex;align-items:stretch;',
+    '  border-bottom:1px solid var(--nb-line);background:var(--nb-accent-wash);}',
+    '.nb-hist-bar .nb-hist-back{flex:1 1 auto;border-bottom:none;}',
+    '.nb-diff-toggle{flex:0 0 auto;display:inline-flex;align-items:center;gap:8px;',
+    '  border:none;border-left:1px solid rgba(18,122,114,.25);background:transparent;',
+    '  color:var(--nb-accent-deep);font:700 12px/1 var(--nb-round);letter-spacing:.01em;',
+    '  padding:0 14px;cursor:pointer;transition:background .14s ease,color .14s ease;}',
+    '.nb-diff-toggle:hover{background:var(--nb-accent);color:#fffdf8;}',
+    '.nb-diff-icon{font-size:13px;line-height:1;}',
+    '.nb-diff-switch{position:relative;width:30px;height:16px;border-radius:999px;',
+    '  background:var(--nb-line-strong);transition:background .16s ease;flex:none;}',
+    '.nb-diff-switch::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;',
+    '  border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .16s ease;}',
+    '.nb-diff-toggle.nb-on .nb-diff-switch{background:var(--nb-accent);}',
+    '.nb-diff-toggle.nb-on .nb-diff-switch::after{transform:translateX(14px);}',
+    // The iframe is a REPLACED element; as a column-flex child with flex:1 +
+    // min-height:0 it resolves to a definite height and fills below the back bar.
+    // (Do NOT switch to absolute top+bottom+height:auto — a replaced element falls
+    // back to the intrinsic ~150px and collapses into a thin strip.)
+    '.nb-hist-frame{flex:1 1 auto;min-height:0;width:100%;border:0;background:#fff;}',
 
     /* toast + success check (transitions.dev) */
     '.nb-toast{position:fixed;bottom:20px;right:20px;display:inline-flex;align-items:center;gap:9px;',
@@ -404,6 +607,9 @@
     const stateApi = modules.state;
     const highlightApi = modules.highlight;
     const markdownApi = modules.markdown;
+    const diffApi = modules.diff;
+    const diffRenderApi = modules.diffRender;
+    const snapshotApi = modules.snapshotCapture;
     if (!anchorApi || !stateApi) {
       throw new Error('overlay.mountOverlay requires NotebackRuntime.anchor and .state');
     }
@@ -413,6 +619,23 @@
     const getState = cfg.getState || (function () { return null; });
     const setState = cfg.setState || function () {};
     const history = cfg.history || null;
+    const historyControl = cfg.historyControl || null;
+    // How Noteback is running on this page — 'extension' (content script) or
+    // 'embedded' (inlined into a saved canvas). Surfaced as a small indicator in
+    // the info dialog. Defaults to embedded (the self-contained canvas is the
+    // common case); the extension passes 'extension' explicitly.
+    const runMode = (cfg.mode === 'extension') ? 'extension' : 'embedded';
+    // In-tab version viewing (read-only). `viewingKey` is the version key shown
+    // inline (null = the live current draft); `inlineView` is its DOM panel.
+    // Inline viewing stays on THIS tab/origin, so the localStorage-backed history
+    // adapter remains reachable — unlike the old new-tab blob whose opaque file://
+    // origin denied localStorage (the bug this replaced).
+    let viewingKey = null;
+    let inlineView = null;
+    // Diff mode for the inline version view: when true, the panel renders a diff
+    // of the viewed version against the next chronological version. Sticky while
+    // browsing versions; reset on closeVersionInline.
+    let diffMode = false;
     const onChange = cfg.onChange || function () {};
     // Prefer the runtime markdown module directly so we can hand it the document
     // markup for line references; fall back to the boot-supplied renderer.
@@ -472,7 +695,9 @@
     (doc.body || doc.documentElement).appendChild(fab);
 
     let pendingAnchor = null;   // anchor described from the current selection
-    let pendingFabRect = null;  // selection rect the chip should sit above
+    let pendingFabRect = null;  // full selection rect — used to place the COMPOSER
+    let pendingCaretRect = null;// zero-width rect at the cursor — used to place the CHIP
+    let pendingFabBelow = true; // chip prefers the side the cursor is on (below for fwd)
     let fabTimer = null;        // debounce: show the chip a beat after settling
     const FAB_DELAY_MS = 340;
 
@@ -489,6 +714,7 @@
       '  </div>' +
       '</div>' +
       '<div class="nb-list"></div>' +
+      '<div class="nb-versions-dock"></div>' +
       '<div class="nb-foot">' +
       '  <div class="nb-copy-wrap">' +
       '    <button type="button" class="nb-btn nb-secondary nb-copy">Copy feedback</button>' +
@@ -509,6 +735,9 @@
       '      <button type="button" class="nb-menu-item nb-save-comments" role="menuitem">' +
       '        <span class="nb-mi-label">HTML · with comments</span>' +
       '        <span class="nb-mi-sub">highlights &amp; notes, re-shareable</span></button>' +
+      '      <button type="button" class="nb-menu-item nb-save-history" role="menuitem" hidden>' +
+      '        <span class="nb-mi-label">HTML · with history</span>' +
+      '        <span class="nb-mi-sub">as above plus history</span></button>' +
       '      <div class="nb-menu-sep" role="none"></div>' +
       '      <button type="button" class="nb-menu-item nb-save-clean" role="menuitem">' +
       '        <span class="nb-mi-label">HTML · clean copy</span>' +
@@ -530,17 +759,21 @@
       '      <span class="nb-info-title">Hand yourself annotatable docs</span>' +
       '      <button type="button" class="nb-info-x" title="Close" aria-label="Close">×</button>' +
       '    </div>' +
-      '    <p class="nb-info-note">Noteback also ships as an agent skill + CLI, so an AI (Claude Code, etc.) can give you HTML that is already annotatable.</p>' +
+      '    <p class="nb-info-note">Skill for AI to produce annotable html documents</p>' +
       '    <div class="nb-cmd"><code>npx skills add alekkowalczyk/noteback</code>' +
       '      <button type="button" class="nb-cmd-copy" data-cmd="npx skills add alekkowalczyk/noteback" title="Copy command">Copy</button></div>' +
       '    <div class="nb-cmd"><code>npx noteback install-skill</code>' +
       '      <button type="button" class="nb-cmd-copy" data-cmd="npx noteback install-skill" title="Copy command">Copy</button></div>' +
-      '    <a class="nb-info-link" href="https://github.com/alekkowalczyk/noteback" target="_blank" rel="noopener noreferrer">View the project on GitHub ↗</a>' +
+      '    <div class="nb-info-foot">' +
+      '      <a class="nb-info-link" href="https://github.com/alekkowalczyk/noteback" target="_blank" rel="noopener noreferrer">View the project on GitHub ↗</a>' +
+      '      <span class="nb-info-mode" title="How Noteback is running on this page"></span>' +
+      '    </div>' +
       '  </div>' +
       '</div>';
 
     const elCount = sidebar.querySelector('.nb-count');
     const elList = sidebar.querySelector('.nb-list');
+    const elVersionsDock = sidebar.querySelector('.nb-versions-dock');
     const saveWrap = sidebar.querySelector('.nb-save-wrap');
     const saveBtn = sidebar.querySelector('.nb-save-btn');
     const saveMenu = saveWrap.querySelector('.nb-menu');
@@ -554,6 +787,11 @@
     sidebar.querySelector('.nb-copy-clean').addEventListener('click', function () { closeCopyMenu(); copyHtmlClean(); });
     saveBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleSaveMenu(); });
     sidebar.querySelector('.nb-save-comments').addEventListener('click', function () { closeSaveMenu(); saveCanvas(); });
+    // "with comments and history" — hidden until there's history AND the mode can
+    // embed it (the embedded canvas exposes onSaveCanvasWithHistory). Toggled in
+    // renderVersions; see refreshSaveHistoryItem.
+    const saveHistoryItem = sidebar.querySelector('.nb-save-history');
+    saveHistoryItem.addEventListener('click', function () { closeSaveMenu(); saveCanvasWithHistory(); });
     sidebar.querySelector('.nb-save-clean').addEventListener('click', function () { closeSaveMenu(); saveClean(); });
     sidebar.querySelector('.nb-save-pdf').addEventListener('click', function () { closeSaveMenu(); savePdf(); });
     const clearBtn = sidebar.querySelector('.nb-clear-comments');
@@ -575,6 +813,8 @@
     /* --- info dialog (install-as-a-skill) ------------------------------- */
     const infoBtn = sidebar.querySelector('.nb-info');
     const infoDialog = sidebar.querySelector('.nb-info-dialog');
+    const infoModeEl = sidebar.querySelector('.nb-info-mode');
+    if (infoModeEl) infoModeEl.textContent = runMode + ' mode';
     let infoOpen = false;
     function openInfo() { infoDialog.hidden = false; infoOpen = true; infoBtn.setAttribute('aria-expanded', 'true'); }
     function closeInfo() { infoDialog.hidden = true; infoOpen = false; infoBtn.setAttribute('aria-expanded', 'false'); }
@@ -591,8 +831,81 @@
         });
       });
     }
+
+    /* --- gear: history opt-out (EMBEDDED only) -------------------------- */
+    // Hoisted so the shared document keydown handler (onDocKeydownInfo) can close
+    // the gear dialog on Escape too. Stay null when the embedded gear block below
+    // doesn't run (extension mode / no history control) — the handler is null-safe.
+    let gearBtnRef = null;
+    let closeGearRef = null;
+    let isGearOpen = function () { return false; };
+    if (runMode === 'embedded' && historyControl && historyControl.available) {
+      const headCtrls = sidebar.querySelector('.nb-head-ctrls');
+      const gearBtn = doc.createElement('button');
+      gearBtn.type = 'button';
+      gearBtn.className = 'nb-info nb-gear-btn'; // reuse .nb-info button styling
+      gearBtn.setAttribute('title', 'Version history');
+      gearBtn.setAttribute('aria-label', 'Version history');
+      gearBtn.setAttribute('aria-expanded', 'false');
+      gearBtn.textContent = '⚙';
+      headCtrls.insertBefore(gearBtn, headCtrls.firstChild);
+
+      const gearDialog = doc.createElement('div');
+      gearDialog.className = 'nb-info-dialog nb-gear-dialog'; // reuse dialog styling
+      gearDialog.setAttribute('role', 'dialog');
+      gearDialog.setAttribute('aria-label', 'Version history');
+      gearDialog.hidden = true;
+      gearDialog.innerHTML =
+        '<div class="nb-info-card">' +
+        '  <div class="nb-info-head">' +
+        '    <span class="nb-info-title">Version history</span>' +
+        '    <button type="button" class="nb-info-x nb-gear-x" title="Close" aria-label="Close">×</button>' +
+        '  </div>' +
+        '  <label class="nb-gear-row"><span class="nb-gear-label">Record history for this document</span>' +
+        '    <input type="checkbox" class="nb-gear-doc" /></label>' +
+        '  <label class="nb-gear-row"><span class="nb-gear-label">Record history for all docs here</span>' +
+        '    <input type="checkbox" class="nb-gear-global" /></label>' +
+        '  <p class="nb-gear-hint">“Here” means documents this browser stores for this location.</p>' +
+        '</div>';
+      sidebar.appendChild(gearDialog);
+
+      const gearDocCb = gearDialog.querySelector('.nb-gear-doc');
+      const gearGlobalCb = gearDialog.querySelector('.nb-gear-global');
+      const syncGear = function () {
+        gearGlobalCb.checked = !historyControl.globalOff();
+        gearDocCb.checked = !historyControl.docOff();
+        gearDocCb.disabled = historyControl.globalOff(); // global off → per-doc is moot
+      };
+      let gearOpen = false;
+      const openGear = function () { syncGear(); gearDialog.hidden = false; gearOpen = true; gearBtn.setAttribute('aria-expanded', 'true'); };
+      const closeGear = function () { gearDialog.hidden = true; gearOpen = false; gearBtn.setAttribute('aria-expanded', 'false'); };
+      gearBtn.addEventListener('click', function (e) { e.stopPropagation(); if (gearOpen) closeGear(); else openGear(); });
+      gearDialog.querySelector('.nb-gear-x').addEventListener('click', closeGear);
+      gearDialog.addEventListener('click', function (e) { if (e.target === gearDialog) closeGear(); });
+      gearBtnRef = gearBtn; closeGearRef = closeGear; isGearOpen = function () { return gearOpen; };
+
+      const onGearToggle = function (wasEnabled) {
+        syncGear();
+        const nowEnabled = historyControl.enabled();
+        if (!nowEnabled) {
+          closeVersionInline();        // leave any inline version view
+          renderSidebar();             // timeline hides (getHistory → [])
+        } else if (!wasEnabled) {
+          // re-enabled: re-save the live draft so the now-enabled version adopts the
+          // current comments (closes the divergence window), then repaint.
+          Promise.resolve(persist(getState())).then(function () { renderSidebar(); });
+        } else {
+          renderSidebar();
+        }
+      };
+      gearDocCb.addEventListener('change', function () { const was = historyControl.enabled(); historyControl.setDoc(!gearDocCb.checked); onGearToggle(was); });
+      gearGlobalCb.addEventListener('change', function () { const was = historyControl.enabled(); historyControl.setGlobal(!gearGlobalCb.checked); onGearToggle(was); });
+    }
+
     const onDocKeydownInfo = function (e) {
-      if (e.key === 'Escape' && infoOpen) { closeInfo(); if (infoBtn && infoBtn.focus) infoBtn.focus(); }
+      if (e.key !== 'Escape') return;
+      if (infoOpen) { closeInfo(); if (infoBtn && infoBtn.focus) infoBtn.focus(); }
+      else if (isGearOpen()) { closeGearRef(); if (gearBtnRef && gearBtnRef.focus) gearBtnRef.focus(); }
     };
     doc.addEventListener('keydown', onDocKeydownInfo);
 
@@ -665,13 +978,19 @@
       if (!anchor) { hideFab(); return; }
       pendingAnchor = anchor;
       pendingFabRect = range.getBoundingClientRect();
+      // The chip hugs the CURSOR (the selection's focus point), not the centre of
+      // the whole passage: below it for a forward drag, flipped above for a
+      // backward one so it never covers the just-selected text.
+      const backward = isSelectionBackward(sel);
+      pendingCaretRect = selectionCaretRect(range, backward);
+      pendingFabBelow = !backward;
 
       // If the chip is already up, just follow the growing selection. Otherwise
       // debounce its first appearance: wait until the selection settles for a
       // beat, then pop it in — so it doesn't flicker mid-drag and the entrance
       // animation is actually seen rather than snapping in under the cursor.
       if (fab.style.display !== 'none') {
-        positionFab(pendingFabRect);
+        positionFab(pendingCaretRect, pendingFabBelow);
       } else {
         scheduleFab();
       }
@@ -679,11 +998,11 @@
 
     /** (Re)arm the debounce; the chip pops in once the selection holds still. */
     function scheduleFab() {
-      if (!win || !win.setTimeout) { if (pendingFabRect) positionFab(pendingFabRect); return; }
+      if (!win || !win.setTimeout) { if (pendingCaretRect) positionFab(pendingCaretRect, pendingFabBelow); return; }
       if (fabTimer) win.clearTimeout(fabTimer);
       fabTimer = win.setTimeout(function () {
         fabTimer = null;
-        if (pendingAnchor && pendingFabRect) positionFab(pendingFabRect);
+        if (pendingAnchor && pendingCaretRect) positionFab(pendingCaretRect, pendingFabBelow);
       }, FAB_DELAY_MS);
     }
 
@@ -692,20 +1011,76 @@
       fabTimer = null;
     }
 
-    function positionFab(rect) {
+    /**
+     * Place the chip next to the cursor. `rect` is a zero-width rect at the
+     * cursor (selection focus); `preferBelow` puts the chip on the side the
+     * cursor sits on — below for a forward drag, above for a backward one —
+     * flipping to the other side only when the viewport has no room there. We
+     * centre on the cursor's x and clamp BOTH edges (we're centring on a point
+     * now, not a wide selection box, so the right edge matters too).
+     */
+    function positionFab(rect, preferBelow) {
       fab.style.display = 'inline-flex';
       const scrollX = win ? (win.scrollX || win.pageXOffset || 0) : 0;
       const scrollY = win ? (win.scrollY || win.pageYOffset || 0) : 0;
+      const vw = win ? (win.innerWidth || (doc.documentElement && doc.documentElement.clientWidth) || 0) : 0;
+      const vh = win ? (win.innerHeight || (doc.documentElement && doc.documentElement.clientHeight) || 0) : 0;
       const fabW = fab.offsetWidth || 110;
+      const fabH = fab.offsetHeight || 0;
+
       let left = rect.left + scrollX + (rect.width / 2) - (fabW / 2);
-      let top = rect.top + scrollY - fab.offsetHeight - 8;
-      if (top < scrollY + 4) top = rect.bottom + scrollY + 8; // flip below
+
+      const below = rect.bottom + scrollY + 8;
+      const above = rect.top + scrollY - fabH - 8;
+      let top;
+      if (preferBelow) {
+        top = below;
+        if (vh && rect.bottom + fabH + 8 > vh) top = above; // no room below → flip up
+      } else {
+        top = above;
+        if (rect.top - fabH - 8 < 0) top = below;           // no room above → flip down
+      }
+
       if (left < scrollX + 4) left = scrollX + 4;
+      if (vw && left + fabW > scrollX + vw - 4) left = scrollX + vw - fabW - 4;
+      if (top < scrollY + 4) top = scrollY + 4;             // never above the viewport
       fab.style.left = left + 'px';
       fab.style.top = top + 'px';
       // Play the pop-in once when first shown for this selection; while the user
       // keeps dragging the selection we only reposition (nb-in already on).
       if (!fab.classList.contains('nb-in')) playFabIn();
+    }
+
+    /**
+     * True when the selection runs backward (focus precedes anchor) — i.e. the
+     * user dragged right-to-left / bottom-to-top, so the cursor is at the START
+     * of the document-ordered range. Uses the standard collapse trick: a range
+     * built start=anchor / end=focus collapses iff focus is before anchor.
+     */
+    function isSelectionBackward(sel) {
+      if (!sel || !sel.anchorNode || !sel.focusNode) return false;
+      try {
+        const r = doc.createRange();
+        r.setStart(sel.anchorNode, sel.anchorOffset);
+        r.setEnd(sel.focusNode, sel.focusOffset);
+        return r.collapsed;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    /**
+     * A zero-width rect at the cursor (selection focus) — the right edge of the
+     * last line for a forward selection, the left edge of the first line for a
+     * backward one. Falls back to the whole-selection box when per-line rects
+     * aren't available.
+     */
+    function selectionCaretRect(range, backward) {
+      const rects = (range && range.getClientRects) ? range.getClientRects() : null;
+      if (!rects || rects.length === 0) return range.getBoundingClientRect();
+      const edge = backward ? rects[0] : rects[rects.length - 1];
+      const x = backward ? edge.left : edge.right;
+      return { left: x, right: x, width: 0, top: edge.top, bottom: edge.bottom, height: edge.height };
     }
 
     /**
@@ -726,6 +1101,7 @@
       fab.classList.remove('nb-in');
       pendingAnchor = null;
       pendingFabRect = null;
+      pendingCaretRect = null;
     }
 
     fab.addEventListener('mousedown', function (e) {
@@ -737,8 +1113,8 @@
       e.stopPropagation();
       if (!pendingAnchor) return;
       const anchor = pendingAnchor;
-      // Position the composer relative to the SELECTION (not the chip, which sits
-      // above it) so the composer can sit clear of the highlighted passage.
+      // Position the composer relative to the SELECTION (the full passage box,
+      // not the cursor-hugging chip) so it can sit clear of the highlighted text.
       const rect = pendingFabRect || fabRect();
       hideFab();
       openPopover({ anchor: anchor, body: '', id: null, rect: rect });
@@ -1121,12 +1497,14 @@
         s = stateApi.addComment(s, { anchor: anchor, body: text });
       }
       setState(s);
-      // The canvas captures per-draft history snapshots by reading the painted
-      // <mark> highlights (snapshot.extractSections). The committed highlights —
-      // including this brand-new comment's — must be in the DOM BEFORE persist()
-      // runs its snapshot, or the snapshot misses the new comment and its later
-      // history entry is never clickable. So drop the compose-time preview and
-      // paint the real highlights first, then persist.
+      // Comments persist as DATA from state.comments (set above, before persist),
+      // and the per-draft history snapshot is captured CLEAN via
+      // snapshotCapture.captureCleanDoc — it clones the doc and strips every
+      // <mark> wrapper, so the capture is paint-independent. The peek re-paints
+      // highlights from the stored comment data at view time. This repaint is
+      // therefore just the visual refresh — drop the compose-time preview and
+      // show the committed highlight — and its position relative to persist()
+      // carries no correctness requirement.
       clearAnchorPreview();
       repaintHighlights();
       await persist(s);
@@ -1193,7 +1571,7 @@
           '<strong>No notes yet</strong>' +
           'Select any text and click <b>Comment</b>, or add a note about the whole document above.';
         elList.appendChild(empty);
-        renderHistory();
+        renderVersions();
         updateLauncher();
         return;
       }
@@ -1210,128 +1588,698 @@
         orphans.forEach(function (c) { elList.appendChild(renderItem(c, 'orphan')); });
       }
 
-      renderHistory();
+      renderVersions();
       updateLauncher();
     }
 
-    function renderHistory() {
+    /**
+     * The "History" timeline group (docs/design.md \u00A714.4). It shows the
+     * document's version history when there is earlier feedback:
+     *   - 0 earlier versions  \u2192 render nothing (the group is hidden entirely).
+     *   - exactly 1 earlier   \u2192 show it inline.
+     *   - 2+ earlier          \u2192 show the MOST-RECENT earlier version inline and tuck
+     *                           the rest under a "+N older versions" disclosure.
+     * A "now" row (the current draft) sits at the top with no action buttons.
+     * Version labels are ordinal by age: with N earlier versions (getHistory is
+     * newest-first), the newest earlier entry is v{N}, the next v{N-1}, \u2026 oldest v1.
+     */
+    function renderVersions() {
       if (!history) return;
-      const existing = elList.querySelector('.nb-history');
+      // The versions timeline docks at the BOTTOM of the sidebar (above the action
+      // buttons), not inside the scrolling comment list — so the comments/empty
+      // state fill the available space and the timeline stays put. See the
+      // .nb-versions-dock CSS.
+      const existing = elVersionsDock.querySelector('.nb-versions');
       if (existing) existing.remove();
       const wrap = doc.createElement('div');
-      wrap.className = 'nb-history';
-      wrap.setAttribute('data-noteback-ui', 'history');
-      elList.appendChild(wrap);
-      Promise.resolve(history.getHistory()).then(function (drafts) {
-        if (!drafts || drafts.length === 0) { wrap.remove(); return; }
+      wrap.className = 'nb-versions';
+      wrap.setAttribute(UI_ATTR, 'versions');
+      elVersionsDock.appendChild(wrap);
+      // While viewing an earlier version inline, show the "Back to current" bar
+      // above the timeline. Shown regardless of how much other history is visible.
+      if (viewingKey) wrap.appendChild(renderBackToCurrentBar());
+      Promise.resolve(history.getHistory()).then(function (versions) {
+        versions = versions || [];
+        // The "save with comments and history" option only makes sense when there IS
+        // history to embed AND the mode can embed it (the embedded canvas exposes
+        // onSaveCanvasWithHistory). Toggle it here, where we already have the count.
+        if (saveHistoryItem) {
+          saveHistoryItem.hidden = !(versions.length >= 1 && exporter && typeof exporter.onSaveCanvasWithHistory === 'function');
+        }
+        // Collapse rule: 0 earlier versions \u2192 the group is not rendered at all. While
+        // viewing inline we still render the group (label + now row + the "Back to
+        // current" bar) even with no OTHER versions, so the timeline is reachable.
+        if (versions.length === 0 && !viewingKey) { wrap.remove(); return; }
+
         const label = doc.createElement('div');
         label.className = 'nb-group-label';
-        label.textContent = 'Earlier feedback (' + drafts.length + (drafts.length === 1 ? ' draft)' : ' drafts)');
+        label.textContent = 'History';
         wrap.appendChild(label);
-        drafts.forEach(function (d) {
-          const dl = doc.createElement('div');
-          dl.className = 'nb-hist-draft';
-          dl.textContent = 'Draft \u00B7 ' + formatWhen(d.lastEditedAt || d.firstSeenAt) + ' (' + d.comments.length + ')';
-          wrap.appendChild(dl);
-          d.comments.forEach(function (c) {
-            const item = doc.createElement('button');
-            item.type = 'button';
-            item.className = 'nb-hist-item';
-            const quote = (c.anchor && c.anchor.quote) ? condense(c.anchor.quote) : '(note on the whole document)';
-            item.textContent = '\u201C' + quote + '\u201D \u2014 ' + (c.body || '');
-            if (c.anchor && d.hasSnapshot && c.sectionId) {
-              item.addEventListener('click', function () { openHistoryPopup(d.contentHash, c); });
-            } else {
-              item.disabled = true;
-            }
-            wrap.appendChild(item);
+
+        // The "now" row: the live draft, status dot active, + a "Show diff"
+        // shortcut (vs the latest earlier version) when history exists.
+        wrap.appendChild(renderNowRow(versions));
+
+        if (versions.length === 0) return; // viewing with no other versions: back bar + now row only
+
+        const total = versions.length; // earlier versions, newest-first
+        // The most-recent earlier version always stays inline.
+        wrap.appendChild(renderVersionRow(versions[0], total));
+
+        if (total >= 2) {
+          // 2+ earlier versions \u2192 collapse indices 1..end under a disclosure.
+          const rest = doc.createElement('div');
+          rest.className = 'nb-ver-rest';
+          rest.setAttribute(UI_ATTR, 'versions-rest');
+          rest.hidden = true;
+          for (let i = 1; i < total; i++) {
+            rest.appendChild(renderVersionRow(versions[i], total - i));
+          }
+          const disclose = doc.createElement('button');
+          disclose.type = 'button';
+          disclose.className = 'nb-disclose';
+          disclose.setAttribute(UI_ATTR, 'versions-disclose');
+          const chev = doc.createElement('span');
+          chev.className = 'nb-disclose-chev';
+          chev.textContent = '\u203A'; // \u203A
+          const dlabel = doc.createElement('span');
+          dlabel.className = 'nb-disclose-label';
+          const remaining = total - 1;
+          const moreLabel = '+' + remaining + ' older version' + (remaining === 1 ? '' : 's');
+          dlabel.textContent = moreLabel;
+          disclose.appendChild(chev);
+          disclose.appendChild(dlabel);
+          // Toggle: reveal/hide the collapsed rows and flip the chevron (CSS
+          // rotates it on .nb-open). The button stays visible in both states.
+          disclose.addEventListener('click', function () {
+            const open = rest.hidden; // about to open if currently hidden
+            rest.hidden = !open;
+            disclose.classList.toggle('nb-open', open);
+            dlabel.textContent = open ? 'Fewer versions' : moreLabel;
           });
+          wrap.appendChild(disclose);
+          wrap.appendChild(rest);
+        }
+      });
+    }
+
+    /**
+     * "Back to current" bar, shown atop the timeline while viewing an earlier
+     * version inline. One click closes the inline view and returns to the live
+     * current draft (same tab — no new tab, no blob).
+     */
+    function renderBackToCurrentBar() {
+      const bar = doc.createElement('button');
+      bar.type = 'button';
+      bar.className = 'nb-backbar';
+      bar.setAttribute(UI_ATTR, 'backbar');
+      const txt = doc.createElement('span');
+      txt.className = 'nb-backbar-txt';
+      txt.textContent = 'Viewing an earlier version';
+      const cta = doc.createElement('span');
+      cta.className = 'nb-backbar-cta';
+      cta.textContent = '← Back to current';
+      bar.appendChild(txt);
+      bar.appendChild(cta);
+      bar.title = 'Return to the current draft';
+      bar.addEventListener('click', function () { closeVersionInline(); });
+      return bar;
+    }
+
+    /**
+     * The "now" row at the top of the timeline — always the live current draft.
+     * When viewing an earlier version inline this row loses the active highlight and
+     * becomes click-to-return (the viewed version row gets the active dot instead).
+     * No chevron/actions either way; status dot active when not viewing.
+     */
+    function renderNowRow(versions) {
+      const s = getState();
+      const count = (s && Array.isArray(s.comments)) ? s.comments.length : 0;
+      const viewing = !!viewingKey;
+      const latest = (versions && versions.length) ? versions[0] : null;
+      const row = doc.createElement('div');
+      // The live current draft. When viewing an older version it is NOT the active
+      // row (the viewed version is) and becomes click-to-return.
+      row.className = 'nb-ver-row' + (viewing ? '' : ' active');
+      row.setAttribute(UI_ATTR, 'version-now');
+      const line = doc.createElement('div');
+      line.className = 'nb-ver-line';
+      const dot = doc.createElement('span');
+      dot.className = 'nb-ver-dot';
+      const name = doc.createElement('span');
+      name.className = 'nb-ver-name';
+      name.textContent = 'now';
+      const spacer = doc.createElement('span');
+      spacer.className = 'nb-ver-spacer';
+      const cnt = doc.createElement('span');
+      cnt.className = 'nb-ver-count';
+      cnt.textContent = String(count);
+      line.appendChild(dot);
+      line.appendChild(name);
+      line.appendChild(spacer);
+      // "Show diff" shortcut: only on the live draft (not while viewing) and only
+      // when there is a latest earlier version to diff against. Opens the same
+      // inline diff (latest → now) as clicking that version row and enabling Diff.
+      if (!viewing && latest && diffApi && diffRenderApi) {
+        const diffBtn = doc.createElement('button');
+        diffBtn.type = 'button';
+        diffBtn.className = 'nb-ver-diff';
+        diffBtn.setAttribute(UI_ATTR, 'version-now-diff');
+        diffBtn.title = 'Show changes since the latest version';
+        const dico = doc.createElement('span');
+        dico.className = 'nb-ver-diff-ico';
+        dico.setAttribute('aria-hidden', 'true');
+        dico.textContent = '⇄';
+        diffBtn.appendChild(dico);
+        diffBtn.appendChild(doc.createTextNode('Show diff'));
+        diffBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          diffMode = true;
+          openVersionInline(latest.versionKey);
+        });
+        line.appendChild(diffBtn);
+      }
+      line.appendChild(cnt);
+      row.appendChild(line);
+      if (viewing) row.addEventListener('click', function () { closeVersionInline(); });
+      return row;
+    }
+
+    /**
+     * One earlier-version row: dot, v-label, a chevron actions menu (copy feedback /
+     * save HTML), time, and count. Clicking the row body opens the read-only inline
+     * view of that version; the chevron stopPropagations so a menu click doesn't also
+     * open the view.
+     * @param {Object} d      a getHistory() entry
+     * @param {number} ordinal the v-number (oldest = 1)
+     */
+    function renderVersionRow(d, ordinal) {
+      const row = doc.createElement('div');
+      // The version currently shown inline gets the active dot + highlight; every
+      // other row is click-to-view.
+      const isViewing = !!(viewingKey && d.versionKey === viewingKey);
+      row.className = 'nb-ver-row' + (isViewing ? ' active nb-ver-viewing' : '');
+      row.setAttribute(UI_ATTR, 'version');
+      row.setAttribute('data-version-key', d.versionKey || '');
+
+      const line = doc.createElement('div');
+      line.className = 'nb-ver-line';
+      const dot = doc.createElement('span');
+      dot.className = 'nb-ver-dot';
+      const name = doc.createElement('span');
+      name.className = 'nb-ver-name';
+      name.textContent = 'v' + ordinal;
+      // Chevron next to the label: opens the actions menu (Copy feedback).
+      const menuBtn = doc.createElement('button');
+      menuBtn.type = 'button';
+      menuBtn.className = 'nb-ver-menu-btn';
+      menuBtn.setAttribute('aria-haspopup', 'menu');
+      menuBtn.setAttribute('aria-expanded', 'false');
+      menuBtn.setAttribute('aria-label', 'Version actions');
+      menuBtn.setAttribute('title', 'Version actions');
+      menuBtn.innerHTML = '<span class="nb-caret" aria-hidden="true">\u25be</span>';
+      menuBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleVersionMenu(menuBtn, d); });
+      const meta = doc.createElement('span');
+      meta.className = 'nb-ver-meta';
+      meta.textContent = formatWhen(d.lastEditedAt || d.createdAt);
+      const spacer = doc.createElement('span');
+      spacer.className = 'nb-ver-spacer';
+      const cnt = doc.createElement('span');
+      cnt.className = 'nb-ver-count';
+      cnt.textContent = String((d.comments && d.comments.length) || 0);
+      line.appendChild(dot);
+      line.appendChild(name);
+      line.appendChild(menuBtn);
+      line.appendChild(spacer);
+      line.appendChild(meta); // date — right-aligned (after the flex spacer)
+      line.appendChild(cnt);
+      row.appendChild(line);
+
+      // Click anywhere on the row (except the chevron, which stops propagation)
+      // opens the read-only inline view of this version.
+      row.addEventListener('click', function () {
+        if (viewingKey && d.versionKey === viewingKey) return; // already viewing this one
+        openVersionInline(d.versionKey);
+      });
+      return row;
+    }
+
+    /** Export one earlier version's feedback as markdown, to the clipboard. */
+    async function copyVersionFeedback(d) {
+      const versionState = { docTitle: d.docTitle || '', comments: (d.comments || []).slice() };
+      let md = null;
+      if (markdownApi && typeof markdownApi.toMarkdown === 'function') {
+        md = markdownApi.toMarkdown(versionState, {});
+      } else if (renderMd) {
+        md = renderMd(versionState);
+      }
+      if (md == null) { toast('Markdown unavailable'); return; }
+      const ok = await copyToClipboard(md);
+      if (ok) toast('Copied feedback as Markdown', { success: true });
+      else toast('Copy failed \u2014 select & copy manually');
+    }
+
+    /**
+     * Open a past version inline (read-only) in the side panel. Branches on
+     * diffMode: snapshot view (default) or a diff against the next version.
+     */
+    function openVersionInline(versionKey) {
+      closeVersionMenu(true); // a row chevron may have opened it
+      if (diffMode) { openVersionDiff(versionKey); return; }
+      Promise.resolve(history.getVersion({ versionKey: versionKey })).then(function (v) {
+        if (!v || !v.html) { toast('This version has no saved snapshot'); return; } // pruned
+        mountInlineView(versionKey, buildSnapshotSrcdoc(v), null);
+      });
+    }
+
+    /** Open a past version inline showing a DIFF vs the next chronological version. */
+    function openVersionDiff(versionKey) {
+      Promise.all([
+        Promise.resolve(history.getVersion({ versionKey: versionKey })),
+        resolveTargetSnapshot(versionKey)
+      ]).then(function (res) {
+        const baseV = res[0];
+        const target = res[1];
+        if (!baseV || !baseV.html) { toast('This version has no saved snapshot'); diffMode = false; openVersionInline(versionKey); return; }
+        if (!target || !target.html) { toast('No snapshot to diff against'); diffMode = false; openVersionInline(versionKey); return; }
+        const cmpLabel = 'v' + target.fromOrdinal + ' → ' + target.label;
+        mountInlineView(versionKey, buildDiffSrcdoc(baseV, target), cmpLabel);
+      });
+    }
+
+    /**
+     * Resolve the diff TARGET for a viewed version: the next chronological version.
+     * For the most-recent earlier version (index 0, newest-first), the target is
+     * the LIVE current draft (captured clean) labelled "now"; otherwise it is the
+     * next-newer stored snapshot. Returns { html, comments, label, fromOrdinal }.
+     */
+    function resolveTargetSnapshot(versionKey) {
+      return Promise.resolve(history.getHistory()).then(function (versions) {
+        versions = versions || [];
+        const total = versions.length;
+        let idx = -1;
+        for (let i = 0; i < total; i++) { if (versions[i].versionKey === versionKey) { idx = i; break; } }
+        if (idx === -1) return null;
+        const fromOrdinal = total - idx;
+        if (idx === 0) {
+          let html = '';
+          try { html = snapshotApi ? snapshotApi.captureCleanDoc(doc) : ''; } catch (e) { html = ''; }
+          const s = getState();
+          const comments = (s && Array.isArray(s.comments)) ? s.comments.slice() : [];
+          return { html: html, comments: comments, label: 'now', fromOrdinal: fromOrdinal };
+        }
+        const targetKey = versions[idx - 1].versionKey;
+        const targetOrdinal = total - (idx - 1);
+        return Promise.resolve(history.getVersion({ versionKey: targetKey })).then(function (tv) {
+          return { html: (tv && tv.html) || '', comments: (tv && tv.comments) || [], label: 'v' + targetOrdinal, fromOrdinal: fromOrdinal };
         });
       });
     }
 
-    function condense(q) {
-      if (markdownApi && markdownApi.condenseQuote) return markdownApi.condenseQuote(q);
-      return q.length > 80 ? q.slice(0, 77) + '\u2026' : q;
+    /** Build the read-only snapshot srcdoc for a version (live highlights + peek). */
+    function buildSnapshotSrcdoc(v) {
+      let painted = '<!DOCTYPE html>' + v.html;
+      try {
+        const parsed = new DOMParser().parseFromString(v.html, 'text/html');
+        try { highlightApi.paintHighlights(parsed.body, { schemaVersion: 1, comments: v.comments || [] }, {}); } catch (e) {}
+        try {
+          const hlStyle = parsed.createElement('style');
+          hlStyle.setAttribute(UI_ATTR, 'peek-highlight-style');
+          hlStyle.textContent = HIGHLIGHT_CSS + PEEK_POP_CSS;
+          (parsed.head || parsed.documentElement).appendChild(hlStyle);
+        } catch (e) {}
+        const scrollScript =
+          '<scr' + 'ipt>(function(){var m=document.querySelector("mark.noteback-highlight");' +
+          'if(m)m.scrollIntoView({block:"center"});})();</scr' + 'ipt>';
+        const peekScript = buildPeekPopoverScript(v.comments || []);
+        painted = '<!DOCTYPE html>' + parsed.documentElement.outerHTML + scrollScript + peekScript;
+      } catch (e) { /* fall back to raw snapshot */ }
+      return painted;
     }
+
+    /** Build the DIFF srcdoc: target doc with diff markup + target comments painted. */
+    function buildDiffSrcdoc(baseV, target) {
+      let result = '<!DOCTYPE html>' + target.html;
+      try {
+        const parsedBase = new DOMParser().parseFromString(baseV.html, 'text/html');
+        const parsedTarget = new DOMParser().parseFromString(target.html, 'text/html');
+        const rendered = diffRenderApi.renderInlineDiff(parsedBase.body, parsedTarget.body, parsedTarget);
+        if (rendered.body && parsedTarget.body && parsedTarget.body.parentNode) {
+          parsedTarget.body.parentNode.replaceChild(rendered.body, parsedTarget.body);
+        }
+        const renderedBody = rendered.body || parsedTarget.body;
+        try { highlightApi.paintHighlights(renderedBody, { schemaVersion: 1, comments: target.comments || [] }, {}); } catch (e) {}
+        try {
+          const st = parsedTarget.createElement('style');
+          st.setAttribute(UI_ATTR, 'peek-diff-style');
+          st.textContent = DIFF_CSS + HIGHLIGHT_CSS + PEEK_POP_CSS;
+          (parsedTarget.head || parsedTarget.documentElement).appendChild(st);
+        } catch (e) {}
+        if (!rendered.hasChanges && renderedBody) {
+          try {
+            const banner = parsedTarget.createElement('div');
+            banner.className = 'nb-diff-nochange';
+            banner.textContent = 'No changes in this version compared with the next.';
+            renderedBody.insertBefore(banner, renderedBody.firstChild);
+          } catch (e) {}
+        }
+        // Sticky legend header framing the panel as a comparison (inserted last so
+        // it lands first, above any no-changes banner). All text is controlled
+        // (ordinals + 'now'/'vN'); built with textContent, never innerHTML.
+        if (renderedBody) {
+          try {
+            const legend = parsedTarget.createElement('div');
+            legend.className = 'nb-diff-legend';
+            legend.setAttribute(UI_ATTR, 'diff-legend');
+            const title = parsedTarget.createElement('span');
+            title.className = 'nb-diff-legend-title';
+            const swap = parsedTarget.createElement('span');
+            swap.className = 'nb-diff-swap';
+            swap.textContent = '⇄';
+            title.appendChild(swap);
+            title.appendChild(parsedTarget.createTextNode(' Comparing v' + target.fromOrdinal + ' → ' + target.label));
+            const keyAdd = parsedTarget.createElement('span');
+            keyAdd.className = 'nb-diff-key nb-k-add';
+            const addChip = parsedTarget.createElement('span');
+            addChip.className = 'nb-k-chip';
+            keyAdd.appendChild(addChip);
+            keyAdd.appendChild(parsedTarget.createTextNode('added'));
+            const keyDel = parsedTarget.createElement('span');
+            keyDel.className = 'nb-diff-key nb-k-del';
+            const delChip = parsedTarget.createElement('span');
+            delChip.className = 'nb-k-chip';
+            keyDel.appendChild(delChip);
+            keyDel.appendChild(parsedTarget.createTextNode('removed'));
+            legend.appendChild(title);
+            legend.appendChild(keyAdd);
+            legend.appendChild(keyDel);
+            // Right-aligned Prev/Next change navigator (only when there are changes
+            // to step through). The in-iframe nav script (below) wires these.
+            if (rendered.hasChanges) {
+              const nav = parsedTarget.createElement('span');
+              nav.className = 'nb-diff-nav';
+              nav.setAttribute(UI_ATTR, 'diff-nav');
+              const prevBtn = parsedTarget.createElement('button');
+              prevBtn.type = 'button';
+              prevBtn.className = 'nb-diff-nav-prev';
+              prevBtn.textContent = '‹ Prev';
+              const pos = parsedTarget.createElement('span');
+              pos.className = 'nb-diff-nav-pos';
+              pos.textContent = '–';
+              const nextBtn = parsedTarget.createElement('button');
+              nextBtn.type = 'button';
+              nextBtn.className = 'nb-diff-nav-next';
+              nextBtn.textContent = 'Next ›';
+              nav.appendChild(prevBtn);
+              nav.appendChild(pos);
+              nav.appendChild(nextBtn);
+              legend.appendChild(nav);
+            }
+            renderedBody.insertBefore(legend, renderedBody.firstChild);
+          } catch (e) {}
+        }
+        const navScript = buildDiffNavScript();
+        const peekScript = buildPeekPopoverScript(target.comments || []);
+        result = '<!DOCTYPE html>' + parsedTarget.documentElement.outerHTML + navScript + peekScript;
+      } catch (e) { /* fall back to raw target */ }
+      return result;
+    }
+
+    /**
+     * The <script> injected into the diff iframe that drives Prev/Next change
+     * navigation. It collects the changed BLOCKS in document order and steps a
+     * focus pointer through them — scrolling each to centre, marking it
+     * `.nb-diff-focus` (ring + intensified fill + pop), and updating the "n / N"
+     * counter. Wraps at both ends. With no changed blocks it hides the navigator
+     * and falls back to scrolling the first comment highlight into view. No
+     * user data is interpolated, so the static source is safe to inline.
+     */
+    function buildDiffNavScript() {
+      return '<scr' + 'ipt>(function(){' +
+        'var items=Array.prototype.slice.call(document.querySelectorAll(' +
+        '".nb-diff-ins-block,.nb-diff-del-block,.nb-diff-edit-block"));' +
+        'var nav=document.querySelector(".nb-diff-nav");' +
+        'var pos=document.querySelector(".nb-diff-nav-pos");' +
+        'var prev=document.querySelector(".nb-diff-nav-prev");' +
+        'var next=document.querySelector(".nb-diff-nav-next");' +
+        'if(!items.length){if(nav)nav.style.display="none";' +
+        'var h=document.querySelector("mark.noteback-highlight");if(h)h.scrollIntoView({block:"center"});return;}' +
+        'var i=0;' +
+        'function show(n,scroll){' +
+        'for(var k=0;k<items.length;k++)items[k].classList.remove("nb-diff-focus");' +
+        'i=((n%items.length)+items.length)%items.length;' +
+        'var el=items[i];el.classList.add("nb-diff-focus");' +
+        'if(scroll)el.scrollIntoView({block:"center",behavior:"smooth"});' +
+        'if(pos)pos.textContent=(i+1)+" / "+items.length;}' +
+        'if(prev)prev.addEventListener("click",function(){show(i-1,true);});' +
+        'if(next)next.addEventListener("click",function(){show(i+1,true);});' +
+        'show(0,true);' +
+        '})();</scr' + 'ipt>';
+    }
+
+    /**
+     * Build + mount the inline view panel (header bar with back button + diff
+     * toggle, then the iframe). `diffLabel` non-null → diff mode is active and the
+     * toggle shows "Diff: v{base} → {target}".
+     */
+    function mountInlineView(versionKey, srcdocHtml, diffLabel) {
+      if (inlineView && inlineView.parentNode) inlineView.parentNode.removeChild(inlineView);
+      inlineView = null;
+      viewingKey = versionKey;
+
+      const view = doc.createElement('div');
+      view.className = 'nb-hist-view';
+      view.setAttribute(UI_ATTR, 'version-view');
+
+      const bar = doc.createElement('div');
+      bar.className = 'nb-hist-bar';
+      bar.setAttribute(UI_ATTR, 'version-view-bar');
+
+      const backBtn = doc.createElement('button');
+      backBtn.type = 'button';
+      backBtn.className = 'nb-hist-back';
+      backBtn.setAttribute(UI_ATTR, 'version-view-back');
+      backBtn.textContent = '← Back to current draft';
+      backBtn.addEventListener('click', function () { closeVersionInline(); });
+      bar.appendChild(backBtn);
+
+      if (diffApi && diffRenderApi) bar.appendChild(buildDiffToggle(versionKey, diffLabel));
+
+      const frame = doc.createElement('iframe');
+      frame.className = 'nb-hist-frame';
+      frame.srcdoc = srcdocHtml;
+
+      view.appendChild(bar);
+      view.appendChild(frame);
+      uiRoot.appendChild(view);
+      inlineView = view;
+
+      openSidebar();    // ensure the timeline (with "you are here") is visible
+      renderVersions(); // re-render so the viewed row is marked + the bar shows
+    }
+
+    /** The Diff on/off switch in the inline-view header. */
+    function buildDiffToggle(versionKey, diffLabel) {
+      const btn = doc.createElement('button');
+      btn.type = 'button';
+      btn.className = 'nb-diff-toggle' + (diffMode ? ' nb-on' : '');
+      btn.setAttribute(UI_ATTR, 'diff-toggle');
+      btn.setAttribute('aria-pressed', diffMode ? 'true' : 'false');
+      btn.title = diffMode ? 'Hide changes' : 'Show changes vs the next version';
+      const icon = doc.createElement('span');
+      icon.className = 'nb-diff-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = '⇄';
+      const label = doc.createElement('span');
+      label.className = 'nb-diff-label';
+      label.textContent = (diffMode && diffLabel) ? ('Diff: ' + diffLabel) : 'Diff';
+      const sw = doc.createElement('span');
+      sw.className = 'nb-diff-switch';
+      btn.appendChild(icon);
+      btn.appendChild(label);
+      btn.appendChild(sw);
+      btn.addEventListener('click', function () { diffMode = !diffMode; openVersionInline(versionKey); });
+      return btn;
+    }
+
+    /** Close the inline version view and return to the live current draft. */
+    function closeVersionInline() {
+      if (inlineView && inlineView.parentNode) inlineView.parentNode.removeChild(inlineView);
+      inlineView = null;
+      const had = viewingKey;
+      viewingKey = null;
+      diffMode = false; // reset on exit; "Back to current" is a clean reset
+      if (had) renderVersions();
+    }
+
+    /**
+     * Build the <script> that runs INSIDE a version-peek iframe so that clicking a
+     * painted highlight shows that comment in a small in-place popover.
+     *
+     * The id->{body,quote} map is serialized as JSON; at runtime the iframe reads
+     * a clicked mark's data-noteback-id and renders the matching comment via
+     * textContent (no innerHTML — comment text is never parsed as HTML). The whole
+     * script is emitted as raw text into the srcdoc, so two things must hold:
+     *   1. The <script> open/close tags are split ('<scr'+'ipt>') so this source
+     *      survives being inlined into a canvas (overlay.js itself ships inside a
+     *      <script> block in every exported canvas).
+     *   2. Any literal "</script>" in the JSON is escaped ("<\/script") the same way
+     *      the canonical exporter does, so a comment body can't close the block.
+     */
+    function buildPeekPopoverScript(comments) {
+      const map = {};
+      for (let i = 0; i < comments.length; i++) {
+        const c = comments[i];
+        if (!c || !c.id) continue;
+        map[c.id] = { body: c.body || '', quote: (c.anchor && c.anchor.quote) || '' };
+      }
+      const mapJson = JSON.stringify(map).replace(/<\/(script)/gi, '<\\/$1');
+      return '<scr' + 'ipt>(function(){' +
+        'var MAP=' + mapJson + ';var pop=null;' +
+        'function ensure(){if(pop)return pop;pop=document.createElement("div");' +
+        'pop.className="nb-peek-pop";(document.body||document.documentElement).appendChild(pop);return pop;}' +
+        'function hide(){if(pop)pop.classList.remove("nb-show");}' +
+        'function show(mark){var id=mark.getAttribute("data-noteback-id");var c=MAP[id];if(!c){hide();return;}' +
+        'var p=ensure();p.textContent="";' +
+        'if(c.quote){var q=document.createElement("span");q.className="nb-peek-pop-quote";' +
+        'q.textContent="\\u201c"+c.quote+"\\u201d";p.appendChild(q);}' +
+        'var b=document.createElement("div");b.className="nb-peek-pop-body";' +
+        'if(c.body){b.textContent=c.body;}else{b.className+=" nb-peek-pop-empty";b.textContent="(no comment)";}' +
+        'p.appendChild(b);' +
+        'var r=mark.getBoundingClientRect();p.style.visibility="hidden";p.classList.add("nb-show");' +
+        'var pw=p.offsetWidth,ph=p.offsetHeight;' +
+        'var vw=document.documentElement.clientWidth,vh=document.documentElement.clientHeight;' +
+        'var left=r.left;if(left+pw>vw-8)left=vw-8-pw;if(left<8)left=8;' +
+        'var top=r.bottom+8;if(top+ph>vh-8)top=r.top-8-ph;if(top<8)top=8;' +
+        'p.style.left=left+"px";p.style.top=top+"px";p.style.visibility="";}' +
+        'document.addEventListener("click",function(e){' +
+        'var t=e.target;var m=t&&t.closest?t.closest("mark.noteback-highlight[data-noteback-id]"):null;' +
+        'if(m){e.preventDefault();e.stopPropagation();show(m);return;}' +
+        'if(pop&&!(t.closest&&t.closest(".nb-peek-pop")))hide();},true);' +
+        'document.addEventListener("keydown",function(e){if(e.key==="Escape")hide();});' +
+        'window.addEventListener("scroll",hide,true);' +
+        '}());</scr' + 'ipt>';
+    }
+
+    /**
+     * Build a re-openable Noteback canvas of a past version, as an HTML string.
+     * Clones the CURRENT live document (keeping its inlined runtime + styles +
+     * template), strips Noteback's own UI + live highlights + any stale embedded-
+     * history block, swaps in the snapshot's doc-content, and re-seeds the
+     * #noteback-state block with the version's comments. The result is a working
+     * annotatable canvas of that version — used by the version row's "Save HTML with
+     * comments" action. It is DOWNLOADED as a file (never window.open'd), so opening
+     * it later is a fresh file:// canvas with its own working storage — sidestepping
+     * the opaque-origin localStorage problem that retired the old new-tab checkout.
+     *
+     * @param {Object} v        getVersion() result: { html, comments, docTitle, contentHash }
+     * @param {string} docId    the current page's baked doc-id
+     * @param {string} docTitle title for the version's state block
+     * @returns {string} a full canvas HTML document
+     */
+    function buildVersionCanvasHtml(v, docId, docTitle) {
+      // Snapshot's doc-content inner HTML (its #noteback-doc-root if present, else body).
+      const parsed = new DOMParser().parseFromString(v.html, 'text/html');
+      const snapRoot = parsed.querySelector('#noteback-doc-root') || parsed.body;
+      const snapInner = snapRoot ? snapRoot.innerHTML : '';
+
+      // Clone the CURRENT live document — it carries the inlined runtime, the canvas
+      // template wrapper, and the page styles, which is what makes the result a
+      // working annotatable canvas.
+      const clone = document.documentElement.cloneNode(true);
+
+      // Strip Noteback's own UI from the clone (sidebar host, launcher, fab, our
+      // injected <style>, any open inline view). The inlined runtime <script> is NOT
+      // a [data-noteback-ui] node, so it survives — that's deliberate.
+      const ui = clone.querySelectorAll('[' + UI_ATTR + ']');
+      for (let i = 0; i < ui.length; i++) {
+        if (ui[i].parentNode) ui[i].parentNode.removeChild(ui[i]);
+      }
+      // Drop any embedded-history block — a saved version is a fresh canvas and must
+      // not carry the source doc's full history (it would re-seed on open).
+      const histBlk = clone.querySelector('#noteback-history');
+      if (histBlk && histBlk.parentNode) histBlk.parentNode.removeChild(histBlk);
+      // Unwrap any live highlight <mark>s left in the clone.
+      const liveMarks = clone.querySelectorAll('mark.' + (highlightApi && highlightApi.HIGHLIGHT_CLASS || 'noteback-highlight'));
+      for (let i = 0; i < liveMarks.length; i++) {
+        const m = liveMarks[i];
+        const p = m.parentNode;
+        if (!p) continue;
+        while (m.firstChild) p.insertBefore(m.firstChild, m);
+        p.removeChild(m);
+      }
+
+      // Swap in the snapshot's doc-content.
+      const cloneRoot = clone.querySelector('#noteback-doc-root');
+      if (cloneRoot) cloneRoot.innerHTML = snapInner;
+
+      // Re-seed the machine-readable state block with the version's comments. The
+      // JSON lands in a <script> element's textContent serialized via outerHTML, which
+      // emits raw text VERBATIM — a comment body or docTitle containing the closing
+      // script sequence would break out of the block (self-XSS). Escape exactly as the
+      // canonical exporter does (JSON.parse reads "\/" back as "/", so it round-trips).
+      const stateEl = clone.querySelector('#noteback-state');
+      if (stateEl) {
+        const stateJson = JSON.stringify({
+          schemaVersion: 1,
+          docId: docId || '',
+          docTitle: docTitle || '',
+          comments: v.comments || []
+        });
+        stateEl.textContent = stateJson.replace(/<\/(script)/gi, '<\\/$1');
+      }
+
+      return '<!DOCTYPE html>\n' + clone.outerHTML;
+    }
+
+    /**
+     * A filesystem-safe download name for a saved version, derived from the doc title
+     * (with the canvas suffix stripped). `clean` tags the no-Noteback variant.
+     */
+    function versionSaveName(d, clean) {
+      let t = (document.title || 'noteback').replace(/ — Noteback feedback canvas$/, '');
+      t = t.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'noteback';
+      return t + (clean ? ' (version, clean)' : ' (version)') + '.html';
+    }
+
+    /** Save a past version as a re-openable canvas (its snapshot + its comments). */
+    async function saveVersionCanvas(d) {
+      if (!d || !d.hasSnapshot) { toast('That version has no saved snapshot'); return; }
+      if (!exporter || typeof exporter.onSaveHtml !== 'function') {
+        toast('Saving is only available in the saved canvas here.');
+        return;
+      }
+      try {
+        const v = await history.getVersion({ versionKey: d.versionKey });
+        if (!v || !v.html) { toast('That version has no saved snapshot'); return; }
+        const rootEl = document.getElementById('noteback-doc-root');
+        const docId = (rootEl && rootEl.getAttribute && rootEl.getAttribute('data-noteback-doc-id')) || '';
+        const html = buildVersionCanvasHtml(v, docId, v.docTitle || document.title || '');
+        await exporter.onSaveHtml(html, versionSaveName(d, false));
+        toast('Saving HTML with comments…');
+      } catch (e) { toast('Save failed'); }
+    }
+
+    /** Save a past version's CLEAN snapshot (the original, no Noteback). */
+    async function saveVersionClean(d) {
+      if (!d || !d.hasSnapshot) { toast('That version has no saved snapshot'); return; }
+      if (!exporter || typeof exporter.onSaveHtml !== 'function') {
+        toast('Saving is only available in the saved canvas here.');
+        return;
+      }
+      try {
+        const v = await history.getVersion({ versionKey: d.versionKey });
+        if (!v || !v.html) { toast('That version has no saved snapshot'); return; }
+        await exporter.onSaveHtml('<!DOCTYPE html>\n' + v.html, versionSaveName(d, true));
+        toast('Saving clean HTML…');
+      } catch (e) { toast('Save failed'); }
+    }
+
     function formatWhen(iso) {
       if (!iso) return 'earlier';
       const d = new Date(iso);
       if (isNaN(d.getTime())) return 'earlier';
       return d.toLocaleString();
-    }
-
-    /**
-     * Highlighter injected into the snapshot iframe. Self-contained (no closure
-     * refs) — serialized via toString() and re-run in the iframe with the quote as
-     * its argument. Searches ACROSS text nodes (a multi-block selection's quote
-     * spans several) and tolerates whitespace differences, then wraps each touched
-     * slice in a <mark> (mirroring the main highlighter), so the whole selected
-     * passage is highlighted, not just a single-node match.
-     */
-    function nbHistHighlight(q) {
-      try {
-        if (!q) return;
-        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-        var nodes = [], starts = [], text = '', n;
-        while ((n = walker.nextNode())) {
-          var pn = n.parentNode;
-          if (pn && (pn.nodeName === 'SCRIPT' || pn.nodeName === 'STYLE')) continue;
-          starts.push(text.length); nodes.push(n); text += n.nodeValue;
-        }
-        var idx = text.indexOf(q), len = q.length;
-        if (idx < 0) {
-          // Whitespace-tolerant fallback: the stored quote keeps the inter-block
-          // whitespace the selection swept up, but the snapshot drops it (blocks end
-          // up adjacent), so each whitespace run becomes \s* (zero-or-more), not \s+.
-          var esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*');
-          var mt = new RegExp(esc).exec(text);
-          if (!mt) return;
-          idx = mt.index; len = mt[0].length;
-        }
-        var end = idx + len, segs = [];
-        for (var k = 0; k < nodes.length; k++) {
-          var s0 = starts[k], s1 = s0 + nodes[k].nodeValue.length;
-          if (s1 <= idx) continue;
-          if (s0 >= end) break;
-          var ls = Math.max(0, idx - s0), le = Math.min(s1, end) - s0;
-          if (le > ls) segs.push([nodes[k], ls, le]);
-        }
-        for (var s = segs.length - 1; s >= 0; s--) {
-          var nd = segs[s][0], a = segs[s][1], b = segs[s][2], full = nd.nodeValue;
-          if (b < full.length) nd.splitText(b);
-          if (a > 0) nd = nd.splitText(a);
-          var mk = document.createElement('mark');
-          mk.style.background = '#fde68a';
-          nd.parentNode.replaceChild(mk, nd);
-          mk.appendChild(nd);
-        }
-        var first = document.querySelector('mark');
-        if (first) first.scrollIntoView({ block: 'center' });
-      } catch (e) {}
-    }
-
-    function openHistoryPopup(contentHash, comment) {
-      Promise.resolve(history.getSection({ contentHash: contentHash, sectionId: comment.sectionId })).then(function (sec) {
-        const back = doc.createElement('div');
-        back.className = 'nb-hist-backdrop';
-        back.setAttribute('data-noteback-ui', 'history-popup');
-        const panel = doc.createElement('div');
-        panel.className = 'nb-hist-panel';
-        const close = doc.createElement('button');
-        close.type = 'button'; close.className = 'nb-hist-close'; close.textContent = '\u2715';
-        close.addEventListener('click', function () { back.remove(); });
-        back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
-        const frame = doc.createElement('iframe');
-        frame.className = 'nb-hist-frame';
-        const quote = (comment.anchor && comment.anchor.quote) || '';
-        const styles = (sec && sec.styles) || '';
-        const bodyHtml = (sec && sec.html) || '<p>(context no longer stored)</p>';
-        const script = '<scr' + 'ipt>(' + nbHistHighlight.toString() + ')(' + JSON.stringify(quote).replace(/<\//g, '<\\/') + ');</scr' + 'ipt>';
-        frame.srcdoc = '<!DOCTYPE html><html><head><base href="' + (typeof location !== 'undefined' ? location.href : '') + '"><style>' + styles + '</style></head><body>' + bodyHtml + script + '</body></html>';
-        panel.appendChild(close); panel.appendChild(frame);
-        back.appendChild(panel); uiRoot.appendChild(back);
-      });
     }
 
     function groupLabel(textValue) {
@@ -1554,6 +2502,24 @@
       toast('Saving the canvas is only available with the extension here.');
     }
 
+    // "HTML · with comments and history" — like saveCanvas, but the exporter also
+    // embeds this doc's full version history (snapshots included) into the file, so
+    // reopening rehydrates the timeline even on a machine with no localStorage copy.
+    async function saveCanvasWithHistory() {
+      const s = getState();
+      if (exporter && typeof exporter.onSaveCanvasWithHistory === 'function') {
+        try {
+          await exporter.onSaveCanvasWithHistory(s);
+          toast('Saving HTML with comments + history…');
+        } catch (e) {
+          toast('Save failed');
+        }
+        return;
+      }
+      // No embed capability here — fall back to the comments-only save.
+      return saveCanvas();
+    }
+
     // "HTML · clean copy" — the original document with all Noteback stripped.
     async function saveClean() {
       const s = getState();
@@ -1682,6 +2648,8 @@
     function closeSidebar() {
       closeSaveMenu();
       closeCopyMenu();
+      closeVersionMenu(true);
+      closeVersionInline(); // a half-open version view with no timeline is a dead end
       sidebar.classList.remove('nb-open');
       launcher.classList.remove('nb-hidden');
     }
@@ -1767,6 +2735,112 @@
     }
 
     /* ------------------------------------------------------------------- *
+     * Version-row actions menu (chevron → Open / Copy feedback)           *
+     * Portaled to uiRoot and positioned in JS: the versions dock clips    *
+     * overflow, so an in-row dropdown would be cut off.                   *
+     * ------------------------------------------------------------------- */
+
+    const versionMenu = doc.createElement('div');
+    versionMenu.className = 'nb-ver-menu nb-menu';
+    versionMenu.setAttribute('role', 'menu');
+    versionMenu.setAttribute(UI_ATTR, 'version-menu');
+    versionMenu.innerHTML =
+      '<button type="button" class="nb-menu-item nb-vm-copy" role="menuitem">' +
+      '<span class="nb-mi-label">Copy feedback</span>' +
+      '<span class="nb-mi-sub">this version’s markdown</span></button>' +
+      '<div class="nb-menu-sep" role="none"></div>' +
+      '<button type="button" class="nb-menu-item nb-vm-save" role="menuitem">' +
+      '<span class="nb-mi-label">Save HTML with comments</span>' +
+      '<span class="nb-mi-sub">re-openable canvas of this version</span></button>' +
+      '<button type="button" class="nb-menu-item nb-vm-saveclean" role="menuitem">' +
+      '<span class="nb-mi-label">Save clean HTML</span>' +
+      '<span class="nb-mi-sub">the original, no Noteback</span></button>';
+    uiRoot.appendChild(versionMenu);
+    const vmCopyItem = versionMenu.querySelector('.nb-vm-copy');
+    const vmSaveItem = versionMenu.querySelector('.nb-vm-save');
+    const vmSaveCleanItem = versionMenu.querySelector('.nb-vm-saveclean');
+    let versionMenuOpen = false;
+    let versionMenuCloseTimer = null;
+    let versionMenuBtn = null;   // the chevron that opened it
+    let versionMenuData = null;  // the version record `d`
+
+    vmCopyItem.addEventListener('click', function (e) {
+      e.stopPropagation();
+      const d = versionMenuData;
+      closeVersionMenu();
+      if (d) copyVersionFeedback(d);
+    });
+    vmSaveItem.addEventListener('click', function (e) {
+      e.stopPropagation();
+      const d = versionMenuData;
+      closeVersionMenu();
+      if (d) saveVersionCanvas(d);
+    });
+    vmSaveCleanItem.addEventListener('click', function (e) {
+      e.stopPropagation();
+      const d = versionMenuData;
+      closeVersionMenu();
+      if (d) saveVersionClean(d);
+    });
+
+    function positionVersionMenu(btn) {
+      const r = btn.getBoundingClientRect();
+      const vw = (win && win.innerWidth) || 360;
+      const vh = (win && win.innerHeight) || 800;
+      const MENU_W = 214;
+      let left = r.left;
+      if (left + MENU_W > vw - 8) left = vw - MENU_W - 8;
+      if (left < 8) left = 8;
+      versionMenu.style.left = left + 'px';
+      // Open upward — version rows sit low in the viewport (dock above the footer).
+      versionMenu.style.top = 'auto';
+      versionMenu.style.bottom = (vh - r.top + 6) + 'px';
+    }
+
+    function openVersionMenu(btn, d) {
+      closeSaveMenu(); closeCopyMenu();
+      if (versionMenuOpen && versionMenuBtn === btn) return;
+      if (versionMenuOpen) closeVersionMenu(true); // switching rows: snap shut first
+      versionMenuOpen = true;
+      versionMenuBtn = btn;
+      versionMenuData = d;
+      if (versionMenuCloseTimer) {
+        (win && win.clearTimeout ? win.clearTimeout : clearTimeout)(versionMenuCloseTimer);
+        versionMenuCloseTimer = null;
+      }
+      // The two "Save…" items need the version's stored snapshot; disable when pruned.
+      // "Copy feedback" only needs the comments, so it stays enabled.
+      vmSaveItem.disabled = !d.hasSnapshot;
+      vmSaveItem.title = d.hasSnapshot ? '' : 'Snapshot no longer stored';
+      vmSaveCleanItem.disabled = !d.hasSnapshot;
+      vmSaveCleanItem.title = d.hasSnapshot ? '' : 'Snapshot no longer stored';
+      btn.setAttribute('aria-expanded', 'true');
+      versionMenu.classList.remove('is-closing');
+      positionVersionMenu(btn);
+      void versionMenu.offsetWidth; // reflow so the closed scale applies before growing
+      versionMenu.classList.add('is-open');
+    }
+
+    function closeVersionMenu(immediate) {
+      if (!versionMenuOpen) return;
+      versionMenuOpen = false;
+      if (versionMenuBtn) versionMenuBtn.setAttribute('aria-expanded', 'false');
+      versionMenuBtn = null;
+      versionMenuData = null;
+      versionMenu.classList.remove('is-open');
+      versionMenu.classList.add('is-closing');
+      const settle = function () { versionMenu.classList.remove('is-closing'); versionMenuCloseTimer = null; };
+      const ms = (immediate || reduceMotion()) ? 0 : POPOVER_CLOSE_MS;
+      if (ms && win && win.setTimeout) versionMenuCloseTimer = win.setTimeout(settle, ms);
+      else settle();
+    }
+
+    function toggleVersionMenu(btn, d) {
+      if (versionMenuOpen && versionMenuBtn === btn) closeVersionMenu();
+      else openVersionMenu(btn, d);
+    }
+
+    /* ------------------------------------------------------------------- *
      * Persistence helper                                                  *
      * ------------------------------------------------------------------- */
 
@@ -1783,6 +2857,7 @@
     const onSelChange = function () { onSelectionChange(); };
     const onScrollOrResize = function () {
       if (fab.style.display !== 'none') hideFab();
+      closeVersionMenu(true); // it's fixed-positioned off a chevron that just moved
     };
     // The comment composer is intentionally NOT dismissed by clicking outside it
     // (only Cancel / Save / Escape close it), so a stray click can't discard an
@@ -1872,10 +2947,29 @@
         if (copyCaretBtn && copyCaretBtn.focus) copyCaretBtn.focus();
       }
     };
+    // The version-row actions menu closes on any click outside it (and its chevron),
+    // and on Escape. The chevron + items stopPropagation, so their own clicks don't
+    // reach here.
+    const onDocClickVersionMenu = function (e) {
+      if (!versionMenuOpen) return;
+      const path = (typeof e.composedPath === 'function') ? e.composedPath() : [];
+      if (path.indexOf(versionMenu) !== -1) return;
+      if (versionMenuBtn && path.indexOf(versionMenuBtn) !== -1) return;
+      closeVersionMenu();
+    };
+    const onDocKeydownVersionMenu = function (e) {
+      if (e.key === 'Escape' && versionMenuOpen) {
+        const btn = versionMenuBtn;
+        closeVersionMenu();
+        if (btn && btn.focus) btn.focus();
+      }
+    };
     doc.addEventListener('click', onDocClickCopyMenu);
     doc.addEventListener('keydown', onDocKeydownCopyMenu);
     doc.addEventListener('click', onDocClickSaveMenu);
     doc.addEventListener('keydown', onDocKeydownSaveMenu);
+    doc.addEventListener('click', onDocClickVersionMenu);
+    doc.addEventListener('keydown', onDocKeydownVersionMenu);
 
     // Initial render so the sidebar reflects loaded state when first opened.
     renderSidebar();
@@ -1893,6 +2987,8 @@
       doc.removeEventListener('keydown', onDocKeydownSaveMenu);
       doc.removeEventListener('click', onDocClickCopyMenu);
       doc.removeEventListener('keydown', onDocKeydownCopyMenu);
+      doc.removeEventListener('click', onDocClickVersionMenu);
+      doc.removeEventListener('keydown', onDocKeydownVersionMenu);
       doc.removeEventListener('keydown', onDocKeydownInfo);
       cancelFabTimer();
       closePopover();

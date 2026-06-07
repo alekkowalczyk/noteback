@@ -75,6 +75,19 @@
     <label class="nb-setting-row"><span>127.0.0.1</span>
       <span class="nb-switch"><input id="nb-type-127" type="checkbox" /><span class="nb-switch__slider"></span></span>
     </label>
+    <div id="nb-hist-block" hidden>
+      <div class="nb-settings__title nb-settings__title--hist">Version history</div>
+      <label class="nb-setting-row"><span>Record history</span>
+        <span class="nb-switch"><input id="nb-hist-global" type="checkbox" /><span class="nb-switch__slider"></span></span>
+      </label>
+      <label class="nb-setting-row" id="nb-hist-site-row"><span>On this site <code id="nb-hist-site-origin"></code></span>
+        <span class="nb-switch"><input id="nb-hist-site" type="checkbox" /><span class="nb-switch__slider"></span></span>
+      </label>
+      <label class="nb-setting-row" id="nb-hist-doc-row"><span>On this page</span>
+        <span class="nb-switch"><input id="nb-hist-doc" type="checkbox" /><span class="nb-switch__slider"></span></span>
+      </label>
+      <p id="nb-hist-hint" class="nb-hist-hint" hidden></p>
+    </div>
   </section>
 
   <section id="nb-info" class="nb-popup__info" hidden>

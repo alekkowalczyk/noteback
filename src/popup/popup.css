@@ -232,6 +232,10 @@ body {
 .nb-popup__settings { padding: 8px 12px 12px; border-top: 1px solid var(--nb-border); }
 .nb-popup__settings[hidden] { display: none; }
 .nb-settings__title { font-size: 12px; font-weight: 600; color: #444; margin-bottom: 6px; }
+.nb-settings__title--hist { margin-top: 12px; }
+.nb-hist-hint { font-size: 11px; color: #92400e; margin: 4px 0 0; }
+.nb-hist-hint[hidden] { display: none; }
+#nb-hist-block[hidden] { display: none; }
 .nb-setting-row {
   display: flex; align-items: center; justify-content: space-between;
   padding: 5px 0; font-size: 13px;

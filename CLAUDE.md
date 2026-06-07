@@ -51,71 +51,195 @@ the code, that have already bitten us once.
   `documentElement.outerHTML` (file-absolute, tracks the opened file). Same
   `toMarkdown`, different `docHtml` origin. This is a deliberate, documented
   tradeoff — don't try to "fix" one to match the other.
-- **Draft identity is hashed from the CLEAN, pre-paint content root.** The
-  localStorage adapter resolves the content hash from `#noteback-doc-root`
-  `textContent` at construction, before highlights are painted — never recompute it
-  from the live DOM after `<mark>` wrappers are added, or the hash shifts.
+- **Doc identity is the BAKED doc-id; a version is hashed from the CLEAN, pre-paint
+  content root.** A draft's identity is the explicit `data-noteback-doc-id` baked on
+  `#noteback-doc-root` (extension pages Noteback didn't author fall back to a per-URL
+  minted id under `nb:url:<href>`). Within that doc-id, a *version* is keyed by a
+  content hash over `#noteback-doc-root` `textContent` (`createHistoryStateAdapter`'s
+  `contentText`), read before highlights are painted — never recompute it from the live
+  DOM after `<mark>` wrappers are added, or the hash shifts (and the draft splinters
+  into a new version). When the text is too short to hash, the version key falls back to
+  `h0:<docId>`.
 - **`window.localStorage` access can THROW (not just be absent) on `file://`** or
   when storage is blocked — and `file://` is the primary canvas use case. The
-  `EMBEDDED_BOOT` adapter composition captures it inside a `try/catch`
-  (`nbLocalStorage`) and falls back to the in-file adapter; never reference
-  `window.localStorage` raw in the boot guard, or a blocked store crashes the whole
-  canvas mount (it did once — the overlay never appeared). Live-verified in Task 9.
+  `EMBEDDED_BOOT` builds the localStorage-backed kv store (`lsStore`) inside a
+  `try/catch`; on failure `lsStore` is `null` and `createHistoryStateAdapter` degrades
+  to the in-file `InFileStateAdapter` (comments still work, just no version history).
+  Never reference `window.localStorage` raw in the boot guard, or a blocked store
+  crashes the whole canvas mount (it did once — the overlay never appeared).
 - **`file://` localStorage is one shared bucket** across all local canvases (Chrome).
-  Keys are content-hashed and namespaced (`nb:gen:`/`nb:lin:`/`nb:attach`) precisely
-  so distinct documents don't collide in that shared bucket.
-- **History snapshots render in an `<iframe srcdoc>`** with the draft's inline
-  `<style>` only; external stylesheets/remote images won't load there. That's
-  expected — the popup shows structure + text + the highlight, not a pixel-perfect
-  reproduction. The highlighted quote is interpolated into an injected `<script>`,
-  so it is escaped with `.replace(/<\//g, '<\\/')` to prevent a `</script>` in the
-  quote from breaking out (a real quote from an HTML/security doc can contain it).
-  The popup re-highlights the quote with a CROSS-NODE matcher (`overlay.nbHistHighlight`,
-  serialized via `toString()`): a multi-block selection's quote spans several text
-  nodes, so a single-text-node `indexOf` can't find it. It also matches whitespace
-  loosely (`\s*`, not `\s+`) because the snapshot drops the inter-block whitespace
-  the live selection swept up (those bare whitespace `<mark>`s are stripped in
-  `snapshot.assembleHtml`), so the quote's whitespace may have no counterpart.
-- **A selection paints one `<mark>` per text slice (same id), so a comment can span
-  many blocks/sections.** `snapshot.extractSections` therefore unions every section
-  the selection touches (via `querySelectorAll`, not `querySelector` — using only the
-  first mark captured just the start, a bug we shipped once). See its block-collection
-  loop and the per-section dedupe.
-- **The history peek pads the captured union with ~`CONTEXT_PAD_BLOCKS` (3) context
-  blocks above the first touched section and below the last** (`snapshot.padContext`),
-  so the popup shows what surrounds the selection — the capture otherwise consumes
-  whole sections and leaves no in-section context. The padding crosses section
-  boundaries (it pulls in the neighbouring heading + a paragraph or two) and skips the
-  inter-block whitespace `<mark>`s a cross-block selection leaves behind. Under the
-  char cap, `trimToCap` protects the **touched blocks** (`blocks[0]..blocks[last]`, the
-  actual selection) and grows outward — section remainder, then padding — so context is
-  sacrificed before the selection. Do **not** reinstate `trimToCap`'s old
-  "prepend `nodes[0]` if it's a heading" shortcut: with padding `nodes[0]` is a context
-  block, not the section heading, so it would wrongly re-add dropped padding. The
-  section heading rides along inside the protected/grown window instead. `contextPad: 0`
-  in the cfg disables padding (used by the union unit test to isolate that logic).
-- **History snapshots are read from the PAINTED highlights — paint before persist.**
-  `snapshot.extractSections` locates a comment's section by querying
-  `mark.noteback-highlight[data-noteback-id="<id>"]` in the live doc. So
-  `overlay.commitPopover` must paint the committed highlights (drop the compose
-  preview, then `repaintHighlights()`) **before** `await persist(s)` runs the
-  snapshot. If persist runs first, a brand-new comment's `<mark>` isn't in the DOM
-  yet, the snapshot is captured empty (`sections:[]`, no `sectionByCommentId`), and
-  the comment's later "Earlier feedback" entry is silently un-clickable
-  (`hasSnapshot:false`, `sectionId:null` → the overlay `disable`s the button: no
-  pointer cursor, clicks ignored). This shipped once and was found only in the live
-  canvas — the Node suite can't catch it (the bug lives in the overlay's DOM
-  paint/persist ordering, which has no Node-side DOM). It is now guarded by the
-  browser e2e `test/e2e/history-popup.e2e.test.js` (real drag-select → reload as a
-  new draft → click the entry → assert the popup opens); that test fails on the
-  pre-fix ordering. The Node tests cover the seams around it (`extractSections`
-  with/without a painted mark; `history()` reporting `hasSnapshot`/`sectionId`).
+  Keys are namespaced and keyed by the explicit doc-id (`nb:doc:<docId>`) /
+  content-hashed version key (`nb:ver:<versionKey>`), with `nb:url:<href>` for
+  per-URL minted ids (extension only), precisely so distinct documents don't collide in
+  that shared bucket.
+- **History snapshots the WHOLE clean document ONCE, at a version's first comment —
+  there is no per-comment fragment/"section" extraction.** `snapshot-capture.js`
+  `captureCleanDoc` clones `documentElement`, strips `[data-noteback-ui]`, **unwraps**
+  every `<mark class="noteback-highlight">`, and drops `#noteback-state` + the inline
+  runtime `<script>`, then stores the result gzipped (`makeCodec`). Because the marks
+  are stripped, the snapshot is **paint-independent**: it does NOT matter whether
+  highlights are painted when `save`/`persist` runs (the old "paint before persist"
+  bug class and its `history-popup.e2e.test.js` guard are gone — `commitPopover`'s
+  `repaintHighlights()` is now just a visual refresh with no ordering requirement vs.
+  `persist`). `history-state-adapter.js` captures the snapshot only when the version
+  has **no** snapshot yet (`needSnapshot = comments.length>0 && !r.hasSnapshot`);
+  `hasSnapshot` is seeded from the real stored snapshot, never the comment count.
+- **Version viewing is IN-TAB and read-only.** Clicking a version row opens
+  `overlay.openVersionInline` — a read-only `<iframe srcdoc>` side panel
+  (`.nb-hist-view`) beside the sidebar (NOT a new tab, NOT a centered modal). It
+  reuses the snapshot painter (`paintHighlights` + re-injected `HIGHLIGHT_CSS` +
+  `buildPeekPopoverScript`). An in-tab `viewingKey` drives the timeline: the viewed
+  row is the active `nb-ver-viewing` row (active dot + highlight — there is **no**
+  "you are here" text label), a "Back to current" bar (`renderBackToCurrentBar` →
+  `closeVersionInline`) returns to the live draft, and other rows switch. There is
+  NO new-tab "checkout" (`openVersionTab` / the `data-noteback-checkout` marker were
+  removed) because a `window.open(blob:)` tab from a `file://` canvas gets an opaque
+  origin whose `localStorage` is denied, leaving the opened tab's history sidebar
+  empty (the bug). The `.nb-hist-frame` iframe fills the panel as a column-flex child
+  (`flex:1;min-height:0`), not via absolute `height:calc(...)`.
+- **The diff view diffs THIS version against the NEXT one, not the previous.**
+  `overlay.openVersionDiff` resolves the target via `resolveTargetSnapshot`: the
+  most-recent earlier version (index 0 of `getHistory`, newest-first) diffs against
+  the LIVE current draft (`snapshotCapture.captureCleanDoc(document)`, labelled
+  "now"); any older version diffs against the next-newer stored snapshot. The pure
+  diff brain is `src/runtime/diff.js` (DOM-free, Node-tested); the DOM renderer is
+  `src/runtime/diff-render.js` (browser-only, e2e-tested, like `highlight.js`).
+  BOTH new files must be registered in the parity-locked runtime lists
+  (`bin/noteback.js`, `examples/build-canvas.js`,
+  `src/background/service-worker.js` — guarded by
+  `test/canvas-runtime-parity.test.js`) AND in `manifest.json` (its `content_scripts`
+  AND `web_accessible_resources` runtime-file arrays), ordered `diff.js` after
+  `markdown.js` and `diff-render.js` after `highlight.js` (before `overlay.js`).
+  Comment highlights are painted AFTER the diff wraps words, so a comment whose
+  quote straddles a changed region may not re-anchor — unchanged-region highlights
+  always do.
+- **The diff's Prev/Next change navigator runs INSIDE the iframe, not from the
+  overlay.** The legend (and its `‹ Prev · n/N · Next ›` cluster) lives in the diff
+  `<iframe srcdoc>`, a separate document — so its buttons CANNOT be wired with
+  overlay `addEventListener`; the click handling, `.nb-diff-focus` stepping (ring +
+  intensified fill, wrapping both ends), scroll-to-centre, and counter are all an
+  injected static `<script>` (`buildDiffNavScript`, same pattern as the peek
+  script). It replaced the old one-shot "scroll to first change" script and keeps
+  its no-changes fallback (scroll the first highlight into view). The separate
+  **"Show diff"** shortcut on the live `now` timeline row IS overlay-side
+  (`renderNowRow`): it sets `diffMode=true` and calls `openVersionInline(latestKey)`
+  — shown only off the live draft and only when a latest earlier version exists.
+- **The version chevron menu SAVES via download, not a tab.** A version row's `▾`
+  menu has **Copy feedback** + **Save HTML with comments** + **Save clean HTML**
+  (both saves disabled when the version's snapshot is pruned). "Save HTML with
+  comments" rebuilds a re-openable canvas of that version with
+  `buildVersionCanvasHtml` (re-added — clones the live shell, swaps in the snapshot
+  content, re-seeds `#noteback-state` with the version's comments, escaping
+  `</script>`; it does NOT bake a checkout marker); "Save clean HTML" saves the raw
+  `v.html` snapshot. Both route through a new `exporter.onSaveHtml(html, name)` hook
+  (embedded: `saveCanvasInPlace` → `downloadCanvas`). Because the result is
+  **downloaded** (a fresh `file://` canvas when reopened, with its own storage), it
+  sidesteps the opaque-origin `localStorage` problem that retired the new-tab open —
+  this is why `buildVersionCanvasHtml` is back but `openVersionTab` is not.
+- **The Versions timeline docks at the BOTTOM of the sidebar, not inside the comment
+  list.** `renderVersions()` renders into `.nb-versions-dock` (a `flex:0 0 auto` band with
+  `max-height:34vh`, its own scroll, collapsing via `:empty` when there are no earlier
+  versions), a sibling between `.nb-list` (`flex:1`) and `.nb-foot`. So the current
+  draft's notes (or the "No notes yet" empty state) keep the available room and the
+  timeline stays put above the action buttons.
+- **"Save · with comments and history" embeds the timeline in the FILE; the block is
+  stripped everywhere else.** `onSaveCanvasWithHistory` → `adapter.exportHistory()` (core
+  `exportDoc`) gathers `nb:doc:<id>` + every `nb:ver:<key>` (snapshots included) into a
+  `<script id="noteback-history" type="application/json">` block (escaping `</script>` →
+  `<\/script>`, valid JSON). On reopen the `EMBEDDED_BOOT` **synchronously** seeds
+  `localStorage` from it BEFORE the adapter resolves, and **only for keys not already
+  present** (never clobber newer local data — so two machines with diverged history don't
+  merge their `nb:doc` version lists; a fresh machine rehydrates fully). The block must be
+  excluded from snapshots (`captureCleanDoc`), clean copies (`rebuildCleanHtml`), and plain
+  "with comments" saves (`rebuildHtml` via `buildCanvasClone`) — else it nests/recurses.
+  Do NOT mark it `data-noteback-ui`
+  to get free stripping: the cross-world stand-down keys off `[data-noteback-ui]`, so a
+  CSP-blocked canvas carrying the block would make the extension stand down and mount
+  nothing. Covered by `test/e2e/history-embed.e2e.test.js`.
+- **A `hidden` menu item needs `.nb-menu-item[hidden]{display:none}` — the `hidden`
+  attribute alone does NOTHING here.** `.nb-menu-item{display:block}` is an author rule of
+  equal specificity to the UA `[hidden]{display:none}`, and author wins — so an item with
+  the `hidden` attribute still renders (it bit the "with comments and history" visibility
+  toggle: the property was set, the item stayed visible). The explicit
+  `.nb-menu-item[hidden]{display:none}` (specificity class+attr) restores it.
+- **`wrap` PRESERVES an existing doc-id — don't make it re-mint.** The version history
+  follows the baked `data-noteback-doc-id`, so re-wrapping a canvas must keep the same
+  id or the history orphans. `bin/noteback.js`'s precedence is: explicit `--id` → the id
+  already baked in the `-o` target file → the id baked in the input HTML
+  (`#noteback-doc-root[data-noteback-doc-id]` OR a source `<!-- noteback-doc-id: … -->`
+  marker, via `readBakedDocId`/`readMarkerDocId`) → mint a fresh one (`mintDocId`). The
+  `-o`-target reuse is the easy one to drop — it's how `wrap` in place keeps history
+  across re-exports.
+- **`--bake-id` anchors the id in the SOURCE so a deleted `-o` canvas can't orphan
+  history.** With a SEPARATE `-o` target (e.g. `examples/spec.html -o examples/spec.canvas.html`),
+  the resolved id lives ONLY in the gitignored canvas; `rm` it and the next `wrap`
+  re-mints, splintering history. `--bake-id` stamps `bakeDocIdIntoSource` into the
+  tracked source as a `<!-- noteback-doc-id: … -->` comment (after the doctype, so it
+  can't trigger quirks mode; prepended for fragments; idempotent — re-bake replaces,
+  never duplicates). The marker is SOURCE-ONLY: `wrapFile` runs `stripDocIdMarker` on
+  the doc content before building, so it never leaks into the canvas (which carries the
+  authoritative id on `#noteback-doc-root`). In-place wrap ignores `--bake-id` (the
+  canvas already carries the id and would clobber the marker). `examples/spec.html` is
+  anchored this way (`dmq41se03tm5q0nu8bh`).
+- **Extension history is GATED per-site (`historyAllowed`), decided at first mount.**
+  `origin-policy.js` `historyAllowed(info, settings)` is default-on for
+  `file`/`localhost`/`127.0.0.1` and opt-in via `historySites` for any other origin.
+  When it's false the content script keeps the comments-only `ChromeStorageAdapter`
+  (no version timeline). The gate is read once at first `mount()`, so toggling a
+  per-site history opt-in takes effect on **reload**, not live (unlike the
+  activate/deactivate transition, which is live on `chrome.storage.onChanged`). The
+  embedded canvas has no settings and always runs history (subject to `lsStore`).
+  `createChromeKvStore` THROWS if `chrome.storage.local` is missing — the content
+  script catches it (not `.catch()`) and degrades.
 - **The click-to-activate injection list is sourced from the manifest, never
   copied.** `popup.js` activates unsupported-origin pages by reading
   `chrome.runtime.getManifest().content_scripts[0].js` and `executeScript`-ing
   that exact list. Don't hard-code the file list in the popup — it would silently
   drift the next time a runtime file is added to the manifest, and the injected
   page would boot an incomplete runtime.
+- **The extension and an embedded canvas run in SEPARATE JS worlds — the
+  single-mount guard can't cross.** Open a saved canvas while the extension is
+  installed and BOTH want to annotate the page: the canvas's inlined runtime boots
+  in the page's MAIN world, the content script in an ISOLATED world. `boot.js`'s
+  `window.__notebackBooted` is a **per-world** global, so the content script never
+  sees the canvas's flag — without help both mount (two launchers) and the
+  extension routes comments to **chrome.storage** while the canvas's localStorage
+  history stays empty (comments appear, but no version is ever recorded — the
+  symptom that bit us). The hand-off rides the DOM, the only shared channel:
+  `boot.js` stamps a **synchronous** `<div data-noteback-ui="mount">` (before its
+  first `await`, so it's in place by the extension's `document_idle`), and
+  `content-script.js` stands down via `originPolicy.overlayMounted(document)`. The
+  marker rides `[data-noteback-ui]`, so every export strip drops it and `destroy()`
+  removes it. **Don't "simplify" the guard back to the JS flag alone** — it silently
+  does nothing across worlds. Covered by `test/e2e/extension-standdown.e2e.test.js`,
+  which loads the real unpacked extension (`channel: 'chromium'`) and reproduces
+  the double-mount.
+- **`extractBodyMarkup` drops the WHOLE `<head>` — so the canvas re-carries the doc's
+  styling separately.** A styled source (inline `<style>` in `<head>`) wrapped naively
+  rendered as raw unstyled HTML in the canvas (the body markup survived, the `<head>`
+  `<style>` didn't). `exporter.extractHeadStyles` pulls the original head's inline
+  `<style>` blocks **and** `<link rel="stylesheet">` refs (EXCLUDING any
+  `[data-noteback-ui]` style — the runtime re-injects its own), and `buildCanvasHtml`
+  substitutes them into the template's `{{DOC_STYLE}}` head token. Two constraints:
+  (1) the `<title>` is deliberately NOT carried — the template owns the canvas title
+  (`<title>… — Noteback feedback canvas</title>`), and a test asserts the original
+  `<title>` never lands in the output; (2) `{{DOC_STYLE}}` is replaced **last** of all
+  tokens, so a CSS rule like `content:"{{x}}"` in the carried stylesheet isn't eaten by
+  an earlier token pass. Covered by the head-carry tests in `test/exporter.test.js`.
+- **History opt-out is a SUBTRACT layer, and the two surfaces go live differently.**
+  `origin-policy.historyAllowed` subtracts `historyDisabledGlobal` /
+  `historyDisabledSites` / `historyDisabledDocs` (keyed on the resolved history
+  doc-id, passed as `info.docKey`) above the base rule. The **extension** can't gate
+  in place (it picks adapter TYPE at mount), so a live opt-out **re-mounts**
+  (`content-script.js` `applySettings` compares `lastHistoryOk` and unmount+mounts on
+  a flip; the gate is computed once via `historyOkFor`) — the "gate read once at
+  mount" invariant still holds (a re-mount is a new mount). The **embedded** canvas
+  always builds the history adapter, so it gates **in place** via
+  `createHistoryStateAdapter`'s `isEnabled()` (fed by `historyControl` over
+  `nb:nohist:global` / `nb:nohist:doc:<docId>`, read/written with **guarded** raw
+  localStorage). Opt-out HIDES the timeline and stops recording but KEEPS stored
+  snapshots; re-enabling the gear re-saves the live draft (`persist(getState())`) so
+  the now-enabled version adopts comments added while off.
 
 ## Live verification (Playwright)
 

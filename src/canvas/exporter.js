@@ -61,17 +61,32 @@
     '    var inner = RT.infileStateAdapter.createInFileStateAdapter(document, {',
     '      onChange: function (s) { latestState = s; }',
     '    });',
-    '    function normHref() {',
-    '      try { var l = location; return (l.origin || (l.protocol + "//" + l.host)) + l.pathname; } catch (e) { return (typeof location !== "undefined" ? location.href : ""); }',
-    '    }',
-    '    var nbLocalStorage = (function () { try { return (typeof window !== "undefined") ? window.localStorage : null; } catch (e) { return null; } })();',
-    '    var adapter = (RT.localStorageStateAdapter && nbLocalStorage)',
-    '      ? RT.localStorageStateAdapter.createLocalStorageStateAdapter({',
-    '          doc: document,',
-    '          storage: nbLocalStorage,',
-    '          inner: inner,',
-    '          attachKey: normHref()',
-    '        })',
+    '    var rootEl = document.getElementById("noteback-doc-root") || document.body;',
+    '    var docId = (rootEl && rootEl.getAttribute && rootEl.getAttribute("data-noteback-doc-id")) || "";',
+    '    var lsStore = (function () { try { var ls = window.localStorage; return { get: function (k) { try { var v = ls.getItem(k); return Promise.resolve(v == null ? null : JSON.parse(v)); } catch (e) { return Promise.resolve(null); } }, set: function (k, v) { try { ls.setItem(k, JSON.stringify(v)); } catch (e) {} return Promise.resolve(); }, remove: function (k) { try { ls.removeItem(k); } catch (e) {} return Promise.resolve(); }, keys: function () { var o = []; try { for (var i = 0; i < ls.length; i++) o.push(ls.key(i)); } catch (e) {} return Promise.resolve(o); } }; } catch (e) { return null; } })();',
+    '    // Rehydrate embedded history (a "save with comments and history" file) into the',
+    '    // local store, seeding only keys NOT already present (never clobber newer local',
+    '    // data). Synchronous, so it completes before the history adapter first resolves.',
+    '    (function () { try { if (!lsStore) return; var hEl = document.getElementById("noteback-history"); var raw = hEl ? (hEl.textContent || "").trim() : ""; if (!raw) return; var data = JSON.parse(raw); var entries = data && data.entries; if (!entries) return; var ls = window.localStorage; for (var key in entries) { if (!Object.prototype.hasOwnProperty.call(entries, key)) continue; if (ls.getItem(key) == null) { try { ls.setItem(key, JSON.stringify(entries[key])); } catch (e) {} } } } catch (e) {} })();',
+    '    var cleanText = function () { try { return rootEl.textContent || ""; } catch (e) { return ""; } };',
+    '    var snap = (RT.snapshotCapture && RT.snapshotCapture.captureCleanDoc) ? function () { return RT.snapshotCapture.captureCleanDoc(document); } : function () { return ""; };',
+    '    // History opt-out flags (gear ⚙). Read/written synchronously via raw',
+    '    // localStorage in try/catch — never the async lsStore wrapper, and never raw',
+    '    // outside a guard (file:// localStorage can THROW).',
+    '    var NOHIST_GLOBAL = "nb:nohist:global";',
+    '    var NOHIST_DOC = "nb:nohist:doc:" + docId;',
+    '    function nbHistGet(k) { try { return window.localStorage.getItem(k) === "1"; } catch (e) { return false; } }',
+    '    function nbHistSet(k, off) { try { if (off) window.localStorage.setItem(k, "1"); else window.localStorage.removeItem(k); } catch (e) {} }',
+    '    var historyControl = {',
+    '      available: !!(RT.historyStateAdapter && lsStore && docId),',
+    '      globalOff: function () { return nbHistGet(NOHIST_GLOBAL); },',
+    '      docOff: function () { return nbHistGet(NOHIST_DOC); },',
+    '      enabled: function () { return !(nbHistGet(NOHIST_GLOBAL) || nbHistGet(NOHIST_DOC)); },',
+    '      setGlobal: function (off) { nbHistSet(NOHIST_GLOBAL, off); },',
+    '      setDoc: function (off) { nbHistSet(NOHIST_DOC, off); }',
+    '    };',
+    '    var adapter = (RT.historyStateAdapter && lsStore && docId)',
+    '      ? RT.historyStateAdapter.createHistoryStateAdapter({ doc: document, store: lsStore, inner: inner, docId: docId, contentText: cleanText, captureSnapshot: snap, isEnabled: function () { return historyControl.enabled(); } })',
     '      : inner;',
     '    function currentState() {',
     '      if (latestState) return latestState;',
@@ -87,13 +102,12 @@
     '      if (!/\\.html?$/i.test(t)) t += ".html";',
     '      return t;',
     '    }',
-    '    function rebuildHtml() {',
+    '    // The live document IS the canvas; clone it and strip Noteback UI + a stale',
+    '    // embedded-history block (highlights are re-painted by the runtime on open).',
+    '    function buildCanvasClone() {',
     '      var stateEl = document.getElementById("' + STATE_BLOCK_ID + '");',
     '      var s = currentState();',
     '      if (stateEl && s) stateEl.textContent = JSON.stringify(s);',
-    '      // The live document IS the canvas; serialize it as-is. Highlights/UI',
-    '      // are re-painted by the embedded runtime on next open, so strip any',
-    '      // injected UI before serializing.',
     '      var clone = document.documentElement.cloneNode(true);',
     '      var ui = clone.querySelectorAll("[' + UI_ATTR + '],mark.' + HIGHLIGHT_CLASS + '");',
     '      for (var i = 0; i < ui.length; i++) {',
@@ -104,6 +118,27 @@
     '        } else if (n.parentNode) {',
     '          n.parentNode.removeChild(n);',
     '        }',
+    '      }',
+    '      var oldHist = clone.querySelector("#noteback-history");',
+    '      if (oldHist && oldHist.parentNode) oldHist.parentNode.removeChild(oldHist);',
+    '      return clone;',
+    '    }',
+    '    function rebuildHtml() {',
+    '      return "<!DOCTYPE html>\\n" + buildCanvasClone().outerHTML;',
+    '    }',
+    '    // Like rebuildHtml, but embeds this doc\'s full version history (snapshots',
+    '    // included) in a #noteback-history JSON block, so reopening rehydrates the',
+    '    // timeline. The JSON lands in a <script> textContent serialized verbatim, so a',
+    '    // comment body containing "</scr"+"ipt>" is escaped to "<\\/scr"+"ipt>" (valid',
+    '    // JSON: "\\/" reads back as "/"), exactly as the state-block exporter does.',
+    '    function rebuildHtmlWithHistory(histJson) {',
+    '      var clone = buildCanvasClone();',
+    '      if (histJson) {',
+    '        var h = document.createElement("script");',
+    '        h.id = "noteback-history";',
+    '        h.type = "application/json";',
+    '        h.textContent = String(histJson).replace(/<\\/(script)/gi, "<\\\\/$1");',
+    '        (clone.querySelector("head") || clone.querySelector("body") || clone).appendChild(h);',
     '      }',
     '      return "<!DOCTYPE html>\\n" + clone.outerHTML;',
     '    }',
@@ -123,6 +158,8 @@
     '      }',
     '      var stEl = clone.querySelector("#' + STATE_BLOCK_ID + '");',
     '      if (stEl && stEl.parentNode) stEl.parentNode.removeChild(stEl);',
+    '      var hEl = clone.querySelector("#noteback-history");',
+    '      if (hEl && hEl.parentNode) hEl.parentNode.removeChild(hEl);',
     '      var scripts = clone.querySelectorAll("script");',
     '      for (var k = 0; k < scripts.length; k++) {',
     '        var sc = scripts[k];',
@@ -155,6 +192,16 @@
     '        if (exporterApi.downloadCanvas) return exporterApi.downloadCanvas(html, name);',
     '        return Promise.resolve();',
     '      },',
+    '      onSaveCanvasWithHistory: function () {',
+    '        var name = suggestedName();',
+    '        var exportP = (adapter && adapter.exportHistory) ? Promise.resolve(adapter.exportHistory()) : Promise.resolve(null);',
+    '        return exportP.then(function (hist) {',
+    '          var html = rebuildHtmlWithHistory(hist ? JSON.stringify(hist) : "");',
+    '          if (exporterApi.saveCanvasInPlace) return exporterApi.saveCanvasInPlace(html, name);',
+    '          if (exporterApi.downloadCanvas) return exporterApi.downloadCanvas(html, name);',
+    '          return Promise.resolve();',
+    '        });',
+    '      },',
     '      onSaveClean: function () {',
     '        var html = rebuildCleanHtml();',
     '        var name = suggestedName();',
@@ -165,6 +212,14 @@
     '      onCopyHtml: function (state, opts) {',
     '        var clean = !!(opts && opts.clean);',
     '        return Promise.resolve(clean ? rebuildCleanHtml() : rebuildHtml());',
+    '      },',
+    '      // Save a PRE-BUILT HTML string to a file. The overlay builds it (e.g. a',
+    '      // past version\'s canvas/clean snapshot) and routes it through the same',
+    '      // save-in-place / download primitives the live-doc saves use.',
+    '      onSaveHtml: function (html, name) {',
+    '        if (exporterApi.saveCanvasInPlace) return exporterApi.saveCanvasInPlace(html, name);',
+    '        if (exporterApi.downloadCanvas) return exporterApi.downloadCanvas(html, name);',
+    '        return Promise.resolve();',
     '      }',
     '      // PDF needs no hook: the overlay falls back to window.print(), and the',
     '      // runtime @media print rules render the clean document.',
@@ -175,9 +230,12 @@
     '      exporter: exporterHooks,',
     '      history: (adapter.getHistory ? {',
     '        getHistory: function () { return adapter.getHistory(); },',
-    '        getSection: function (ref) { return adapter.getSection(ref); },',
+    '        getVersion: function (ref) { return adapter.getVersion(ref); },',
+    '        getCurrentVersionKey: function () { return adapter.getCurrentVersionKey(); },',
     '        clearCurrent: function () { return adapter.clearCurrent(); }',
     '      } : null),',
+    '      mode: "embedded",',
+    '      historyControl: historyControl,',
     '      docId: (typeof location !== "undefined" ? location.href : ""),',
     '      docTitle: suggestedName()',
     '    });',
@@ -213,7 +271,9 @@
     cfg = cfg || {};
     const template = String(cfg.templateHtml == null ? '' : cfg.templateHtml);
     const state = cfg.state || {};
-    const docBody = extractBodyMarkup(String(cfg.docHtml == null ? '' : cfg.docHtml));
+    const rawDocHtml = String(cfg.docHtml == null ? '' : cfg.docHtml);
+    const docBody = extractBodyMarkup(rawDocHtml);
+    const docStyle = extractHeadStyles(rawDocHtml);
     const docTitle = String(state.docTitle || 'document');
 
     const stateJson = safeStringify(state);
@@ -229,10 +289,15 @@
     // string (a function avoids `$`-pattern interpretation in String.replace).
     let out = template;
     out = replaceToken(out, 'DOC_TITLE', escapeHtml(docTitle));
+    out = replaceToken(out, 'DOC_ID', escapeHtml(String(state.docId == null ? '' : state.docId)));
     out = replaceToken(out, 'GUIDING_COMMENT', GUIDING_COMMENT);
     out = replaceToken(out, 'DOC_BODY', docBody);
     out = replaceToken(out, 'STATE_JSON', escapeForJsonScript(stateJson));
     out = replaceToken(out, 'INLINED_RUNTIME', inlined);
+    // DOC_STYLE is replaced LAST: the carried CSS is opaque text we don't want
+    // re-scanned for any other {{TOKEN}} (a rule like `content: "{{x}}"` would
+    // otherwise be eaten by an earlier pass).
+    out = replaceToken(out, 'DOC_STYLE', docStyle);
     return out;
   }
 
@@ -272,6 +337,52 @@
 
     body = stripInjectedUi(body);
     return body.trim();
+  }
+
+  /**
+   * Pull the original document's STYLING out of its <head> so the wrapped canvas
+   * keeps it. `extractBodyMarkup` deliberately drops the whole <head> (title,
+   * meta, scripts), which would otherwise leave a styled source rendering as raw
+   * unstyled HTML inside the canvas. We re-carry only what styles the document:
+   * inline <style> blocks and <link rel="stylesheet"> references.
+   *
+   * Noteback's OWN injected styles (any element carrying data-noteback-ui — e.g.
+   * the fab/overlay <style data-noteback-ui>) are excluded: they belong to the
+   * runtime, not the document, and the runtime re-injects them itself. The
+   * <title> is also left behind (the template owns the canvas title).
+   *
+   * String-based (no DOM) so the pure builder runs under Node. Returns '' when
+   * there is no <head> or no document styling to carry.
+   *
+   * @param {string} html  full captured document (or a fragment with a <head>).
+   * @returns {string} concatenated <style>/<link> markup, or ''.
+   */
+  function extractHeadStyles(html) {
+    const s = String(html == null ? '' : html);
+    const headMatch = /<head\b[^>]*>([\s\S]*?)<\/head\s*>/i.exec(s);
+    if (!headMatch) return '';
+    const head = headMatch[1];
+    const out = [];
+
+    // Inline <style> blocks, excluding Noteback's own injected UI styles.
+    const styleRe = /<style\b([^>]*)>[\s\S]*?<\/style\s*>/gi;
+    let m;
+    while ((m = styleRe.exec(head)) !== null) {
+      if (new RegExp('\\b' + UI_ATTR + '\\b', 'i').test(m[1])) continue;
+      out.push(m[0]);
+    }
+
+    // <link rel="stylesheet"> references (best-effort: external/relative hrefs
+    // resolve against the canvas's location, same as any saved HTML document).
+    const linkRe = /<link\b[^>]*>/gi;
+    let lm;
+    while ((lm = linkRe.exec(head)) !== null) {
+      if (!/\brel\s*=\s*["']?\s*stylesheet/i.test(lm[0])) continue;
+      if (new RegExp('\\b' + UI_ATTR + '\\b', 'i').test(lm[0])) continue;
+      out.push(lm[0]);
+    }
+
+    return out.join('\n  ');
   }
 
   /**
@@ -601,6 +712,7 @@
     EMBEDDED_BOOT,
     buildCanvasHtml,
     extractBodyMarkup,
+    extractHeadStyles,
     escapeForInlineScript,
     escapeForJsonScript,
     downloadCanvas,

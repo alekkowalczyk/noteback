@@ -33,12 +33,11 @@
 (function () {
   'use strict';
 
-  // Stand down if an overlay is already mounted on this page — most importantly
-  // when the page is itself a Noteback *canvas*, whose embedded runtime booted
-  // first and set this flag. Mounting again would double the UI and split state
-  // between the canvas's in-file JSON and chrome.storage. boot.js OWNS this flag
-  // (sets it synchronously on mount); we only read it here. This also prevents a
-  // duplicate content-script injection from booting twice.
+  // Stand down if THIS isolated world already booted — a duplicate content-script
+  // injection. boot.js sets __notebackBooted on the global it sees; for us that is
+  // the ISOLATED world's global, so this catches a re-injection but NOT an embedded
+  // canvas that booted in the page's MAIN world (different globalThis). That
+  // cross-world case is handled just below, through the shared DOM.
   if (window.__notebackBooted) return;
 
   const RT = window.NotebackRuntime || {};
@@ -49,10 +48,27 @@
     return;
   }
 
+  // Stand down if the page is itself a Noteback *canvas*: its inlined runtime boots
+  // at DOMContentLoaded (before our document_idle) and mounts an overlay into the
+  // shared light DOM. Content scripts share the DOM but NOT JS globals with the
+  // page, so the canvas's main-world __notebackBooted is invisible above — we
+  // detect its overlay through the DOM instead (boot.js stamps a synchronous
+  // [data-noteback-ui] mount marker). Mounting again would show two launchers and
+  // split state between the canvas's localStorage/in-file history and chrome.storage.
+  if (RT.originPolicy && typeof RT.originPolicy.overlayMounted === 'function' &&
+      RT.originPolicy.overlayMounted(document)) {
+    return;
+  }
+
   /* --- identity ------------------------------------------------------------ */
 
   const docId = location.href;
   const docTitle = deriveTitle();
+
+  // The resolved history doc-id (baked attribute or nb:url minted id). Cached so the
+  // settings re-evaluation and NOTEBACK_PING can read it synchronously after boot.
+  let historyDocId = null;
+  let docIdPromise = null;
 
   function deriveTitle() {
     const t = (document.title || '').trim();
@@ -62,9 +78,40 @@
     return last || location.href;
   }
 
+  // History doc-id: a baked attribute (the page is itself a wrapped canvas) wins;
+  // else a per-URL minted id, persisted in chrome.storage under
+  // `nb:url:<normalizedHref>` (fragment stripped, so #hash routes share a bucket),
+  // so the same page maps to a stable history bucket across reloads. Distinct
+  // from `docId` (location.href) above, which keys the comments-only
+  // ChromeStorageAdapter and the export identity — those are unchanged.
+  function resolveDocId() {
+    if (docIdPromise) return docIdPromise;
+    docIdPromise = new Promise(function (resolve) {
+      const rootEl = document.getElementById('noteback-doc-root');
+      const baked = rootEl && rootEl.getAttribute && rootEl.getAttribute('data-noteback-doc-id');
+      if (baked) { resolve(baked); return; }
+      // fragment-independent: same doc across #hash routes
+      const normHref = (location.href || '').split('#')[0];
+      const urlKey = 'nb:url:' + normHref;
+      try {
+        chrome.storage.local.get(urlKey, function (items) {
+          let id = items && items[urlKey];
+          if (id) { resolve(id); return; }
+          id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+          const bag = {};
+          bag[urlKey] = id;
+          chrome.storage.local.set(bag, function () { resolve(id); });
+        });
+      } catch (e) { resolve(''); }
+    });
+    return docIdPromise;
+  }
+
   /* --- adapter ------------------------------------------------------------- */
 
-  const adapter = RT.chromeStorageAdapter.createChromeStorageAdapter(docId);
+  // The StorageAdapter is built per-mount (async), gated by the origin's history
+  // opt-in: see buildAdapter() / mount(). The comments-only ChromeStorageAdapter
+  // is the fallback when history is not allowed (or the kv store is unavailable).
 
   /* --- export hooks (wired into the overlay via boot) ---------------------- */
 
@@ -156,16 +203,80 @@
   let active = false;
   let ready = Promise.resolve(null); // always resolves to the current controller (or null)
 
-  function mount() {
+  // The history gate for THIS page, computed identically wherever it's needed
+  // (buildAdapter chooses the adapter type; applySettings decides whether a live
+  // change must re-mount). Reads the module-level historyDocId at call time.
+  function historyOkFor(settings) {
+    return !!(policy && policy.historyAllowed &&
+      policy.historyAllowed({ type: originType, origin: origin, docKey: historyDocId }, settings));
+  }
+
+  /**
+   * Build the StorageAdapter (and optional history wiring) for this mount.
+   * When history is allowed for the page's origin and the chrome-backed kv store
+   * + a resolved history doc-id are both available, run the unified history
+   * engine over chrome.storage. Otherwise fall back to the comments-only
+   * ChromeStorageAdapter (today's behavior — unchanged). chrome.* lives only here
+   * and in the kv/chrome-storage adapters.
+   * @param {Object|null} settings  per-origin policy settings (null on force-activate).
+   * @returns {Promise<{adapter:Object, history:Object|null}>}
+   */
+  function buildAdapter(settings) {
+    const historyOk = historyOkFor(settings);
+    if (!historyOk || !RT.historyStateAdapter || !RT.chromeKvStore || !RT.snapshotCapture) {
+      return Promise.resolve({
+        adapter: RT.chromeStorageAdapter.createChromeStorageAdapter(docId),
+        history: null
+      });
+    }
+    return resolveDocId().then(function (resolvedId) {
+      // createChromeKvStore THROWS eagerly if chrome.storage.local is missing —
+      // catch (don't .catch()) and degrade to the comments-only path.
+      let kv = null;
+      try { kv = RT.chromeKvStore.createChromeKvStore(chrome); } catch (e) { kv = null; }
+      if (!kv || !resolvedId) {
+        return {
+          adapter: RT.chromeStorageAdapter.createChromeStorageAdapter(docId),
+          history: null
+        };
+      }
+      const adapter = RT.historyStateAdapter.createHistoryStateAdapter({
+        doc: document,
+        store: kv,
+        inner: null,
+        docId: resolvedId,
+        contentText: function () {
+          try { return (document.getElementById('noteback-doc-root') || document.body).textContent || ''; }
+          catch (e) { return ''; }
+        },
+        captureSnapshot: function () { return RT.snapshotCapture.captureCleanDoc(document); }
+      });
+      return {
+        adapter: adapter,
+        history: (adapter.getHistory ? {
+          getHistory: function () { return adapter.getHistory(); },
+          getVersion: function (ref) { return adapter.getVersion(ref); },
+          getCurrentVersionKey: function () { return adapter.getCurrentVersionKey(); },
+          clearCurrent: function () { return adapter.clearCurrent(); }
+        } : null)
+      };
+    });
+  }
+
+  function mount(settings) {
     if (active) return ready;
     active = true;
-    ready = RT.boot
-      .boot({
-        root: document.body || document.documentElement,
-        adapter: adapter,
-        exporter: exporter,
-        docId: docId,
-        docTitle: docTitle
+    ready = buildAdapter(settings)
+      .then(function (built) {
+        return RT.boot.boot({
+          root: document.body || document.documentElement,
+          adapter: built.adapter,
+          exporter: exporter,
+          history: built.history,
+          mode: 'extension',
+          docId: docId,
+          docTitle: docTitle
+        });
       })
       .then(function (c) { controller = c; return c; })
       .catch(function () { controller = null; return null; });
@@ -187,29 +298,40 @@
     return policy.isActive({ type: originType, origin: origin }, settings);
   }
 
+  let lastHistoryOk = null; // only meaningful on the settings-driven path (force-activate pages never re-mount)
+
   function applySettings(settings) {
-    if (shouldActivate(settings)) mount();
-    else unmount();
+    // History gate is decided at mount (the adapter TYPE differs). To honor a live
+    // history opt-out we re-mount when the gate flips while active — comments survive
+    // (they live in chrome.storage); the rebuilt adapter shows/hides the timeline.
+    const histOk = historyOkFor(settings);
+    if (!shouldActivate(settings)) { unmount(); lastHistoryOk = histOk; return; }
+    if (active && histOk !== lastHistoryOk) unmount(); // gate flipped → rebuild adapter
+    lastHistoryOk = histOk;
+    mount(settings);
   }
 
   // Click-to-activate (unsupported origins). When the popup injects us on an
   // 'other' origin via activeTab, it first sets window.__notebackForceActivate.
   // The user's click IS the opt-in, so we mount unconditionally and do NOT
-  // consult nb:settings (the per-type/per-site predicate governs only
-  // file/localhost/127). Such pages also ignore live settings changes.
+  // consult nb:settings. Such pages also ignore live settings changes.
   if (window.__notebackForceActivate) {
     mount();
   } else {
-    // Initial decision from stored settings.
-    readSettings().then(applySettings);
+    // Resolve the history doc-id once (needed for the per-doc opt-out gate + PING),
+    // THEN make the initial settings decision and subscribe to live changes.
+    resolveDocId().then(function (id) {
+      historyDocId = id || null;
+      readSettings().then(applySettings);
 
-    // React live to popup-driven changes (no page reload needed).
-    if (chrome.storage && chrome.storage.onChanged) {
-      chrome.storage.onChanged.addListener(function (changes, area) {
-        if (area !== 'local' || !changes[SETTINGS_KEY]) return;
-        applySettings(changes[SETTINGS_KEY].newValue || null);
-      });
-    }
+      // React live to popup-driven changes (no page reload needed).
+      if (chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.addListener(function (changes, area) {
+          if (area !== 'local' || !changes[SETTINGS_KEY]) return;
+          applySettings(changes[SETTINGS_KEY].newValue || null);
+        });
+      }
+    });
   }
 
   function readSettings() {
@@ -237,6 +359,7 @@
           originType: originType,
           origin: origin,
           docId: docId,
+          historyDocId: historyDocId,
           docTitle: docTitle
         });
         return false;

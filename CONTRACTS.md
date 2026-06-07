@@ -60,12 +60,77 @@ Rules:
 - Adapters are **stateless wrappers** over their backing store; identity is the
   `docId` inside the State, not adapter instance.
 
-Implementations (both satisfy the contract; see §12 adapter tests):
+**History-mode extension.** When the adapter is the **snapshot-history adapter**
+(`createHistoryStateAdapter`, §8) it additionally exposes
+`getHistory() -> Promise<Version[]>`, `getVersion({versionKey}) -> Promise<{html, comments, docTitle, contentHash}|null>`,
+`getCurrentVersionKey() -> Promise<string|null>` (THIS document's current version key
+— its content hash, or `null` when degraded), `exportHistory() -> Promise<{schemaVersion, entries}|null>`
+(this doc's full history as a kv-key → record map, snapshots included; used by "save
+with comments and history" to embed history in the file), and
+`clearCurrent() -> Promise<void>`. The overlay
+feature-detects these (via the `history` config passed to `boot`, §3.7) to drive the
+version timeline; the comments-only `ChromeStorageAdapter`/`InFileStateAdapter` don't
+have them and the timeline stays hidden. There is no per-comment "section" lookup —
+history operates on whole-document version snapshots, not extracted fragments.
+
+**Inline version view.** Clicking a version row calls `openVersionInline(versionKey)`,
+which opens a read-only `<iframe srcdoc>` side panel (`.nb-hist-view`) beside the
+sidebar — same tab, same origin. An in-tab `viewingKey` (null = live draft) drives the
+timeline: the viewed row is the active `nb-ver-viewing` row (active dot + highlight, no
+text label), a "Back to current" bar (`renderBackToCurrentBar`) is shown above the
+timeline and calls `closeVersionInline()` to return to the live draft, and every other
+row remains clickable to switch the view. Inline viewing never mutates the live
+document. There is no new-tab checkout: `openVersionTab` and the
+`data-noteback-checkout` marker were removed because a `window.open(blob:)` tab spawned
+from a `file://` canvas gets an opaque origin whose `localStorage` is denied, leaving
+the opened tab's history sidebar empty.
+
+- **Diff view.** While viewing an earlier version inline, a "Diff" toggle in the
+  panel header re-renders the document as an inline, formatting-preserving diff of
+  the viewed version (base) against the **next chronological version** (target):
+  the most-recent earlier version diffs against the live current draft ("now").
+  Added runs are green `<ins class="nb-diff-ins">` / `.nb-diff-ins-block`, removed
+  runs red `<del class="nb-diff-del">` / `.nb-diff-del-block`, edited paragraphs
+  `.nb-diff-edit-block` (word-level). To read unmistakably as a comparison (not as
+  document content), the diff iframe gets a sticky legend header
+  (`.nb-diff-legend` — "Comparing v{from} → {to}" + a colour key) and each changed
+  block carries a left gutter rail (a `+`/`−`/`✎` badge + thick change-bar via
+  `::before`) and an `Added`/`Removed`/`Edited` tag (`::after`) — a SOLID,
+  saturated, square label filled with the rail colour (not a pale wash), on a
+  square-cornered block, so the change type registers instantly. Word changes use a
+  shape cue (underline for adds, strike-through for deletes) on top of colour.
+  Comment highlights stay painted (layered on a separate visual channel). The
+  legend also carries a right-aligned **Prev/Next change navigator** (a `n / N`
+  counter between two buttons) driven by an in-iframe script (`buildDiffNavScript`):
+  it steps a `.nb-diff-focus` pointer through the changed blocks in document order,
+  scrolling each to centre with a colour ring + intensified fill, wrapping at both
+  ends. A **"Show diff"** shortcut on the live `now` timeline row
+  (`.nb-ver-diff`) opens the latest-version → now diff directly (diff toggle
+  pre-armed) — equivalent to opening that version's row and enabling Diff. The
+  toggle is sticky while switching version rows and
+  resets on "Back to current". Pure diff logic lives in `NotebackRuntime.diff`
+  (`src/runtime/diff.js`); DOM rendering in `NotebackRuntime.diffRender`
+  (`src/runtime/diff-render.js`).
+
+**Version save actions.** A version row's `▾` actions menu offers **Copy feedback**,
+**Save HTML with comments**, and **Save clean HTML** (both saves disabled when the
+version's snapshot is pruned). "Save HTML with comments" rebuilds a re-openable canvas
+of that version via `buildVersionCanvasHtml(v, docId, docTitle)` (clone the live shell,
+swap in the snapshot content, re-seed `#noteback-state` with the version's comments,
+escaping `</script>`; no checkout marker); "Save clean HTML" saves the raw `v.html`
+snapshot. Both route through `exporter.onSaveHtml(html, name)` and are **downloaded** —
+opening the file later is a fresh `file://` canvas with its own storage, which is why
+this re-uses a version-canvas builder without reintroducing the opaque-origin bug.
+
+Implementations (all satisfy the `load`/`save` core; covered by the adapter tests
+under `test/` — `history-state-adapter.test.js`, `chrome-kv-store.test.js`,
+`draft-history-core.test.js`):
 
 | Implementation        | File                                      | Backing store |
 |-----------------------|-------------------------------------------|---------------|
-| `ChromeStorageAdapter`| `src/adapters/chrome-storage-adapter.js`  | `chrome.storage.local`, keyed by `docId` |
+| `ChromeStorageAdapter`| `src/adapters/chrome-storage-adapter.js`  | `chrome.storage.local`, keyed by `docId` (comments-only) |
 | `InFileStateAdapter`  | `src/adapters/infile-state-adapter.js`    | the in-file `<script id="noteback-state">` JSON block |
+| `createHistoryStateAdapter` | `src/adapters/history-state-adapter.js` | a kv store (chrome- or localStorage-backed) + the history core, wrapping an inner adapter (§8) |
 
 ### 1.1 ChromeStorageAdapter
 
@@ -105,28 +170,57 @@ from per-document state, which is keyed `"noteback:" + docId`, §1.1). Shape:
 {
   "version": 1,
   "origins": { "file": true, "localhost": true, "127.0.0.1": true },
-  "disabledSites": []   // canonical origins, e.g. "http://localhost:3000"; "file://" for file pages
+  "disabledSites": [],  // canonical origins, e.g. "http://localhost:3000"; "file://" for file pages
+  "historySites": []    // canonical origins opted IN to snapshot history (§8); other origins are comments-only
 }
 ```
 
-A missing/partial object reads as **all-on, nothing disabled** (current behavior;
-zero migration). `src/content/origin-policy.js` is the single source of truth and
-is shared by the content script (gating) and the popup (rendering toggles):
+A missing/partial object reads as **all-on, nothing disabled, history opt-in empty**
+(current behavior; zero migration). `src/content/origin-policy.js` is the single
+source of truth and is shared by the content script (gating) and the popup
+(rendering toggles):
 
 - `classifyOrigin(loc) -> 'file' | 'localhost' | '127.0.0.1' | 'other'`
 - `originOf(loc) -> canonical origin` (`"file://"` for file pages)
-- `normalizeSettings(s) -> { origins, disabledSites }` (defaults filled)
+- `normalizeSettings(s) -> { origins, disabledSites, historySites, historyDisabledGlobal, historyDisabledSites, historyDisabledDocs }` (defaults filled)
 - `isActive({type, origin}, settings)` — **active** iff `origins[type] !== false`
   **and** `origin ∉ disabledSites`. Per-type is the master gate; per-site only
   subtracts a single origin. `'other'` is never active.
+- `historyAllowed({type, origin, docKey}, settings)` — gates the **snapshot-history
+  engine** (§8). Default-**on** for `file`/`localhost`/`127.0.0.1`; for any other origin
+  it is opt-in via `origin ∈ historySites`. When false the content script keeps the
+  comments-only `ChromeStorageAdapter` (no version timeline). Decided at first mount.
+- `overlayMounted(doc) -> boolean` — true when a Noteback overlay is already mounted on
+  `doc` (any `[data-noteback-ui]` node). The content script calls this to stand down on a
+  page whose own embedded canvas runtime already booted (see §3.7's cross-world note);
+  `doc` is caller-supplied, so the module stays node-testable.
+
+**History opt-out (subtract layer).** A user can stop recording history without
+losing what's stored. The mechanism differs by mode but the semantics match — both
+take effect **live** and **keep** stored data:
+
+- `historyAllowed({type, origin, docKey}, settings)` applies an opt-out subtract
+  layer above the base rule: `historyDisabledGlobal` (kill switch),
+  `historyDisabledSites` (origins), and `historyDisabledDocs` (history doc-ids) each
+  force `false`. Base rule unchanged (on for file/localhost/127; `historySites`
+  opt-in for other origins). `nb:settings` gains those three fields (normalized:
+  bool / [] / []).
+- Embedded mode carries no settings; it opts out via two localStorage flags,
+  `nb:nohist:global` and `nb:nohist:doc:<docId>`, surfaced as `historyControl`
+  (`available/globalOff/docOff/enabled/setGlobal/setDoc`) on the embedded boot.
+- `createHistoryStateAdapter` accepts an optional `isEnabled()` predicate; false ⇒
+  pass-through to `inner`, empty `getHistory()`/`getVersion()` (data kept). Live
+  toggle invalidates the memoized resolution.
+- `boot()` / `mountOverlay()` cfg gains `historyControl` (embedded only); the overlay
+  renders the gear ⚙ when `runMode === 'embedded' && historyControl.available`.
 
 **Active** → the content script mounts the overlay. **Dormant** → injected but
 mounts nothing (no chip, launcher, or listeners); stored comments are untouched.
 The content script re-evaluates live on `chrome.storage.onChanged`, so popup
 toggles take effect without a page reload. `NOTEBACK_PING` reports
-`{ booted, dormant, originType, origin }` so the popup distinguishes "off by
-settings" from "no file access". The embedded canvas is unaffected — it has no
-settings and always shows its UI.
+`{ booted, dormant, originType, origin, historyDocId }` so the popup distinguishes
+"off by settings" from "no file access" and scopes the per-page history opt-out. The
+embedded canvas is unaffected — it has no settings and always shows its UI.
 
 ### 1.4 Click-to-activate on unsupported origins (extension mode only)
 
@@ -150,8 +244,8 @@ and `isActive` is `false` (§1.3). The popup offers a manual escape hatch:
 Activation is **ephemeral**: a reload drops the injected runtime and the user
 re-clicks. Annotation **data** persists per-URL in `chrome.storage.local`
 (keyed `"noteback:" + docId`, §1.1), so highlights re-render on the next
-activation. The injected list is the extension runtime only; canvas-only files
-(`draft-history-core`, `snapshot`, `localstorage-state-adapter`) are excluded.
+activation. The injected list is **exactly** `content_scripts[0].js` from the
+manifest (the same files the browser would auto-inject), so it never drifts.
 
 ---
 
@@ -186,7 +280,11 @@ by `markdown.js`.
 Field rules:
 - `schemaVersion` — integer, currently `1`.
 - `docId` — string; the document identity key. Re-opening the same file restores
-  its comments.
+  its comments. In **comments-only** modes this is the file path / URL
+  (`location.href`). The **snapshot-history** engine (§8) uses a separate, explicit
+  doc-id — the value baked into `#noteback-doc-root[data-noteback-doc-id]` (§5), or a
+  per-URL minted id for extension pages Noteback didn't author. Its version records
+  (`nb:doc:` / `nb:ver:`) live in §8, not in this State block.
 - `docTitle` — string; human label (usually the file name).
 - `comments` — array, possibly empty, order = creation order.
 - `comment.id` — string, format `"c_" + <stable unique id>`.
@@ -320,6 +418,11 @@ Mode-agnostic UI: floating "💬 Comment" button, comment popover, sidebar.
  * @param {Node} cfg.root                 Document root to annotate.
  * @param {StorageAdapter} cfg.adapter    Persistence (see §1).
  * @param {Object} cfg.exporter           Export hooks (see §3.6); may be partial in embedded mode.
+ * @param {Object} [cfg.history]          Snapshot-history adapter (see §1, §8); null/absent → timeline hidden.
+ * @param {Object} [cfg.historyControl]   Embedded-only history opt-out control (§1.3); drives the gear ⚙ (`available/globalOff/docOff/enabled/setGlobal/setDoc`). Null/absent → no gear.
+ * @param {string} [cfg.mode]             'extension' | 'embedded' — drives the info-dialog run-mode
+ *                                        indicator. Defaults to 'embedded' (the canvas is the common case);
+ *                                        the extension content script passes 'extension'.
  * @returns {{ destroy: () => void, refresh: () => Promise<void> }}
  */
 function mountOverlay(cfg) { ... }
@@ -331,6 +434,12 @@ function mountOverlay(cfg) { ... }
   **keyframe animation restarted via reflow** (`classList.remove` →
   `void el.offsetWidth` → `classList.add`), NOT a CSS `transition` — a transition
   out of `display:none` does not reliably fire. See the gotcha in `CLAUDE.md`.
+- **The chip hugs the cursor**, not the centre of the passage: it's anchored to
+  the selection's *focus point* (where the drag ended) and centred on that x —
+  **below** the cursor for a forward drag, flipped **above** for a backward one
+  (so it never covers the just-selected text), flipping again only when the
+  viewport lacks room. The *composer*, by contrast, is still placed off the full
+  selection box (see below). Covered by `test/e2e/comment-chip-position.e2e.test.js`.
 - **Comment composer** is positioned to stay clear of the selection's vertical
   band when there's room (prefer below, flip above, else hug the nearer edge),
   is **draggable by its handle**, and is dismissed **only** by Cancel / Save /
@@ -377,13 +486,27 @@ Each receives the current `State`.
  * @property {(state: State) => void|Promise<void>}   [onCopyMarkdown] Copy feedback as Markdown.
  * @property {(state: State, opts: {clean?: boolean}) => Promise<string>} [onCopyHtml] Build HTML for the clipboard — the clean document (clean:true) or the full feedback canvas (clean:false). Returns the string; the overlay/popup writes it to the clipboard.
  * @property {(state: State) => void|Promise<void>}   [onSaveCanvas]   Save HTML *with* comments (re-shareable canvas).
+ * @property {(state: State) => void|Promise<void>}   [onSaveCanvasWithHistory] Save HTML with comments AND the embedded version history (a `#noteback-history` JSON block). Present only on the embedded canvas. The overlay shows the "with comments and history" item only when this hook exists AND `getHistory()` is non-empty.
  * @property {(state: State) => void|Promise<void>}   [onSaveClean]    Save HTML *without* Noteback (the original document).
+ * @property {(html: string, name: string) => void|Promise<void>} [onSaveHtml] Save a PRE-BUILT HTML string to a file (the overlay builds it — e.g. a past version's canvas or clean snapshot — and this routes it through the same save-in-place/download primitives the live-doc saves use). Present only on the embedded canvas.
  * @property {(state: State) => void}                 [onSavePdf]      Produce a PDF. Omit to use the overlay's default (`window.print()`).
  */
 ```
 
 Footer **Save…** menu → hooks: *HTML · with comments* → `onSaveCanvas`,
-*HTML · clean copy* → `onSaveClean`, *PDF/Print* → `onSavePdf` (default `window.print()`).
+*HTML · with comments and history* → `onSaveCanvasWithHistory` (hidden unless there's
+history), *HTML · clean copy* → `onSaveClean`, *PDF/Print* → `onSavePdf`
+(default `window.print()`).
+
+**Embedded history block.** `onSaveCanvasWithHistory` calls the adapter's
+`exportHistory()` (a `{schemaVersion, entries}` map of `nb:doc:*`/`nb:ver:*` kv keys →
+records, snapshots included) and writes it into a `<script id="noteback-history"
+type="application/json">` block (escaping `</script>` to `<\/script>` so a comment body
+can't close it). On reopen the embedded boot **synchronously** seeds `localStorage` from
+that block — **only keys not already present** (never clobber newer local data) — before
+the history adapter first resolves. The block is excluded from snapshots
+(`captureCleanDoc`), clean copies (`rebuildCleanHtml`), plain "with comments" saves
+(`rebuildHtml`), so it never nests/recurses.
 
 Footer **Copy ▾** menu → `onCopyHtml`: *Copy html (with feedback)* →
 `onCopyHtml(state, {clean:false})` (same bytes as `onSaveCanvas`), *Copy html
@@ -410,21 +533,31 @@ Single entry point used by **both** modes.
  * @param {Node} [cfg.root=document.body]
  * @param {StorageAdapter} cfg.adapter
  * @param {Object} [cfg.exporter]
+ * @param {Object} [cfg.history]   Snapshot-history adapter (see §1, §8); forwarded to the overlay.
+ * @param {Object} [cfg.historyControl] Embedded-only history opt-out control (§1.3); forwarded to the overlay (gear ⚙).
  * @returns {Promise<{ destroy: () => void }>}
  */
 async function boot(cfg) { ... }
 ```
 
-**Single-mount guard (cross-module invariant).** `boot()` sets `window.__notebackBooted`
+**Single-mount guard (per JS world).** `boot()` sets `window.__notebackBooted`
 synchronously on first call (before any `await`) and stores its controller on
-`window.__notebackController`. A second `boot()` returns that existing controller
-instead of mounting again. This matters when a page carries **both** an embedded
-canvas runtime **and** the installed extension (opening a saved/agent-wrapped canvas
-with the extension on): the embedded canvas boots first (its inline script runs before
-the content script's `document_idle`), so it wins and the extension stands down — no
-duplicate launcher/sidebar, and the canvas's in-file state stays authoritative rather
-than competing with `chrome.storage`. `content-script.js` only **reads** the flag
-(early-returns if set); `boot.js` owns writing it, and `destroy()` clears it.
+`window.__notebackController`; a second `boot()` **in the same world** returns that
+controller instead of mounting again (a duplicate injection / re-boot).
+
+**Cross-world stand-down (embedded canvas vs. extension).** When a page carries **both**
+an embedded canvas runtime **and** the installed extension (opening a saved canvas with
+the extension on), the two run in **separate JS worlds** — the canvas in the page's MAIN
+world, the content script in an ISOLATED world — so neither sees the other's
+`__notebackBooted` flag. The hand-off goes through the **shared DOM** instead: `boot()`
+appends a synchronous `<div data-noteback-ui="mount">` marker (before its first `await`,
+so it's present by the extension's `document_idle`; `destroy()` removes it). The content
+script stands down when `originPolicy.overlayMounted(document)` finds any
+`[data-noteback-ui]` node — the embedded canvas boots at `DOMContentLoaded` (before
+`document_idle`), so it wins and the extension does **not** double-mount. Because the
+marker only exists when `boot()` actually ran, a canvas whose runtime was blocked (e.g.
+CSP) leaves no marker and the extension correctly takes over. Guarded by
+`test/e2e/extension-standdown.e2e.test.js` (loads the real unpacked extension).
 
 ---
 
@@ -456,16 +589,17 @@ Node tests require the file directly:
 | `src/runtime/highlight.js`                | `highlight`             | no                     | DOM         |
 | `src/runtime/overlay.js`                  | `overlay`               | no                     | DOM         |
 | `src/runtime/draft-history-core.js`       | `draftHistory`          | yes                    | pure-ish    |
-| `src/runtime/snapshot.js`                 | `snapshot`              | yes                    | mixed       |
+| `src/runtime/snapshot-capture.js`         | `snapshotCapture`       | yes                    | pure-ish    |
 | `src/runtime/boot.js`                     | `boot`                  | no                     | DOM         |
 | `src/adapters/chrome-storage-adapter.js`  | `chromeStorageAdapter`  | no                     | DOM (chrome)|
+| `src/adapters/chrome-kv-store.js`         | `chromeKvStore`         | yes (tests)            | DOM (chrome)|
 | `src/adapters/infile-state-adapter.js`    | `infileStateAdapter`    | no                     | DOM         |
-| `src/adapters/localstorage-state-adapter.js` | `localStorageStateAdapter` | yes (tests)        | DOM         |
+| `src/adapters/history-state-adapter.js`   | `historyStateAdapter`   | yes (tests)            | mixed       |
 | `src/canvas/exporter.js`                  | `exporter`              | yes (pure parts)       | mixed       |
 
-**Runtime dependency order** (the order the service worker concatenates for
-inlining, the order in `web_accessible_resources`, and the order in
-`bin/noteback.js` / `examples/build-canvas.js`):
+**Runtime dependency order** — the order the service worker concatenates for
+inlining and the order in `bin/noteback.js`'s `RUNTIME_FILES` (the `wrap` CLI) /
+`examples/build-canvas.js`:
 
 ```
 src/runtime/anchor.js
@@ -474,24 +608,25 @@ src/runtime/markdown.js
 src/runtime/highlight.js
 src/runtime/overlay.js
 src/runtime/draft-history-core.js
-src/runtime/snapshot.js
+src/runtime/snapshot-capture.js
 src/adapters/infile-state-adapter.js
-src/adapters/localstorage-state-adapter.js
+src/adapters/history-state-adapter.js
 src/canvas/exporter.js
 src/runtime/boot.js
 ```
 
-(`chrome-storage-adapter.js` and `content-script.js` are loaded **only** in extension
-mode, appended after the shared runtime; they are NOT inlined into the canvas, which
-uses `InFileStateAdapter` instead.)
+The **canvas inline** runtime (above) uses `InFileStateAdapter` as the inner adapter
+and a **localStorage-backed** kv store built inline in the embedded boot (§8); it does
+NOT inline `chrome-kv-store.js`, `chrome-storage-adapter.js`, or `content-script.js`.
 
-The draft-history modules — `draft-history-core.js`, `snapshot.js`, and the
-canvas-only `localstorage-state-adapter.js` — are inlined into the canvas and listed
-in `web_accessible_resources`, but are **not** yet loaded by the extension
-`content_scripts[].js`: Plan 1 leaves the live extension unchanged. The extension
-binding (which adds `draft-history-core.js` + `snapshot.js` to `content_scripts`)
-lands in a later plan; `localstorage-state-adapter.js` stays canvas-only, mirroring
-how `chrome-storage-adapter.js` is extension-only.
+The **extension** loads the full snapshot-history engine: `manifest.json`
+`content_scripts[0].js` lists the same shared runtime **plus** `chrome-kv-store.js`
+(extension kv backend), `chrome-storage-adapter.js` (the comments-only fallback),
+`origin-policy.js`, and `content-script.js` (extension boot). The extension content
+script gates the history adapter behind `historyAllowed` (§1.3); otherwise it falls
+back to the comments-only `ChromeStorageAdapter`. The `content_scripts[0].js` order is
+the single source of truth for click-to-activate injection (§1.4) and is also
+mirrored in `web_accessible_resources` (so the modules can be `fetch`ed for inlining).
 
 ---
 
@@ -512,6 +647,14 @@ exporter both depend on them.
 - Content is `JSON.stringify(state)` (whitespace-insensitive; parsers must tolerate
   both pretty and minified JSON).
 - There is **exactly one** such element per canvas.
+
+**Baked doc-id.** The canvas body wraps the document in
+`<div id="noteback-doc-root" data-noteback-doc-id="…">` (`canvas-template.html`,
+filled by the exporter's `{{DOC_ID}}` token). That attribute is the stable identity
+the snapshot-history engine (§8) keys on — it persists across re-exports, so a
+re-shared/re-wrapped canvas keeps the same version history. `wrap`
+(`bin/noteback.js`) mints one when absent and preserves it on re-export
+(`mintDocId` / `readBakedDocId`); see §8 for the precedence.
 
 ---
 
@@ -536,6 +679,11 @@ exact string is the contract (the exporter writes it; tests may assert it):
    `src/canvas/canvas-template.html` with:
    - the guiding HTML comment (§6),
    - the original document markup,
+   - the original document's `<head>` styling (`{{DOC_STYLE}}`): its inline
+     `<style>` blocks + `<link rel="stylesheet">` refs, **excluding** Noteback's own
+     `data-noteback-ui` styles — so a styled source keeps its look in the canvas
+     instead of rendering as raw HTML. Extracted by `exporter.extractHeadStyles`
+     and substituted **last** so the carried CSS is never re-scanned for `{{…}}` tokens.
    - the state block (§5),
    - one inline `<script>` containing the concatenated runtime + a boot call that uses
      `InFileStateAdapter`.
@@ -544,3 +692,136 @@ exact string is the contract (the exporter writes it; tests may assert it):
 
 The produced file must, with **no extension installed**, render the doc, paint the
 highlights, show the sidebar, and allow add/edit/delete + re-serialize.
+
+---
+
+## 8. Snapshot history
+
+**One** storage-agnostic history engine runs identically in both modes (embedded
+canvas over `localStorage`, extension over `chrome.storage.local`). It keeps a
+per-document timeline of **versions** and snapshots the **whole clean document once**,
+at a version's first comment, so the user can peek/open/copy-feedback on a past draft.
+
+### 8.1 Identity — the doc-id
+
+Identity is an **explicit doc-id**, not derived at runtime:
+
+- **Canvas:** baked into `#noteback-doc-root[data-noteback-doc-id]` (§5).
+- **`wrap` CLI** (`bin/noteback.js`): precedence is explicit `--id <id>` → the id
+  already baked in the `-o` target → the id baked in the input HTML
+  (`#noteback-doc-root` attr OR a source `<!-- noteback-doc-id: … -->` marker) →
+  otherwise **mint** a fresh one. Helpers: `mintDocId`, `readBakedDocId`,
+  `readMarkerDocId`. Re-export preserves the existing id, so a re-wrapped canvas keeps
+  its history. **`--bake-id`** (with a separate `-o` target) stamps the resolved id
+  into the SOURCE as that comment marker (`bakeDocIdIntoSource`, idempotent, after the
+  doctype) so history survives even if the generated canvas is deleted; the marker is
+  stripped from the canvas content (`stripDocIdMarker`) so it never double-anchors.
+- **Extension on a page it didn't author** (no baked id): a per-URL minted id stored
+  under `nb:url:<normalizedHref>` (fragment stripped) in `chrome.storage.local`. A
+  baked id always wins. This is distinct from the comments-only `docId`
+  (`location.href`) that still keys `ChromeStorageAdapter` / the export identity.
+
+### 8.2 The engine — `draft-history-core.js`
+
+`createDraftHistory({store, now, codec, limits})` → `{resolve, persist, history,
+version, clearCurrent}`. It is **pure** — no DOM, no `localStorage`, no `chrome.*` —
+talking only to an injected **async kv store** (`get/set/remove/keys`) and a `codec`
+(`compress`/`decompress`, gzip with an identity fallback). Per doc-id it owns an
+ordered list of versions; each version is keyed by a **content hash** over the
+normalized visible text (`cyrb53`-based), or **`'h0:' + docId`** when the text is too
+short to hash (`< MIN_HASH_CHARS`, 32). `resolve` initialises/looks up the current
+version and returns `{degraded, docId, versionKey, contentHash, comments, hasSnapshot}`;
+`persist` writes the comments and captures the snapshot **once** (only if none stored
+yet); `history` returns past versions (newest-first, non-empty only); `version`
+decompresses one version's snapshot; `clearCurrent` wipes a version's comments +
+snapshot. Retention runs on every `resolve`/`persist`: a snapshot window (~5), a
+metadata window (~15), a 90-day TTL, and a coarse ~3 MB global byte cap (internal
+`prune` / `enforceByteCap`; the doc's newest version and the active version are always
+protected).
+
+### 8.3 kv namespaces / record shapes
+
+- `nb:doc:<docId>` → `{ schemaVersion:1, docId, docTitle, versions:[versionKey,…] }`
+  (oldest→newest).
+- `nb:ver:<versionKey>` → `{ schemaVersion:1, versionKey, docId, contentHash,
+  comments:[], snapshotHtml:<gzip str|''>, createdAt, lastEditedAt, docTitle }`.
+  `versionKey = contentHash || ('h0:' + docId)`.
+- `nb:url:<normalizedHref>` → minted per-URL doc-id (**extension only**, §8.1).
+
+This is a **clean break** from the old key namespaces — old data is simply ignored.
+The embedded canvas still loads its *current* comments from the in-file `#noteback-state`
+block (§5); history is the extra layer on top.
+
+### 8.4 Two kv backends, one engine
+
+- **Extension:** `src/adapters/chrome-kv-store.js` — `createChromeKvStore(chromeApi?)`
+  → async `{get,set,remove,keys}` over `chrome.storage.local` (supports both the
+  callback and promise MV3 forms). It **throws eagerly** if `chrome.storage.local` is
+  unavailable, so callers wrap construction in `try/catch` and degrade.
+- **Embedded canvas:** an equivalent `localStorage`-backed kv store built **inline** in
+  the exporter's `EMBEDDED_BOOT` (`lsStore`). Its `try/catch` is load-bearing —
+  `window.localStorage` can *throw* on `file://`; on failure `lsStore` is `null` and
+  the adapter degrades to the in-file `InFileStateAdapter`.
+
+### 8.5 The adapter — `history-state-adapter.js`
+
+`createHistoryStateAdapter({doc, store, inner, docId, contentText, captureSnapshot, …})`
+is the **mode-agnostic** StorageAdapter (it replaced the old localStorage adapter).
+It wraps an **inner** adapter (embedded: `InFileStateAdapter`; extension: `null`) + the
+kv `store` + the core. `load`/`save` flow comments through both `inner` and the core;
+on the **first** comment it captures the snapshot via `captureSnapshot()` and stores it
+gzipped. It also exposes `getHistory`/`getVersion`/`clearCurrent` (§1) and `makeCodec`
+(gzip via `CompressionStream`/`Response`, identity fallback). `hasSnapshot` is seeded
+from the version's **real stored snapshot state**, never the comment count. If the store
+or core is unusable (or doc-id is empty) it **degrades**: comments still flow through
+`inner`; the history methods return `[]`/`null`/no-op.
+
+### 8.6 Snapshot capture — `snapshot-capture.js`
+
+`captureCleanDoc(doc)` clones `documentElement`, removes `[data-noteback-ui]`, **unwraps**
+every `<mark class="noteback-highlight">`, removes `#noteback-state` and the inline
+runtime `<script>`, and returns the clean full-document HTML. Because marks are
+stripped, the snapshot is **paint-independent** — it does not matter whether highlights
+are painted when `save` runs. `stripNotebackFromHtml(html)` is the string-only Node-test
+equivalent (no DOM); `identityCodec` is the no-op gzip fallback.
+
+### 8.7 Overlay — version timeline + inline view
+
+The overlay renders a **version timeline** (`renderVersions`) instead of the old
+history popup. It docks at the **bottom** of the sidebar — `.nb-versions-dock`, a
+bounded (`max-height:34vh`), self-scrolling band between the scrolling comment list
+(`.nb-list`, `flex:1`) and the action footer (`.nb-foot`), collapsing via `:empty` when
+there are no earlier versions — so the current draft's notes keep the available space.
+Collapse rule: **0** earlier versions → hidden; **1** → inline; **2+** → newest inline +
+a "+N older versions" disclosure. Each row's chevron menu has **copy feedback**, **save
+HTML with comments**, and **save clean HTML** actions, and the row body is click-to-view:
+
+- **Inline view** (`openVersionInline`) parses the stored snapshot and re-renders it by
+  running the **live** highlight painter (`highlightApi.paintHighlights`) over the parsed
+  doc — no cross-node re-highlighter — then **re-injects the shared `HIGHLIGHT_CSS`**
+  (plus `PEEK_POP_CSS` for the in-iframe comment popover) into the snapshot `<head>` so
+  the marks match the live document. It renders inside an `<iframe srcdoc>` that
+  **fills the panel** as a column-flex child (`flex:1;min-height:0`), in a side panel
+  (`.nb-hist-view`) that sits **beside the sidebar** (not a centered modal — the sidebar
+  stays visible on the right with the live timeline). An in-tab `viewingKey` marks the
+  viewed version the active `nb-ver-viewing` row (active dot + highlight, no text label);
+  a "Back to current" bar (`renderBackToCurrentBar` → `closeVersionInline`) returns to the
+  live draft. Pruned snapshots (`html === ''`) toast and leave the view closed. The
+  `</script>` escape applies to `buildPeekPopoverScript`, which serializes comment data
+  into the iframe's inline script.
+
+- **Save actions** (chevron menu): **Save HTML with comments** rebuilds a re-openable
+  canvas of the version with `buildVersionCanvasHtml` (clone the live shell, swap in the
+  snapshot content, re-seed `#noteback-state` with the version's comments, escaping
+  `</script>`); **Save clean HTML** saves the raw `v.html` snapshot. Both call
+  `exporter.onSaveHtml(html, name)` (download), are disabled when the snapshot is pruned,
+  and never `window.open` — so a re-opened saved file is a fresh `file://` canvas with its
+  own storage, avoiding the opaque-origin `localStorage` bug that retired `openVersionTab`.
+
+### 8.8 Per-site opt-in
+
+The extension content script gates the engine on `historyAllowed(info, settings)`
+(§1.3): default-on for `file`/`localhost`/`127.0.0.1`, opt-in via `historySites` for
+other origins. When not allowed it keeps the comments-only `ChromeStorageAdapter`. The
+embedded canvas has no settings and always runs history (subject to `lsStore`
+availability, §8.4).
