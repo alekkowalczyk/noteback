@@ -83,37 +83,35 @@ is a good companion for choosing the aesthetic direction before you write the HT
 
 ## How to wrap
 
-After writing the HTML file (e.g. `plan.html`), wrap it in place:
-
-```
-npx noteback wrap plan.html
-```
-
-`plan.html` is now the canvas — opening it boots the annotation UI. To keep the
-plain original too, write the canvas to a separate file instead:
-
-```
-npx noteback wrap plan.html -o plan.canvas.html
-```
-
-**If you wrap to a separate `-o` file and intend to iterate, add `--bake-id`:**
+After writing the HTML (e.g. `plan.html`), **write the canvas to a separate file
+and bake the id.** Default to this whenever you might iterate:
 
 ```
 npx noteback wrap plan.html -o plan.canvas.html --bake-id
 ```
 
-Noteback keys each document's comments and **version history** to a stable
-*doc-id*. Wrapping **in place** (`wrap plan.html`) bakes that id into the file, so
-re-wrapping always keeps the same history. But with a separate `-o` output the id
-lives **only inside the generated canvas** — if that canvas is later deleted,
-moved, or regenerated from scratch, the next wrap mints a *new* id and the
-document's history (stored in the browser, keyed by the old id) is **orphaned**:
-the comments/timeline silently vanish. `--bake-id` stamps the id back into the
-**source** (`plan.html`, as an HTML comment marker), so every re-wrap resolves the
-same id and history follows the document across edits. Use it whenever the canvas
-is a regenerated build artifact rather than the file you keep — i.e. any time your
-loop is *edit `plan.html` → re-wrap → hand back*. (It's a no-op for in-place wraps,
-which already carry the id.)
+Two reasons this beats wrapping in place:
+
+- **You keep editing the lean source, never the bloated canvas.** The canvas
+  inlines Noteback's runtime, so it's typically ~30× the size of your source
+  (≈9 KB → ≈280 KB in the bundled example). Edit `plan.html` each round — cheap and
+  safe — and treat `plan.canvas.html` as a regenerated deliverable you never open in
+  an editor. Wrapping *in place* (`wrap plan.html` with no `-o`) overwrites your
+  source with that 280 KB canvas, leaving nothing lean to iterate on; re-reading or
+  editing it then burns context and risks corrupting the inlined `<script>`.
+- **History survives regeneration.** Noteback keys each document's comments and
+  **version history** to a stable *doc-id*. With a separate `-o` canvas that id
+  normally lives only inside the generated file, so deleting or regenerating it would
+  mint a *new* id and **orphan** the browser-stored history (comments/timeline
+  silently vanish). `--bake-id` stamps the id back into the source as an HTML comment
+  marker, so every re-wrap resolves the same id and history follows the document.
+
+So your loop is: **edit `plan.html` → `wrap … -o plan.canvas.html --bake-id` → hand
+back `plan.canvas.html`** (the canvas is what the user opens).
+
+For a throwaway one-shot you won't revise, wrapping in place is fine
+(`npx noteback wrap plan.html`; `plan.html` itself becomes the canvas, with the id
+already baked in, so `--bake-id` is a no-op there).
 
 The wrapper reuses Noteback's tested canvas builder, so the embedded runtime is
 escaped correctly — **never assemble the canvas by hand** (the `</script>` / `<!--`
@@ -132,7 +130,7 @@ again.
 
 Show a short, consistent message so the workflow is obvious:
 
-> 📝 I wrote this as a **Noteback canvas** — open **`plan.html`** in your browser.
+> 📝 I wrote this as a **Noteback canvas** — open **`plan.canvas.html`** in your browser.
 > Highlight any text to comment on it, or use the **🗨 Noteback** button (bottom-right)
 > to add a note about the whole document. When you're done, click **Copy feedback**
 > and paste it back here and I'll revise.
