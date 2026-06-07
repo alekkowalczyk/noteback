@@ -148,3 +148,68 @@ test('file://: editing the doc in place moves the comment to an earlier version 
     await context.close();
   }
 });
+
+test('file://: opening a version inline shows the timeline + "you are here", then returns to current', { timeout: 90000 }, async () => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  try {
+    // Clean slate, one comment (draft v0.3).
+    await page.goto(fileURL);
+    await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
+    await page.reload();
+    await page.waitForTimeout(300);
+    await createComment(page, 'feedback on draft v0.3');
+
+    // Edit the file in place so the comment becomes an EARLIER version.
+    const before = fs.readFileSync(canvasFile, 'utf8');
+    const edited = before.replace('Draft v0.3', 'Draft v0.31');
+    assert.notStrictEqual(edited, before, 'sanity: the "Draft v0.3" token was found and edited');
+    fs.writeFileSync(canvasFile, edited);
+    await page.goto(fileURL + '?reload=1');
+    await page.waitForTimeout(500);
+
+    // Sidebar shows the timeline with one earlier-version row.
+    await openSidebar(page);
+    assert.ok(await page.locator('.nb-versions').count() > 0, 'the Versions timeline group is rendered');
+    const earlier = page.locator('.nb-ver-row[data-version-key]');
+    assert.ok(await earlier.count() >= 1, 'an earlier-version row (v0.3) is shown on file://');
+
+    // Open it INLINE. On file:// the live page's localStorage works, so the snapshot
+    // is reachable — this is exactly what the old new-tab blob (opaque origin) could
+    // not do, which is why the opened tab's sidebar was empty.
+    await earlier.first().locator('.nb-ver-line').first().click();
+    await page.waitForTimeout(500);
+    assert.strictEqual(await page.locator('.nb-hist-view').count(), 1, 'the inline version view opens on file://');
+    assert.strictEqual(await page.locator('.nb-sidebar.nb-open').count(), 1, 'the sidebar stays visible beside the inline view');
+
+    // The viewed version is the "you are here" row, and a "Back to current" bar shows.
+    const viewingRow = page.locator('.nb-ver-row.active.nb-ver-viewing');
+    assert.strictEqual(await viewingRow.count(), 1, 'the opened version is marked the active "viewing" row');
+    assert.strictEqual(((await viewingRow.locator('.nb-ver-here').first().textContent()) || '').trim(), 'you are here', 'the opened version is marked "you are here"');
+    assert.strictEqual(await page.locator('.nb-backbar').count(), 1, 'a "Back to current" bar is offered');
+
+    // The inline iframe actually rendered the snapshot (history was reachable).
+    const hasContent = await page.evaluate(() => {
+      function findFrame(node) {
+        if (node.shadowRoot) {
+          const f = node.shadowRoot.querySelector('iframe.nb-hist-frame');
+          if (f) return f;
+          for (const c of node.shadowRoot.querySelectorAll('*')) { const r = findFrame(c); if (r) return r; }
+        }
+        for (const c of node.children || []) { const r = findFrame(c); if (r) return r; }
+        return null;
+      }
+      const f = findFrame(document.documentElement);
+      return !!(f && f.contentDocument && (f.contentDocument.body.textContent || '').length > 0);
+    });
+    assert.ok(hasContent, 'the inline iframe shows the captured snapshot (history reachable on file://)');
+
+    // Back to current closes the view.
+    await page.locator('.nb-backbar').click();
+    await page.waitForTimeout(200);
+    assert.strictEqual(await page.locator('.nb-hist-view').count(), 0, '"Back to current" closes the inline view');
+    assert.strictEqual(await page.locator('.nb-ver-row.nb-ver-viewing').count(), 0, 'no row stays marked "viewing" after returning');
+  } finally {
+    await context.close();
+  }
+});
