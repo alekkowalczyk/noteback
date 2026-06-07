@@ -65,6 +65,11 @@
   const docId = location.href;
   const docTitle = deriveTitle();
 
+  // The resolved history doc-id (baked attribute or nb:url minted id). Cached so the
+  // settings re-evaluation and NOTEBACK_PING can read it synchronously after boot.
+  let historyDocId = null;
+  let docIdPromise = null;
+
   function deriveTitle() {
     const t = (document.title || '').trim();
     if (t) return t;
@@ -80,17 +85,18 @@
   // from `docId` (location.href) above, which keys the comments-only
   // ChromeStorageAdapter and the export identity — those are unchanged.
   function resolveDocId() {
-    const rootEl = document.getElementById('noteback-doc-root');
-    const baked = rootEl && rootEl.getAttribute && rootEl.getAttribute('data-noteback-doc-id');
-    if (baked) return Promise.resolve(baked);
-    // fragment-independent: same doc across #hash routes
-    const normHref = (location.href || '').split('#')[0];
-    const urlKey = 'nb:url:' + normHref;
-    return new Promise(function (resolve) {
+    if (docIdPromise) return docIdPromise;
+    docIdPromise = new Promise(function (resolve) {
+      const rootEl = document.getElementById('noteback-doc-root');
+      const baked = rootEl && rootEl.getAttribute && rootEl.getAttribute('data-noteback-doc-id');
+      if (baked) { resolve(baked); return; }
+      // fragment-independent: same doc across #hash routes
+      const normHref = (location.href || '').split('#')[0];
+      const urlKey = 'nb:url:' + normHref;
       try {
         chrome.storage.local.get(urlKey, function (items) {
           let id = items && items[urlKey];
-          if (id) return resolve(id);
+          if (id) { resolve(id); return; }
           id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
           const bag = {};
           bag[urlKey] = id;
@@ -98,6 +104,7 @@
         });
       } catch (e) { resolve(''); }
     });
+    return docIdPromise;
   }
 
   /* --- adapter ------------------------------------------------------------- */
@@ -208,19 +215,19 @@
    */
   function buildAdapter(settings) {
     const historyOk = !!(policy && policy.historyAllowed &&
-      policy.historyAllowed({ type: originType, origin: origin }, settings));
+      policy.historyAllowed({ type: originType, origin: origin, docKey: historyDocId }, settings));
     if (!historyOk || !RT.historyStateAdapter || !RT.chromeKvStore || !RT.snapshotCapture) {
       return Promise.resolve({
         adapter: RT.chromeStorageAdapter.createChromeStorageAdapter(docId),
         history: null
       });
     }
-    return resolveDocId().then(function (historyDocId) {
+    return resolveDocId().then(function (resolvedId) {
       // createChromeKvStore THROWS eagerly if chrome.storage.local is missing —
       // catch (don't .catch()) and degrade to the comments-only path.
       let kv = null;
       try { kv = RT.chromeKvStore.createChromeKvStore(chrome); } catch (e) { kv = null; }
-      if (!kv || !historyDocId) {
+      if (!kv || !resolvedId) {
         return {
           adapter: RT.chromeStorageAdapter.createChromeStorageAdapter(docId),
           history: null
@@ -230,7 +237,7 @@
         doc: document,
         store: kv,
         inner: null,
-        docId: historyDocId,
+        docId: resolvedId,
         contentText: function () {
           try { return (document.getElementById('noteback-doc-root') || document.body).textContent || ''; }
           catch (e) { return ''; }
@@ -284,32 +291,41 @@
     return policy.isActive({ type: originType, origin: origin }, settings);
   }
 
+  let lastHistoryOk = null;
+
   function applySettings(settings) {
-    // The history-vs-comments gate is decided at FIRST mount (mount() early-returns
-    // when already active); only the activate/deactivate transition is live, so a
-    // per-site history opt-in change takes effect on reload, not immediately.
-    if (shouldActivate(settings)) mount(settings);
-    else unmount();
+    // History gate is decided at mount (the adapter TYPE differs). To honor a live
+    // history opt-out we re-mount when the gate flips while active — comments survive
+    // (they live in chrome.storage); the rebuilt adapter shows/hides the timeline.
+    const histOk = !!(policy && policy.historyAllowed &&
+      policy.historyAllowed({ type: originType, origin: origin, docKey: historyDocId }, settings));
+    if (!shouldActivate(settings)) { unmount(); lastHistoryOk = histOk; return; }
+    if (active && histOk !== lastHistoryOk) unmount(); // gate flipped → rebuild adapter
+    lastHistoryOk = histOk;
+    mount(settings);
   }
 
   // Click-to-activate (unsupported origins). When the popup injects us on an
   // 'other' origin via activeTab, it first sets window.__notebackForceActivate.
   // The user's click IS the opt-in, so we mount unconditionally and do NOT
-  // consult nb:settings (the per-type/per-site predicate governs only
-  // file/localhost/127). Such pages also ignore live settings changes.
+  // consult nb:settings. Such pages also ignore live settings changes.
   if (window.__notebackForceActivate) {
     mount();
   } else {
-    // Initial decision from stored settings.
-    readSettings().then(applySettings);
+    // Resolve the history doc-id once (needed for the per-doc opt-out gate + PING),
+    // THEN make the initial settings decision and subscribe to live changes.
+    resolveDocId().then(function (id) {
+      historyDocId = id || null;
+      readSettings().then(applySettings);
 
-    // React live to popup-driven changes (no page reload needed).
-    if (chrome.storage && chrome.storage.onChanged) {
-      chrome.storage.onChanged.addListener(function (changes, area) {
-        if (area !== 'local' || !changes[SETTINGS_KEY]) return;
-        applySettings(changes[SETTINGS_KEY].newValue || null);
-      });
-    }
+      // React live to popup-driven changes (no page reload needed).
+      if (chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.addListener(function (changes, area) {
+          if (area !== 'local' || !changes[SETTINGS_KEY]) return;
+          applySettings(changes[SETTINGS_KEY].newValue || null);
+        });
+      }
+    });
   }
 
   function readSettings() {
@@ -337,6 +353,7 @@
           originType: originType,
           origin: origin,
           docId: docId,
+          historyDocId: historyDocId,
           docTitle: docTitle
         });
         return false;
