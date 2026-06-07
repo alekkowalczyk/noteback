@@ -16,6 +16,11 @@
   root.NotebackRuntime = root.NotebackRuntime || {};
 
   var BLOCK_SELECTOR = 'p,li,h1,h2,h3,h4,h5,h6,blockquote,pre,td,th,dt,dd,figcaption';
+  var CLS_INS = 'nb-diff-ins';
+  var CLS_DEL = 'nb-diff-del';
+  var CLS_INS_BLOCK = 'nb-diff-ins-block';
+  var CLS_DEL_BLOCK = 'nb-diff-del-block';
+  var CLS_EDIT_BLOCK = 'nb-diff-edit-block';
 
   function diffApi() {
     var g = root.NotebackRuntime || {};
@@ -41,13 +46,13 @@
   // Replace an edited block's children with word-diff runs (eq text / ins / del).
   function applyWordDiff(el, baseText, targetText, doc, diff) {
     while (el.firstChild) el.removeChild(el.firstChild);
-    el.classList.add('nb-diff-edit-block');
+    el.classList.add(CLS_EDIT_BLOCK);
     var runs = diff.diffWords(baseText, targetText);
     for (var i = 0; i < runs.length; i++) {
       var r = runs[i];
       if (r.op === 'eq') { el.appendChild(doc.createTextNode(r.text)); continue; }
       var span = doc.createElement(r.op === 'ins' ? 'ins' : 'del');
-      span.className = r.op === 'ins' ? 'nb-diff-ins' : 'nb-diff-del';
+      span.className = r.op === 'ins' ? CLS_INS : CLS_DEL;
       span.textContent = r.text;
       el.appendChild(span);
     }
@@ -56,6 +61,7 @@
   // Render the inline diff. Returns { body, hasChanges }: a deep clone of the
   // target body carrying .nb-diff-* markup. `doc` is the target's ownerDocument.
   function renderInlineDiff(baseBody, targetBody, doc) {
+    if (!targetBody) return { body: null, hasChanges: false };
     var diff = diffApi();
     var outBody = targetBody.cloneNode(true); // full clone — preserves structure
     if (!diff) return { body: outBody, hasChanges: false };
@@ -72,7 +78,7 @@
         continue; // unchanged — leave the cloned block as-is
       }
       if (s.type === 'ins') {
-        if (outBlocks[s.targetIndex]) outBlocks[s.targetIndex].classList.add('nb-diff-ins-block');
+        if (outBlocks[s.targetIndex]) outBlocks[s.targetIndex].classList.add(CLS_INS_BLOCK);
         changed = true;
         continue;
       }
@@ -82,13 +88,18 @@
         continue;
       }
       // 'del': inject the base-only block before the next surviving target block.
+      // v1 limitation: the deleted block is inserted before the next surviving
+      // target block (or appended to outBody). For a deletion inside a nested
+      // container, that anchor may live in a different parent, so a cross-container
+      // delete can land in the wrong container. Leaf-level positioning only; no
+      // container-hierarchy reconstruction. Acceptable for v1 (never throws).
       var anchor = null;
       for (var j = i + 1; j < steps.length; j++) {
         var nj = steps[j];
         if (nj.type !== 'del' && nj.targetIndex != null && outBlocks[nj.targetIndex]) { anchor = outBlocks[nj.targetIndex]; break; }
       }
       var delEl = base.els[s.baseIndex].cloneNode(true);
-      delEl.classList.add('nb-diff-del-block');
+      delEl.classList.add(CLS_DEL_BLOCK);
       if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(delEl, anchor);
       else outBody.appendChild(delEl);
       changed = true;
