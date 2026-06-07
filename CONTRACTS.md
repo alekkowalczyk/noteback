@@ -85,6 +85,33 @@ document. There is no new-tab checkout: `openVersionTab` and the
 from a `file://` canvas gets an opaque origin whose `localStorage` is denied, leaving
 the opened tab's history sidebar empty.
 
+- **Diff view.** While viewing an earlier version inline, a "Diff" toggle in the
+  panel header re-renders the document as an inline, formatting-preserving diff of
+  the viewed version (base) against the **next chronological version** (target):
+  the most-recent earlier version diffs against the live current draft ("now").
+  Added runs are green `<ins class="nb-diff-ins">` / `.nb-diff-ins-block`, removed
+  runs red `<del class="nb-diff-del">` / `.nb-diff-del-block`, edited paragraphs
+  `.nb-diff-edit-block` (word-level). To read unmistakably as a comparison (not as
+  document content), the diff iframe gets a sticky legend header
+  (`.nb-diff-legend` — "Comparing v{from} → {to}" + a colour key) and each changed
+  block carries a left gutter rail (a `+`/`−`/`✎` badge + thick change-bar via
+  `::before`) and an `Added`/`Removed`/`Edited` tag (`::after`) — a SOLID,
+  saturated, square label filled with the rail colour (not a pale wash), on a
+  square-cornered block, so the change type registers instantly. Word changes use a
+  shape cue (underline for adds, strike-through for deletes) on top of colour.
+  Comment highlights stay painted (layered on a separate visual channel). The
+  legend also carries a right-aligned **Prev/Next change navigator** (a `n / N`
+  counter between two buttons) driven by an in-iframe script (`buildDiffNavScript`):
+  it steps a `.nb-diff-focus` pointer through the changed blocks in document order,
+  scrolling each to centre with a colour ring + intensified fill, wrapping at both
+  ends. A **"Show diff"** shortcut on the live `now` timeline row
+  (`.nb-ver-diff`) opens the latest-version → now diff directly (diff toggle
+  pre-armed) — equivalent to opening that version's row and enabling Diff. The
+  toggle is sticky while switching version rows and
+  resets on "Back to current". Pure diff logic lives in `NotebackRuntime.diff`
+  (`src/runtime/diff.js`); DOM rendering in `NotebackRuntime.diffRender`
+  (`src/runtime/diff-render.js`).
+
 **Version save actions.** A version row's `▾` actions menu offers **Copy feedback**,
 **Save HTML with comments**, and **Save clean HTML** (both saves disabled when the
 version's snapshot is pruned). "Save HTML with comments" rebuilds a re-openable canvas
@@ -681,9 +708,14 @@ Identity is an **explicit doc-id**, not derived at runtime:
 
 - **Canvas:** baked into `#noteback-doc-root[data-noteback-doc-id]` (§5).
 - **`wrap` CLI** (`bin/noteback.js`): precedence is explicit `--id <id>` → the id
-  already baked in the `-o` target → the id baked in the input HTML → otherwise
-  **mint** a fresh one. Helpers: `mintDocId`, `readBakedDocId`. Re-export preserves the
-  existing id, so a re-wrapped canvas keeps its history.
+  already baked in the `-o` target → the id baked in the input HTML
+  (`#noteback-doc-root` attr OR a source `<!-- noteback-doc-id: … -->` marker) →
+  otherwise **mint** a fresh one. Helpers: `mintDocId`, `readBakedDocId`,
+  `readMarkerDocId`. Re-export preserves the existing id, so a re-wrapped canvas keeps
+  its history. **`--bake-id`** (with a separate `-o` target) stamps the resolved id
+  into the SOURCE as that comment marker (`bakeDocIdIntoSource`, idempotent, after the
+  doctype) so history survives even if the generated canvas is deleted; the marker is
+  stripped from the canvas content (`stripDocIdMarker`) so it never double-anchors.
 - **Extension on a page it didn't author** (no baked id): a per-URL minted id stored
   under `nb:url:<normalizedHref>` (fragment stripped) in `chrome.storage.local`. A
   baked id always wins. This is distinct from the comments-only `docId`

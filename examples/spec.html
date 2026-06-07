@@ -1,305 +1,428 @@
-<!DOCTYPE html>
+<!doctype html>
+<!-- noteback-doc-id: dmq41se03tm5q0nu8bh -->
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RealtimeSync Service — Technical Spec</title>
-  <style>
-    :root {
-      --ink: #1b2330;
-      --muted: #586275;
-      --faint: #98a1b2;
-      --line: #e8eaef;
-      --line-soft: #f0f1f4;
-      --accent: #0f766e;
-      --accent-deep: #0b5d56;
-      --accent-wash: #e8f2f0;
-      --honey: #f4c44a;
-      --bg: #fcfcfb;
-      --card: #ffffff;
-      --code-bg: #f4f5f7;
-      --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    }
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>RealtimeSync Service — Technical Spec</title>
+        <style>
+            :root {
+                --ink: #1b2330;
+                --muted: #586275;
+                --faint: #98a1b2;
+                --line: #e8eaef;
+                --line-soft: #f0f1f4;
+                --accent: #0f766e;
+                --accent-deep: #0b5d56;
+                --accent-wash: #e8f2f0;
+                --honey: #f4c44a;
+                --bg: #fcfcfb;
+                --card: #ffffff;
+                --code-bg: #f4f5f7;
+                --sans:
+                    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+                    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+                --serif:
+                    ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino,
+                    Georgia, serif;
+                --mono:
+                    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                    monospace;
+            }
 
-    * { box-sizing: border-box; }
+            * {
+                box-sizing: border-box;
+            }
 
-    html { -webkit-text-size-adjust: 100%; }
+            html {
+                -webkit-text-size-adjust: 100%;
+            }
 
-    body {
-      margin: 0;
-      background:
-        radial-gradient(1200px 480px at 78% -8%, #f3f7f6 0%, rgba(243,247,246,0) 60%),
-        var(--bg);
-      color: var(--ink);
-      font: 400 16.5px/1.72 var(--sans);
-      -webkit-font-smoothing: antialiased;
-      text-rendering: optimizeLegibility;
-    }
+            body {
+                margin: 0;
+                background:
+                    radial-gradient(
+                        1200px 480px at 78% -8%,
+                        #f3f7f6 0%,
+                        rgba(243, 247, 246, 0) 60%
+                    ),
+                    var(--bg);
+                color: var(--ink);
+                font: 400 16.5px/1.72 var(--sans);
+                -webkit-font-smoothing: antialiased;
+                text-rendering: optimizeLegibility;
+            }
 
-    .doc {
-      max-width: 720px;
-      margin: 0 auto;
-      padding: 72px 28px 96px;
-    }
+            .doc {
+                max-width: 720px;
+                margin: 0 auto;
+                padding: 72px 28px 96px;
+            }
 
-    /* ---- header ---------------------------------------------------------- */
-    .doc-head { margin-bottom: 44px; }
+            /* ---- header ---------------------------------------------------------- */
+            .doc-head {
+                margin-bottom: 44px;
+            }
 
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 30px;
-    }
-    .brand-mark {
-      width: 30px; height: 30px; flex: none;
-      display: grid; place-items: center;
-      border-radius: 9px;
-      background: linear-gradient(150deg, var(--accent) 0%, var(--accent-deep) 100%);
-      box-shadow: 0 6px 16px -8px rgba(15, 118, 110, .6);
-    }
-    .brand-mark svg { display: block; }
-    .brand-name {
-      font: 700 14.5px/1 var(--sans);
-      letter-spacing: .01em;
-      color: var(--ink);
-    }
-    .brand-name span { color: var(--accent); }
+            .brand {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 30px;
+            }
+            .brand-mark {
+                width: 30px;
+                height: 30px;
+                flex: none;
+                display: grid;
+                place-items: center;
+                border-radius: 9px;
+                background: linear-gradient(
+                    150deg,
+                    var(--accent) 0%,
+                    var(--accent-deep) 100%
+                );
+                box-shadow: 0 6px 16px -8px rgba(15, 118, 110, 0.6);
+            }
+            .brand-mark svg {
+                display: block;
+            }
+            .brand-name {
+                font: 700 14.5px/1 var(--sans);
+                letter-spacing: 0.01em;
+                color: var(--ink);
+            }
+            .brand-name span {
+                color: var(--accent);
+            }
 
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      margin: 0 0 14px;
-      font: 700 11.5px/1 var(--sans);
-      letter-spacing: .16em;
-      text-transform: uppercase;
-      color: var(--accent);
-    }
-    .eyebrow::before {
-      content: "";
-      width: 22px; height: 3px; border-radius: 3px;
-      background: var(--honey);
-    }
+            .eyebrow {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                margin: 0 0 14px;
+                font: 700 11.5px/1 var(--sans);
+                letter-spacing: 0.16em;
+                text-transform: uppercase;
+                color: var(--accent);
+            }
+            .eyebrow::before {
+                content: "";
+                width: 22px;
+                height: 3px;
+                border-radius: 3px;
+                background: var(--honey);
+            }
 
-    h1 {
-      margin: 0 0 18px;
-      font: 700 42px/1.08 var(--sans);
-      letter-spacing: -.022em;
-      color: var(--ink);
-    }
+            h1 {
+                margin: 0 0 18px;
+                font: 700 42px/1.08 var(--sans);
+                letter-spacing: -0.022em;
+                color: var(--ink);
+            }
 
-    .lead {
-      margin: 0 0 26px;
-      max-width: 60ch;
-      font: 400 19px/1.6 var(--sans);
-      color: var(--muted);
-    }
+            .lead {
+                margin: 0 0 26px;
+                max-width: 60ch;
+                font: 400 19px/1.6 var(--sans);
+                color: var(--muted);
+            }
 
-    .meta-row {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px;
-      padding-top: 22px;
-      border-top: 1px solid var(--line);
-      font: 500 13.5px/1 var(--sans);
-      color: var(--muted);
-    }
-    .badge {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 5px 11px;
-      border-radius: 999px;
-      background: var(--accent-wash);
-      color: var(--accent-deep);
-      font-weight: 600;
-    }
-    .badge::before {
-      content: ""; width: 6px; height: 6px; border-radius: 50%;
-      background: var(--accent);
-    }
-    .meta-dot { color: var(--faint); }
+            .meta-row {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 10px;
+                padding-top: 22px;
+                border-top: 1px solid var(--line);
+                font: 500 13.5px/1 var(--sans);
+                color: var(--muted);
+            }
+            .badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 5px 11px;
+                border-radius: 999px;
+                background: var(--accent-wash);
+                color: var(--accent-deep);
+                font-weight: 600;
+            }
+            .badge::before {
+                content: "";
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+                background: var(--accent);
+            }
+            .meta-dot {
+                color: var(--faint);
+            }
 
-    /* ---- sections -------------------------------------------------------- */
-    section { margin-top: 46px; }
+            /* ---- sections -------------------------------------------------------- */
+            section {
+                margin-top: 46px;
+            }
 
-    h2 {
-      display: flex;
-      align-items: baseline;
-      gap: 14px;
-      margin: 0 0 14px;
-      font: 700 23px/1.2 var(--sans);
-      letter-spacing: -.012em;
-      color: var(--ink);
-    }
-    h2 .num {
-      flex: none;
-      font: 700 13px/1 var(--mono);
-      color: var(--accent);
-      background: var(--accent-wash);
-      padding: 6px 8px;
-      border-radius: 7px;
-      letter-spacing: 0;
-      transform: translateY(-2px);
-    }
+            h2 {
+                display: flex;
+                align-items: baseline;
+                gap: 14px;
+                margin: 0 0 14px;
+                font: 700 23px/1.2 var(--sans);
+                letter-spacing: -0.012em;
+                color: var(--ink);
+            }
+            h2 .num {
+                flex: none;
+                font: 700 13px/1 var(--mono);
+                color: var(--accent);
+                background: var(--accent-wash);
+                padding: 6px 8px;
+                border-radius: 7px;
+                letter-spacing: 0;
+                transform: translateY(-2px);
+            }
 
-    p { margin: 0 0 18px; }
-    p:last-child { margin-bottom: 0; }
+            p {
+                margin: 0 0 18px;
+            }
+            p:last-child {
+                margin-bottom: 0;
+            }
 
-    .body p { color: #2b3447; }
+            .body p {
+                color: #2b3447;
+            }
 
-    code {
-      font: 600 .86em/1 var(--mono);
-      background: var(--code-bg);
-      border: 1px solid var(--line);
-      padding: 2px 6px;
-      border-radius: 6px;
-      color: var(--accent-deep);
-    }
+            code {
+                font: 600 0.86em/1 var(--mono);
+                background: var(--code-bg);
+                border: 1px solid var(--line);
+                padding: 2px 6px;
+                border-radius: 6px;
+                color: var(--accent-deep);
+            }
 
-    /* key/value facts */
-    .facts {
-      margin: 22px 0 0;
-      display: grid;
-      grid-template-columns: max-content 1fr;
-      gap: 10px 20px;
-      padding: 18px 20px;
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-    }
-    .facts dt {
-      font: 600 13px/1.5 var(--sans);
-      color: var(--faint);
-      text-transform: uppercase;
-      letter-spacing: .04em;
-    }
-    .facts dd { margin: 0; font: 500 15px/1.5 var(--sans); color: var(--ink); }
+            /* key/value facts */
+            .facts {
+                margin: 22px 0 0;
+                display: grid;
+                grid-template-columns: max-content 1fr;
+                gap: 10px 20px;
+                padding: 18px 20px;
+                background: var(--card);
+                border: 1px solid var(--line);
+                border-radius: 14px;
+            }
+            .facts dt {
+                font: 600 13px/1.5 var(--sans);
+                color: var(--faint);
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+            }
+            .facts dd {
+                margin: 0;
+                font: 500 15px/1.5 var(--sans);
+                color: var(--ink);
+            }
 
-    /* callout */
-    .note {
-      margin: 24px 0 0;
-      display: flex;
-      gap: 13px;
-      padding: 16px 18px;
-      background: #fffaf0;
-      border: 1px solid #f4e3bd;
-      border-left: 3px solid var(--honey);
-      border-radius: 12px;
-    }
-    .note-ico {
-      flex: none; width: 22px; height: 22px;
-      display: grid; place-items: center;
-      border-radius: 50%;
-      background: var(--honey);
-      color: #5a4413;
-      font: 700 13px/1 var(--sans);
-    }
-    .note p { margin: 0; font-size: 15px; color: #6b5827; }
-    .note strong { color: #4a3c14; }
+            /* callout */
+            .note {
+                margin: 24px 0 0;
+                display: flex;
+                gap: 13px;
+                padding: 16px 18px;
+                background: #fffaf0;
+                border: 1px solid #f4e3bd;
+                border-left: 3px solid var(--honey);
+                border-radius: 12px;
+            }
+            .note-ico {
+                flex: none;
+                width: 22px;
+                height: 22px;
+                display: grid;
+                place-items: center;
+                border-radius: 50%;
+                background: var(--honey);
+                color: #5a4413;
+                font: 700 13px/1 var(--sans);
+            }
+            .note p {
+                margin: 0;
+                font-size: 15px;
+                color: #6b5827;
+            }
+            .note strong {
+                color: #4a3c14;
+            }
 
-    /* ---- footer ---------------------------------------------------------- */
-    .doc-foot {
-      margin-top: 64px;
-      padding-top: 22px;
-      border-top: 1px solid var(--line);
-      display: flex;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 8px;
-      font: 500 13px/1.5 var(--sans);
-      color: var(--faint);
-    }
-    .doc-foot a { color: var(--accent); text-decoration: none; }
-    .doc-foot a:hover { text-decoration: underline; }
+            /* ---- footer ---------------------------------------------------------- */
+            .doc-foot {
+                margin-top: 64px;
+                padding-top: 22px;
+                border-top: 1px solid var(--line);
+                display: flex;
+                justify-content: space-between;
+                flex-wrap: wrap;
+                gap: 8px;
+                font: 500 13px/1.5 var(--sans);
+                color: var(--faint);
+            }
+            .doc-foot a {
+                color: var(--accent);
+                text-decoration: none;
+            }
+            .doc-foot a:hover {
+                text-decoration: underline;
+            }
 
-    @media (max-width: 560px) {
-      .doc { padding: 48px 20px 72px; }
-      h1 { font-size: 33px; }
-      .lead { font-size: 17.5px; }
-    }
-  </style>
-</head>
-<body>
-  <article class="doc">
-    <header class="doc-head">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M3 6.5a5 5 0 0 1 8.6-2.3M13 9.5a5 5 0 0 1-8.6 2.3" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>
-            <path d="M11.4 1.6v2.6H8.8M4.6 14.4v-2.6h2.6" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </span>
-        <span class="brand-name">Realtime<span>Sync</span></span>
-      </div>
+            @media (max-width: 560px) {
+                .doc {
+                    padding: 48px 20px 72px;
+                }
+                h1 {
+                    font-size: 33px;
+                }
+                .lead {
+                    font-size: 17.5px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <article class="doc">
+            <header class="doc-head">
+                <div class="brand">
+                    <span class="brand-mark" aria-hidden="true">
+                        <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                        >
+                            <path
+                                d="M3 6.5a5 5 0 0 1 8.6-2.3M13 9.5a5 5 0 0 1-8.6 2.3"
+                                stroke="#fff"
+                                stroke-width="1.6"
+                                stroke-linecap="round"
+                            />
+                            <path
+                                d="M11.4 1.6v2.6H8.8M4.6 14.4v-2.6h2.6"
+                                stroke="#fff"
+                                stroke-width="1.6"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                        </svg>
+                    </span>
+                    <span class="brand-name">Realtime<span>Sync</span></span>
+                </div>
 
-      <p class="eyebrow">Technical Spec</p>
-      <h1>RealtimeSync Service</h1>
-      <p class="lead">A near-real-time synchronization service that keeps every open
-      copy of a document consistent as collaborators edit it together, streaming each
-      change to subscribers within milliseconds of it being written.</p>
+                <p class="eyebrow">Technical Spec</p>
+                <h1>RealtimeSync Service</h1>
+                <p class="lead">
+                    A near-real-time synchronization service that keeps every
+                    open copy of a document consistent as collaborators edit it
+                    together, streaming each change to subscribers within
+                    milliseconds of it being written.
+                </p>
 
-      <div class="meta-row">
-        <span class="badge">Draft v0.3</span>
-        <span class="meta-dot">·</span>
-        <span>Prepared for review</span>
-        <span class="meta-dot">·</span>
-        <span>Platform Team</span>
-      </div>
-    </header>
+                <div class="meta-row">
+                    <span class="badge">Draft v0.31</span>
+                    <span class="meta-dot">·</span>
+                    <span>Prepared for review</span>
+                    <span class="meta-dot">·</span>
+                    <span>Platform Team</span>
+                </div>
+            </header>
 
-    <main class="body">
-      <section>
-        <h2><span class="num">01</span> Overview</h2>
-        <p>RealtimeSync keeps client documents in sync with the server in near real
-        time. Clients open a <code>WebSocket</code> connection and receive change events
-        as other users edit the same document. The server guarantees that every message
-        is delivered at least once, and clients are responsible for de-duplicating events
-        they have already seen.</p>
-      </section>
+            <main class="body">
+                <section>
+                    <h2><span class="num">01</span> Overview</h2>
+                    <p>
+                        RealtimeSync keeps client documents in sync with the
+                        server in near real time. Clients open a
+                        <code>WebSocket</code> connection and receive change
+                        events as other users edit the same document. The server
+                        guarantees that every message is delivered at least
+                        once, and the clients are responsible for de-duplicating
+                        events they have already seen.
+                    </p>
+                </section>
 
-      <section>
-        <h2><span class="num">02</span> Architecture</h2>
-        <p>Incoming edits are written to a single <code>Redis</code> instance that acts
-        as the central message broker. Each connected client subscribes to a channel
-        named after the <code>document id</code>. When an edit arrives, the broker fans
-        it out to every subscriber on that channel synchronously before acknowledging the
-        writer.</p>
-        <div class="note">
-          <span class="note-ico" aria-hidden="true">!</span>
-          <p><strong>Open question.</strong> A synchronous fan-out couples writer latency
-          to the slowest subscriber on the channel. We should confirm this is acceptable
-          under fan-out to thousands of clients.</p>
-        </div>
-      </section>
+                <section>
+                    <h2><span class="num">02</span> Architecture</h2>
 
-      <section>
-        <h2><span class="num">03</span> Data Model</h2>
-        <p>Each user has a single workspace, and every document belongs to exactly one
-        workspace. Permissions are stored as a flat list of user ids on the document
-        itself, which is checked on every incoming edit.</p>
-        <dl class="facts">
-          <dt>Workspace</dt><dd>One per user · owns its documents</dd>
-          <dt>Document</dt><dd>Belongs to exactly one workspace</dd>
-          <dt>Permissions</dt><dd>Flat list of user ids, checked per edit</dd>
-        </dl>
-      </section>
+                    <div class="note">
+                        <span class="note-ico" aria-hidden="true">!</span>
+                        <p>
+                            <strong>Open question.</strong> A synchronous
+                            fan-out couples writer latency to the slowest
+                            subscriber on the channel. We should confirm this is
+                            acceptable under fan out to thousands of clients.
+                        </p>
+                    </div>
+                    <p>
+                        Incoming edits are written to a single
+                        <code>Redis</code> instance that acts as the central
+                        message broker. Each connected client subscribes to a
+                        channel named after the <code>document id</code>. When
+                        an edit arrives, the broker fans it out to every
+                        subscriber on that channel synchronously before
+                        acknowledging the writer.
+                    </p>
+                </section>
 
-      <section>
-        <h2><span class="num">04</span> Scaling</h2>
-        <p>To handle more load we will run multiple server instances behind a load
-        balancer. Because all state lives in <code>Redis</code>, any instance can serve
-        any client, and we can add instances without coordination. We expect this to
-        scale linearly to roughly one million concurrent connections.</p>
-      </section>
-    </main>
+                <section>
+                    <h2><span class="num">03</span> Data Model</h2>
+                    <p>
+                        Each user has a single workspace, and every document
+                        belongs to exactly one workspace. Permissions are stored
+                        as a flat list of user ids on the document itself, which
+                        is checked on every incoming edit.
+                    </p>
+                    <dl class="facts">
+                        <dt>Document</dt>
+                        <dd>Belongs to exactly one workspace</dd>
+                        <dt>Workspace</dt>
+                        <dd>One per user · owns its documents</dd>
+                        <dt>Permissions</dt>
+                        <dd>Flat list of user ids, checked per edit</dd>
+                    </dl>
+                </section>
 
-    <footer class="doc-foot">
-      <span>RealtimeSync Service — Technical Spec</span>
-      <span>Internal · <a href="#">platform@example.com</a></span>
-    </footer>
-  </article>
-</body>
+                <section>
+                    <h2><span class="num">04</span> Scaling</h2>
+                    <p>
+                        To handle more load we will run multiple server
+                        instances behind a load balancer. Because all state
+                        lives in <code>Redis</code>, any instance can serve any
+                        client, and we can add instances without coordination.
+                        We expect this to scale linearly to more or less one
+                        million concurrent connections.
+                    </p>
+                </section>
+
+                <section>
+                    <h2><span class="num">05</span> Security</h2>
+                    <p>
+                        Every client connection is authenticated with a
+                        short-lived token issued at handshake time, and each
+                        incoming edit is re-checked against the document's
+                        permission list before it is broadcast. Tokens are
+                        refreshed over the existing <code>WebSocket</code>
+                        channel, so a long-lived session never has to reconnect
+                        just to stay authorized.
+                    </p>
+                </section>
+            </main>
+
+            <footer class="doc-foot">
+                <span>RealtimeSync Service — Technical Spec</span>
+                <span>Internal · <a href="#">platform@example.com</a></span>
+            </footer>
+        </article>
+    </body>
 </html>

@@ -218,6 +218,66 @@ test('re-wrap reuses the doc-id already in the -o target', () => {
   assert.ok(out.includes('data-noteback-doc-id="KEEPME"'), 'id preserved across re-wrap');
 });
 
+/* --- --bake-id: anchor a stable doc-id in the SOURCE -------------------- */
+
+test('readMarkerDocId reads a source-level doc-id comment marker (else null)', () => {
+  assert.strictEqual(
+    cli.readMarkerDocId('<!DOCTYPE html>\n<!-- noteback-doc-id: ABC123 -->\n<html></html>'),
+    'ABC123'
+  );
+  assert.strictEqual(cli.readMarkerDocId('<html><body><p>no marker</p></body></html>'), null);
+});
+
+test('bakeDocIdIntoSource inserts the marker after the doctype and is idempotent', () => {
+  const baked = cli.bakeDocIdIntoSource(DOC, 'ID1');
+  // Sits right after the doctype, where it cannot trigger quirks mode.
+  assert.match(baked, /<!DOCTYPE html>\n<!-- noteback-doc-id: ID1 -->\n/);
+  assert.strictEqual(cli.readMarkerDocId(baked), 'ID1');
+  // The original body is untouched.
+  assert.match(baked, /a single Redis instance/);
+
+  // Re-baking with a new id REPLACES the marker — it never duplicates.
+  const rebaked = cli.bakeDocIdIntoSource(baked, 'ID2');
+  assert.strictEqual(cli.readMarkerDocId(rebaked), 'ID2');
+  assert.strictEqual((rebaked.match(/noteback-doc-id:/g) || []).length, 1, 'exactly one marker');
+});
+
+test('bakeDocIdIntoSource prepends the marker when there is no doctype (fragment)', () => {
+  const baked = cli.bakeDocIdIntoSource('<p>just a fragment</p>', 'FRAG1');
+  assert.match(baked, /^<!-- noteback-doc-id: FRAG1 -->\n<p>just a fragment<\/p>/);
+});
+
+test('wrapFile --bake-id anchors a stable id in the source so re-wraps survive a deleted canvas', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noteback-bake-'));
+  const input = path.join(dir, 'plan.html');
+  const output = path.join(dir, 'plan.canvas.html');
+  fs.writeFileSync(input, DOC);
+
+  // First wrap with bake-id: mints an id, writes the canvas, AND stamps the source.
+  cli.wrapFile(input, output, null, true);
+
+  const src = fs.readFileSync(input, 'utf8');
+  const id = cli.readMarkerDocId(src);
+  assert.ok(id, 'the source now carries a doc-id marker');
+
+  const canvas1 = fs.readFileSync(output, 'utf8');
+  assert.ok(canvas1.includes('data-noteback-doc-id="' + id + '"'), 'canvas baked the same id on the doc root');
+  // The marker is a SOURCE-only anchor — it must not leak into the canvas content.
+  assert.ok(!/<!--\s*noteback-doc-id:/i.test(canvas1), 'the comment marker is stripped from the canvas');
+
+  // Simulate the gitignored canvas being cleaned, then re-wrap to a FRESH target
+  // with no --bake-id and no --id: the id must come back from the source marker.
+  fs.unlinkSync(output);
+  const output2 = path.join(dir, 'plan.canvas.2.html');
+  cli.wrapFile(input, output2);
+  assert.ok(
+    fs.readFileSync(output2, 'utf8').includes('data-noteback-doc-id="' + id + '"'),
+    'the source marker re-anchors the id across a deleted canvas'
+  );
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('install-skill writes the .agents hub + a .claude symlink (covers Codex/OpenCode/Claude)', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'noteback-home-'));
 

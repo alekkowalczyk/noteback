@@ -94,6 +94,75 @@
     '.nb-peek-pop-empty{color:#a2a09b;font-style:italic;}' +
     '@media (prefers-reduced-motion: reduce){.nb-peek-pop{transition:none;}}';
 
+  // Diff styling injected INTO the version-view iframe when diff mode is on.
+  // Goal: make it unmistakably a COMPARISON, not part of the document — a sticky
+  // legend header frames the panel; each changed block carries a left gutter rail
+  // (a +/-/edit glyph badge + a thick change-bar) and an Added/Removed/Edited tag,
+  // so a tinted block can't be misread as a document callout; and word-level
+  // changes use SHAPE cues (underline for adds, strike-through for deletes) on top
+  // of colour, so a single-word edit pops and stays legible without relying on hue.
+  const DIFF_CSS =
+    // Legend header — sticky banner that frames everything below as a diff.
+    '.nb-diff-legend{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:7px 14px;flex-wrap:wrap;' +
+    '  margin:0 0 16px;padding:10px 15px;border-radius:0 0 11px 11px;background:#1f2a37;color:#eef2f7;' +
+    '  font:600 12.5px/1.3 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;' +
+    '  box-shadow:0 7px 20px -12px rgba(18,26,36,.7);}' +
+    '.nb-diff-legend-title{display:inline-flex;align-items:center;gap:7px;font-weight:700;letter-spacing:.01em;}' +
+    '.nb-diff-legend-title .nb-diff-swap{font-size:14px;opacity:.85;}' +
+    '.nb-diff-key{display:inline-flex;align-items:center;gap:6px;color:#aebac7;font-weight:600;}' +
+    '.nb-diff-key .nb-k-chip{display:inline-block;width:11px;height:11px;border-radius:3px;}' +
+    '.nb-diff-key.nb-k-add .nb-k-chip{background:#0a9d4e;}' +
+    '.nb-diff-key.nb-k-del .nb-k-chip{background:#db2c1c;}' +
+    // Word-level changes: colour + a strong shape cue so single words stand out.
+    'ins.nb-diff-ins{text-decoration:underline;text-decoration-color:#1f9d57;text-decoration-thickness:2px;' +
+    '  text-underline-offset:2px;background:#d8f3e1;color:#0f7a3d;border-radius:3px;padding:0 2px;font-weight:600;}' +
+    'del.nb-diff-del{text-decoration:line-through;text-decoration-color:#cf4335;text-decoration-thickness:2px;' +
+    '  background:#fadbd7;color:#b3261e;border-radius:3px;padding:0 2px;}' +
+    // Changed BLOCKS: left gutter rail (glyph badge + thick change-bar) + a tag.
+    // Square corners (no rounding) read as a deliberate diff frame, not a callout.
+    '.nb-diff-ins-block,.nb-diff-del-block,.nb-diff-edit-block{position:relative;margin:5px 0;' +
+    '  padding:7px 80px 7px 32px;border-radius:0;}' +
+    '.nb-diff-ins-block::before,.nb-diff-del-block::before,.nb-diff-edit-block::before{' +
+    '  content:"";position:absolute;left:7px;top:7px;width:18px;height:18px;border-radius:3px;color:#fff;' +
+    '  display:flex;align-items:center;justify-content:center;' +
+    '  font:700 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;}' +
+    // Tag: a solid, saturated, square label so the change type registers instantly.
+    '.nb-diff-ins-block::after,.nb-diff-del-block::after,.nb-diff-edit-block::after{' +
+    '  position:absolute;top:6px;right:7px;font:800 9.5px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;' +
+    '  letter-spacing:.09em;text-transform:uppercase;padding:3px 7px;border-radius:2px;' +
+    '  box-shadow:0 1px 2px rgba(0,0,0,.22);}' +
+    // Added — vivid green rail + "+" badge + solid green tag.
+    '.nb-diff-ins-block{background:#eaf7ef;border-left:4px solid #0a9d4e;}' +
+    '.nb-diff-ins-block::before{content:"+";background:#0a9d4e;}' +
+    '.nb-diff-ins-block::after{content:"Added";background:#0a9d4e;color:#fff;}' +
+    // Removed — vivid red rail + minus badge + solid red tag; struck + muted text.
+    '.nb-diff-del-block{background:#fcebe9;border-left:4px solid #db2c1c;color:#9c6660;' +
+    '  text-decoration:line-through;text-decoration-color:rgba(178,38,30,.4);}' +
+    '.nb-diff-del-block::before{content:"\\2212";background:#db2c1c;}' +
+    '.nb-diff-del-block::after{content:"Removed";background:#db2c1c;color:#fff;text-decoration:none;}' +
+    // Edited — vivid amber rail + pencil badge + solid amber tag (dark text for contrast).
+    '.nb-diff-edit-block{background:#fff7e6;border-left:4px solid #ec9706;}' +
+    '.nb-diff-edit-block::before{content:"\\270E";background:#ec9706;color:#3f2a00;font-size:11px;}' +
+    '.nb-diff-edit-block::after{content:"Edited";background:#ec9706;color:#3f2a00;}' +
+    // Prev/Next change navigator (right-aligned in the legend) + the focused-change
+    // emphasis it drives: a colour ring, an intensified fill, and a brief pop.
+    '.nb-diff-nav{margin-left:auto;display:inline-flex;align-items:center;gap:4px;}' +
+    '.nb-diff-nav button{font:700 10.5px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;cursor:pointer;' +
+    '  color:#eef2f7;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);' +
+    '  border-radius:6px;padding:4px 9px;transition:background .14s ease;}' +
+    '.nb-diff-nav button:hover{background:rgba(255,255,255,.26);}' +
+    '.nb-diff-nav-pos{min-width:40px;text-align:center;color:#cdd6e0;' +
+    '  font:700 10.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace;}' +
+    '.nb-diff-focus{position:relative;z-index:2;animation:nb-diff-pop .35s ease-out 1;}' +
+    '.nb-diff-ins-block.nb-diff-focus{background:#d3f0de;box-shadow:0 0 0 3px rgba(10,157,78,.55);}' +
+    '.nb-diff-del-block.nb-diff-focus{background:#fbdcd8;box-shadow:0 0 0 3px rgba(219,44,28,.55);}' +
+    '.nb-diff-edit-block.nb-diff-focus{background:#fdeecb;box-shadow:0 0 0 3px rgba(236,151,6,.6);}' +
+    '@keyframes nb-diff-pop{0%{transform:scale(.992);}55%{transform:scale(1.012);}100%{transform:scale(1);}}' +
+    // No-changes banner.
+    '.nb-diff-nochange{margin:0 0 14px;padding:9px 13px;border-radius:8px;' +
+    '  background:#eef1f4;color:#54606c;' +
+    '  font:600 13px/1.4 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}';
+
   // Light-DOM styles: the floating "Comment" chip that appears on selection, and
   // the painted highlight (HIGHLIGHT_CSS, shared with the peek).
   const BUTTON_CSS = [
@@ -335,6 +404,14 @@
     '.nb-ver-count{font:600 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;background:#efe7d6;',
     '  border:1px solid var(--nb-line);border-radius:999px;padding:2px 9px;color:var(--nb-ink-soft);}',
     '.nb-ver-row.active .nb-ver-count{background:#fff;}',
+    /* "Show diff" shortcut on the now row: a small accent pill, right-aligned by
+       the .nb-ver-spacer, opening the latest-version → now diff. */
+    '.nb-ver-diff{flex:none;display:inline-flex;align-items:center;gap:5px;cursor:pointer;',
+    '  background:var(--nb-accent-wash);color:var(--nb-accent-deep);border:1px solid var(--nb-accent);',
+    '  border-radius:999px;padding:3px 10px;font:700 11px/1 var(--nb-round);',
+    '  transition:background .14s ease,box-shadow .2s ease;}',
+    '.nb-ver-diff:hover{background:#dcebe8;box-shadow:0 6px 16px -12px rgba(15,98,89,.7);}',
+    '.nb-ver-diff-ico{font-size:12px;line-height:1;}',
     /* per-row actions live behind a chevron next to the version name; clicking it
        opens .nb-ver-menu (a portaled .nb-menu positioned in JS, since the dock
        clips overflow) with Open + Copy feedback. */
@@ -376,6 +453,23 @@
     '  font:700 12px/1 var(--nb-round);letter-spacing:.01em;padding:11px 14px;cursor:pointer;text-align:left;',
     '  transition:background .14s ease,color .14s ease;}',
     '.nb-hist-back:hover{background:var(--nb-accent);color:#fffdf8;}',
+    /* the inline-view header is now a flex bar holding the back button (left) and
+       the diff toggle (right); the bar owns the bottom border. */
+    '.nb-hist-bar{flex:0 0 auto;display:flex;align-items:stretch;',
+    '  border-bottom:1px solid var(--nb-line);background:var(--nb-accent-wash);}',
+    '.nb-hist-bar .nb-hist-back{flex:1 1 auto;border-bottom:none;}',
+    '.nb-diff-toggle{flex:0 0 auto;display:inline-flex;align-items:center;gap:8px;',
+    '  border:none;border-left:1px solid rgba(18,122,114,.25);background:transparent;',
+    '  color:var(--nb-accent-deep);font:700 12px/1 var(--nb-round);letter-spacing:.01em;',
+    '  padding:0 14px;cursor:pointer;transition:background .14s ease,color .14s ease;}',
+    '.nb-diff-toggle:hover{background:var(--nb-accent);color:#fffdf8;}',
+    '.nb-diff-icon{font-size:13px;line-height:1;}',
+    '.nb-diff-switch{position:relative;width:30px;height:16px;border-radius:999px;',
+    '  background:var(--nb-line-strong);transition:background .16s ease;flex:none;}',
+    '.nb-diff-switch::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;',
+    '  border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .16s ease;}',
+    '.nb-diff-toggle.nb-on .nb-diff-switch{background:var(--nb-accent);}',
+    '.nb-diff-toggle.nb-on .nb-diff-switch::after{transform:translateX(14px);}',
     // The iframe is a REPLACED element; as a column-flex child with flex:1 +
     // min-height:0 it resolves to a definite height and fills below the back bar.
     // (Do NOT switch to absolute top+bottom+height:auto — a replaced element falls
@@ -513,6 +607,9 @@
     const stateApi = modules.state;
     const highlightApi = modules.highlight;
     const markdownApi = modules.markdown;
+    const diffApi = modules.diff;
+    const diffRenderApi = modules.diffRender;
+    const snapshotApi = modules.snapshotCapture;
     if (!anchorApi || !stateApi) {
       throw new Error('overlay.mountOverlay requires NotebackRuntime.anchor and .state');
     }
@@ -535,6 +632,10 @@
     // origin denied localStorage (the bug this replaced).
     let viewingKey = null;
     let inlineView = null;
+    // Diff mode for the inline version view: when true, the panel renders a diff
+    // of the viewed version against the next chronological version. Sticky while
+    // browsing versions; reset on closeVersionInline.
+    let diffMode = false;
     const onChange = cfg.onChange || function () {};
     // Prefer the runtime markdown module directly so we can hand it the document
     // markup for line references; fall back to the boot-supplied renderer.
@@ -1535,8 +1636,9 @@
         label.textContent = 'History';
         wrap.appendChild(label);
 
-        // The "now" row: the live draft, no actions, status dot active.
-        wrap.appendChild(renderNowRow());
+        // The "now" row: the live draft, status dot active, + a "Show diff"
+        // shortcut (vs the latest earlier version) when history exists.
+        wrap.appendChild(renderNowRow(versions));
 
         if (versions.length === 0) return; // viewing with no other versions: back bar + now row only
 
@@ -1610,10 +1712,11 @@
      * becomes click-to-return (the viewed version row gets the active dot instead).
      * No chevron/actions either way; status dot active when not viewing.
      */
-    function renderNowRow() {
+    function renderNowRow(versions) {
       const s = getState();
       const count = (s && Array.isArray(s.comments)) ? s.comments.length : 0;
       const viewing = !!viewingKey;
+      const latest = (versions && versions.length) ? versions[0] : null;
       const row = doc.createElement('div');
       // The live current draft. When viewing an older version it is NOT the active
       // row (the viewed version is) and becomes click-to-return.
@@ -1634,6 +1737,28 @@
       line.appendChild(dot);
       line.appendChild(name);
       line.appendChild(spacer);
+      // "Show diff" shortcut: only on the live draft (not while viewing) and only
+      // when there is a latest earlier version to diff against. Opens the same
+      // inline diff (latest → now) as clicking that version row and enabling Diff.
+      if (!viewing && latest && diffApi && diffRenderApi) {
+        const diffBtn = doc.createElement('button');
+        diffBtn.type = 'button';
+        diffBtn.className = 'nb-ver-diff';
+        diffBtn.setAttribute(UI_ATTR, 'version-now-diff');
+        diffBtn.title = 'Show changes since the latest version';
+        const dico = doc.createElement('span');
+        dico.className = 'nb-ver-diff-ico';
+        dico.setAttribute('aria-hidden', 'true');
+        dico.textContent = '⇄';
+        diffBtn.appendChild(dico);
+        diffBtn.appendChild(doc.createTextNode('Show diff'));
+        diffBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          diffMode = true;
+          openVersionInline(latest.versionKey);
+        });
+        line.appendChild(diffBtn);
+      }
       line.appendChild(cnt);
       row.appendChild(line);
       if (viewing) row.addEventListener('click', function () { closeVersionInline(); });
@@ -1715,74 +1840,266 @@
     }
 
     /**
-     * Open a past version inline (read-only) in a side panel beside the sidebar.
-     * Parses the version's clean snapshot, runs the LIVE highlight painter over it
-     * (commented passages wrapped in the same <mark class="noteback-highlight">),
-     * re-injects HIGHLIGHT_CSS + PEEK_POP_CSS, and shows it in an <iframe srcdoc>
-     * under a "← Back to current draft" bar. Sets `viewingKey` and re-renders the
-     * timeline so the sidebar marks this version the active "viewing" row and offers
-     * a way back / a switch to another version. Pruned snapshots (html === '') toast
-     * and leave the current draft in place.
+     * Open a past version inline (read-only) in the side panel. Branches on
+     * diffMode: snapshot view (default) or a diff against the next version.
      */
     function openVersionInline(versionKey) {
       closeVersionMenu(true); // a row chevron may have opened it
+      if (diffMode) { openVersionDiff(versionKey); return; }
       Promise.resolve(history.getVersion({ versionKey: versionKey })).then(function (v) {
         if (!v || !v.html) { toast('This version has no saved snapshot'); return; } // pruned
-
-        // Parse the snapshot and paint REAL highlights into it via the live painter.
-        // paintHighlights creates each <mark> with the parsed doc's own ownerDocument,
-        // so the marks land inside `parsed` and survive serialization below.
-        let painted = '<!DOCTYPE html>' + v.html;
-        try {
-          const parsed = new DOMParser().parseFromString(v.html, 'text/html');
-          try {
-            highlightApi.paintHighlights(parsed.body, { schemaVersion: 1, comments: v.comments || [] }, {});
-          } catch (e) { /* keep the un-highlighted snapshot */ }
-          // The clean snapshot dropped Noteback's styles; re-inject HIGHLIGHT_CSS so
-          // the marks match the live document, plus PEEK_POP_CSS for the in-iframe
-          // comment popover.
-          try {
-            const hlStyle = parsed.createElement('style');
-            hlStyle.setAttribute(UI_ATTR, 'peek-highlight-style');
-            hlStyle.textContent = HIGHLIGHT_CSS + PEEK_POP_CSS;
-            (parsed.head || parsed.documentElement).appendChild(hlStyle);
-          } catch (e) { /* styling is best-effort */ }
-          const scrollScript =
-            '<scr' + 'ipt>(function(){var m=document.querySelector("mark.noteback-highlight");' +
-            'if(m)m.scrollIntoView({block:"center"});})();</scr' + 'ipt>';
-          // Click a painted highlight → show that comment in an in-place popover.
-          // The id->comment map is serialized into the iframe; comment bodies are
-          // placed via textContent and any literal "</script>" in the JSON is escaped.
-          const peekScript = buildPeekPopoverScript(v.comments || []);
-          painted = '<!DOCTYPE html>' + parsed.documentElement.outerHTML + scrollScript + peekScript;
-        } catch (e) { /* DOMParser unavailable — fall back to the raw snapshot */ }
-
-        // Swap any existing inline view (switching versions) WITHOUT a redundant
-        // timeline re-render — we re-render once below after viewingKey is set.
-        if (inlineView && inlineView.parentNode) inlineView.parentNode.removeChild(inlineView);
-        inlineView = null;
-        viewingKey = versionKey;
-
-        const view = doc.createElement('div');
-        view.className = 'nb-hist-view';
-        view.setAttribute(UI_ATTR, 'version-view');
-        const backBar = doc.createElement('button');
-        backBar.type = 'button';
-        backBar.className = 'nb-hist-back';
-        backBar.setAttribute(UI_ATTR, 'version-view-back');
-        backBar.textContent = '← Back to current draft';
-        backBar.addEventListener('click', function () { closeVersionInline(); });
-        const frame = doc.createElement('iframe');
-        frame.className = 'nb-hist-frame';
-        frame.srcdoc = painted; // the snapshot with live highlights painted in
-        view.appendChild(backBar);
-        view.appendChild(frame);
-        uiRoot.appendChild(view);
-        inlineView = view;
-
-        openSidebar();    // ensure the timeline (with the active viewing row) is visible
-        renderVersions(); // re-render so the viewed row is marked + the bar shows
+        mountInlineView(versionKey, buildSnapshotSrcdoc(v), null);
       });
+    }
+
+    /** Open a past version inline showing a DIFF vs the next chronological version. */
+    function openVersionDiff(versionKey) {
+      Promise.all([
+        Promise.resolve(history.getVersion({ versionKey: versionKey })),
+        resolveTargetSnapshot(versionKey)
+      ]).then(function (res) {
+        const baseV = res[0];
+        const target = res[1];
+        if (!baseV || !baseV.html) { toast('This version has no saved snapshot'); diffMode = false; openVersionInline(versionKey); return; }
+        if (!target || !target.html) { toast('No snapshot to diff against'); diffMode = false; openVersionInline(versionKey); return; }
+        const cmpLabel = 'v' + target.fromOrdinal + ' → ' + target.label;
+        mountInlineView(versionKey, buildDiffSrcdoc(baseV, target), cmpLabel);
+      });
+    }
+
+    /**
+     * Resolve the diff TARGET for a viewed version: the next chronological version.
+     * For the most-recent earlier version (index 0, newest-first), the target is
+     * the LIVE current draft (captured clean) labelled "now"; otherwise it is the
+     * next-newer stored snapshot. Returns { html, comments, label, fromOrdinal }.
+     */
+    function resolveTargetSnapshot(versionKey) {
+      return Promise.resolve(history.getHistory()).then(function (versions) {
+        versions = versions || [];
+        const total = versions.length;
+        let idx = -1;
+        for (let i = 0; i < total; i++) { if (versions[i].versionKey === versionKey) { idx = i; break; } }
+        if (idx === -1) return null;
+        const fromOrdinal = total - idx;
+        if (idx === 0) {
+          let html = '';
+          try { html = snapshotApi ? snapshotApi.captureCleanDoc(doc) : ''; } catch (e) { html = ''; }
+          const s = getState();
+          const comments = (s && Array.isArray(s.comments)) ? s.comments.slice() : [];
+          return { html: html, comments: comments, label: 'now', fromOrdinal: fromOrdinal };
+        }
+        const targetKey = versions[idx - 1].versionKey;
+        const targetOrdinal = total - (idx - 1);
+        return Promise.resolve(history.getVersion({ versionKey: targetKey })).then(function (tv) {
+          return { html: (tv && tv.html) || '', comments: (tv && tv.comments) || [], label: 'v' + targetOrdinal, fromOrdinal: fromOrdinal };
+        });
+      });
+    }
+
+    /** Build the read-only snapshot srcdoc for a version (live highlights + peek). */
+    function buildSnapshotSrcdoc(v) {
+      let painted = '<!DOCTYPE html>' + v.html;
+      try {
+        const parsed = new DOMParser().parseFromString(v.html, 'text/html');
+        try { highlightApi.paintHighlights(parsed.body, { schemaVersion: 1, comments: v.comments || [] }, {}); } catch (e) {}
+        try {
+          const hlStyle = parsed.createElement('style');
+          hlStyle.setAttribute(UI_ATTR, 'peek-highlight-style');
+          hlStyle.textContent = HIGHLIGHT_CSS + PEEK_POP_CSS;
+          (parsed.head || parsed.documentElement).appendChild(hlStyle);
+        } catch (e) {}
+        const scrollScript =
+          '<scr' + 'ipt>(function(){var m=document.querySelector("mark.noteback-highlight");' +
+          'if(m)m.scrollIntoView({block:"center"});})();</scr' + 'ipt>';
+        const peekScript = buildPeekPopoverScript(v.comments || []);
+        painted = '<!DOCTYPE html>' + parsed.documentElement.outerHTML + scrollScript + peekScript;
+      } catch (e) { /* fall back to raw snapshot */ }
+      return painted;
+    }
+
+    /** Build the DIFF srcdoc: target doc with diff markup + target comments painted. */
+    function buildDiffSrcdoc(baseV, target) {
+      let result = '<!DOCTYPE html>' + target.html;
+      try {
+        const parsedBase = new DOMParser().parseFromString(baseV.html, 'text/html');
+        const parsedTarget = new DOMParser().parseFromString(target.html, 'text/html');
+        const rendered = diffRenderApi.renderInlineDiff(parsedBase.body, parsedTarget.body, parsedTarget);
+        if (rendered.body && parsedTarget.body && parsedTarget.body.parentNode) {
+          parsedTarget.body.parentNode.replaceChild(rendered.body, parsedTarget.body);
+        }
+        const renderedBody = rendered.body || parsedTarget.body;
+        try { highlightApi.paintHighlights(renderedBody, { schemaVersion: 1, comments: target.comments || [] }, {}); } catch (e) {}
+        try {
+          const st = parsedTarget.createElement('style');
+          st.setAttribute(UI_ATTR, 'peek-diff-style');
+          st.textContent = DIFF_CSS + HIGHLIGHT_CSS + PEEK_POP_CSS;
+          (parsedTarget.head || parsedTarget.documentElement).appendChild(st);
+        } catch (e) {}
+        if (!rendered.hasChanges && renderedBody) {
+          try {
+            const banner = parsedTarget.createElement('div');
+            banner.className = 'nb-diff-nochange';
+            banner.textContent = 'No changes in this version compared with the next.';
+            renderedBody.insertBefore(banner, renderedBody.firstChild);
+          } catch (e) {}
+        }
+        // Sticky legend header framing the panel as a comparison (inserted last so
+        // it lands first, above any no-changes banner). All text is controlled
+        // (ordinals + 'now'/'vN'); built with textContent, never innerHTML.
+        if (renderedBody) {
+          try {
+            const legend = parsedTarget.createElement('div');
+            legend.className = 'nb-diff-legend';
+            legend.setAttribute(UI_ATTR, 'diff-legend');
+            const title = parsedTarget.createElement('span');
+            title.className = 'nb-diff-legend-title';
+            const swap = parsedTarget.createElement('span');
+            swap.className = 'nb-diff-swap';
+            swap.textContent = '⇄';
+            title.appendChild(swap);
+            title.appendChild(parsedTarget.createTextNode(' Comparing v' + target.fromOrdinal + ' → ' + target.label));
+            const keyAdd = parsedTarget.createElement('span');
+            keyAdd.className = 'nb-diff-key nb-k-add';
+            const addChip = parsedTarget.createElement('span');
+            addChip.className = 'nb-k-chip';
+            keyAdd.appendChild(addChip);
+            keyAdd.appendChild(parsedTarget.createTextNode('added'));
+            const keyDel = parsedTarget.createElement('span');
+            keyDel.className = 'nb-diff-key nb-k-del';
+            const delChip = parsedTarget.createElement('span');
+            delChip.className = 'nb-k-chip';
+            keyDel.appendChild(delChip);
+            keyDel.appendChild(parsedTarget.createTextNode('removed'));
+            legend.appendChild(title);
+            legend.appendChild(keyAdd);
+            legend.appendChild(keyDel);
+            // Right-aligned Prev/Next change navigator (only when there are changes
+            // to step through). The in-iframe nav script (below) wires these.
+            if (rendered.hasChanges) {
+              const nav = parsedTarget.createElement('span');
+              nav.className = 'nb-diff-nav';
+              nav.setAttribute(UI_ATTR, 'diff-nav');
+              const prevBtn = parsedTarget.createElement('button');
+              prevBtn.type = 'button';
+              prevBtn.className = 'nb-diff-nav-prev';
+              prevBtn.textContent = '‹ Prev';
+              const pos = parsedTarget.createElement('span');
+              pos.className = 'nb-diff-nav-pos';
+              pos.textContent = '–';
+              const nextBtn = parsedTarget.createElement('button');
+              nextBtn.type = 'button';
+              nextBtn.className = 'nb-diff-nav-next';
+              nextBtn.textContent = 'Next ›';
+              nav.appendChild(prevBtn);
+              nav.appendChild(pos);
+              nav.appendChild(nextBtn);
+              legend.appendChild(nav);
+            }
+            renderedBody.insertBefore(legend, renderedBody.firstChild);
+          } catch (e) {}
+        }
+        const navScript = buildDiffNavScript();
+        const peekScript = buildPeekPopoverScript(target.comments || []);
+        result = '<!DOCTYPE html>' + parsedTarget.documentElement.outerHTML + navScript + peekScript;
+      } catch (e) { /* fall back to raw target */ }
+      return result;
+    }
+
+    /**
+     * The <script> injected into the diff iframe that drives Prev/Next change
+     * navigation. It collects the changed BLOCKS in document order and steps a
+     * focus pointer through them — scrolling each to centre, marking it
+     * `.nb-diff-focus` (ring + intensified fill + pop), and updating the "n / N"
+     * counter. Wraps at both ends. With no changed blocks it hides the navigator
+     * and falls back to scrolling the first comment highlight into view. No
+     * user data is interpolated, so the static source is safe to inline.
+     */
+    function buildDiffNavScript() {
+      return '<scr' + 'ipt>(function(){' +
+        'var items=Array.prototype.slice.call(document.querySelectorAll(' +
+        '".nb-diff-ins-block,.nb-diff-del-block,.nb-diff-edit-block"));' +
+        'var nav=document.querySelector(".nb-diff-nav");' +
+        'var pos=document.querySelector(".nb-diff-nav-pos");' +
+        'var prev=document.querySelector(".nb-diff-nav-prev");' +
+        'var next=document.querySelector(".nb-diff-nav-next");' +
+        'if(!items.length){if(nav)nav.style.display="none";' +
+        'var h=document.querySelector("mark.noteback-highlight");if(h)h.scrollIntoView({block:"center"});return;}' +
+        'var i=0;' +
+        'function show(n,scroll){' +
+        'for(var k=0;k<items.length;k++)items[k].classList.remove("nb-diff-focus");' +
+        'i=((n%items.length)+items.length)%items.length;' +
+        'var el=items[i];el.classList.add("nb-diff-focus");' +
+        'if(scroll)el.scrollIntoView({block:"center",behavior:"smooth"});' +
+        'if(pos)pos.textContent=(i+1)+" / "+items.length;}' +
+        'if(prev)prev.addEventListener("click",function(){show(i-1,true);});' +
+        'if(next)next.addEventListener("click",function(){show(i+1,true);});' +
+        'show(0,true);' +
+        '})();</scr' + 'ipt>';
+    }
+
+    /**
+     * Build + mount the inline view panel (header bar with back button + diff
+     * toggle, then the iframe). `diffLabel` non-null → diff mode is active and the
+     * toggle shows "Diff: v{base} → {target}".
+     */
+    function mountInlineView(versionKey, srcdocHtml, diffLabel) {
+      if (inlineView && inlineView.parentNode) inlineView.parentNode.removeChild(inlineView);
+      inlineView = null;
+      viewingKey = versionKey;
+
+      const view = doc.createElement('div');
+      view.className = 'nb-hist-view';
+      view.setAttribute(UI_ATTR, 'version-view');
+
+      const bar = doc.createElement('div');
+      bar.className = 'nb-hist-bar';
+      bar.setAttribute(UI_ATTR, 'version-view-bar');
+
+      const backBtn = doc.createElement('button');
+      backBtn.type = 'button';
+      backBtn.className = 'nb-hist-back';
+      backBtn.setAttribute(UI_ATTR, 'version-view-back');
+      backBtn.textContent = '← Back to current draft';
+      backBtn.addEventListener('click', function () { closeVersionInline(); });
+      bar.appendChild(backBtn);
+
+      if (diffApi && diffRenderApi) bar.appendChild(buildDiffToggle(versionKey, diffLabel));
+
+      const frame = doc.createElement('iframe');
+      frame.className = 'nb-hist-frame';
+      frame.srcdoc = srcdocHtml;
+
+      view.appendChild(bar);
+      view.appendChild(frame);
+      uiRoot.appendChild(view);
+      inlineView = view;
+
+      openSidebar();    // ensure the timeline (with "you are here") is visible
+      renderVersions(); // re-render so the viewed row is marked + the bar shows
+    }
+
+    /** The Diff on/off switch in the inline-view header. */
+    function buildDiffToggle(versionKey, diffLabel) {
+      const btn = doc.createElement('button');
+      btn.type = 'button';
+      btn.className = 'nb-diff-toggle' + (diffMode ? ' nb-on' : '');
+      btn.setAttribute(UI_ATTR, 'diff-toggle');
+      btn.setAttribute('aria-pressed', diffMode ? 'true' : 'false');
+      btn.title = diffMode ? 'Hide changes' : 'Show changes vs the next version';
+      const icon = doc.createElement('span');
+      icon.className = 'nb-diff-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = '⇄';
+      const label = doc.createElement('span');
+      label.className = 'nb-diff-label';
+      label.textContent = (diffMode && diffLabel) ? ('Diff: ' + diffLabel) : 'Diff';
+      const sw = doc.createElement('span');
+      sw.className = 'nb-diff-switch';
+      btn.appendChild(icon);
+      btn.appendChild(label);
+      btn.appendChild(sw);
+      btn.addEventListener('click', function () { diffMode = !diffMode; openVersionInline(versionKey); });
+      return btn;
     }
 
     /** Close the inline version view and return to the live current draft. */
@@ -1791,6 +2108,7 @@
       inlineView = null;
       const had = viewingKey;
       viewingKey = null;
+      diffMode = false; // reset on exit; "Back to current" is a clean reset
       if (had) renderVersions();
     }
 

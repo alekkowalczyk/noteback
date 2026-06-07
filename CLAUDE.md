@@ -97,6 +97,33 @@ the code, that have already bitten us once.
   origin whose `localStorage` is denied, leaving the opened tab's history sidebar
   empty (the bug). The `.nb-hist-frame` iframe fills the panel as a column-flex child
   (`flex:1;min-height:0`), not via absolute `height:calc(...)`.
+- **The diff view diffs THIS version against the NEXT one, not the previous.**
+  `overlay.openVersionDiff` resolves the target via `resolveTargetSnapshot`: the
+  most-recent earlier version (index 0 of `getHistory`, newest-first) diffs against
+  the LIVE current draft (`snapshotCapture.captureCleanDoc(document)`, labelled
+  "now"); any older version diffs against the next-newer stored snapshot. The pure
+  diff brain is `src/runtime/diff.js` (DOM-free, Node-tested); the DOM renderer is
+  `src/runtime/diff-render.js` (browser-only, e2e-tested, like `highlight.js`).
+  BOTH new files must be registered in the parity-locked runtime lists
+  (`bin/noteback.js`, `examples/build-canvas.js`,
+  `src/background/service-worker.js` — guarded by
+  `test/canvas-runtime-parity.test.js`) AND in `manifest.json` (its `content_scripts`
+  AND `web_accessible_resources` runtime-file arrays), ordered `diff.js` after
+  `markdown.js` and `diff-render.js` after `highlight.js` (before `overlay.js`).
+  Comment highlights are painted AFTER the diff wraps words, so a comment whose
+  quote straddles a changed region may not re-anchor — unchanged-region highlights
+  always do.
+- **The diff's Prev/Next change navigator runs INSIDE the iframe, not from the
+  overlay.** The legend (and its `‹ Prev · n/N · Next ›` cluster) lives in the diff
+  `<iframe srcdoc>`, a separate document — so its buttons CANNOT be wired with
+  overlay `addEventListener`; the click handling, `.nb-diff-focus` stepping (ring +
+  intensified fill, wrapping both ends), scroll-to-centre, and counter are all an
+  injected static `<script>` (`buildDiffNavScript`, same pattern as the peek
+  script). It replaced the old one-shot "scroll to first change" script and keeps
+  its no-changes fallback (scroll the first highlight into view). The separate
+  **"Show diff"** shortcut on the live `now` timeline row IS overlay-side
+  (`renderNowRow`): it sets `diffMode=true` and calls `openVersionInline(latestKey)`
+  — shown only off the live draft and only when a latest earlier version exists.
 - **The version chevron menu SAVES via download, not a tab.** A version row's `▾`
   menu has **Copy feedback** + **Save HTML with comments** + **Save clean HTML**
   (both saves disabled when the version's snapshot is pruned). "Save HTML with
@@ -138,9 +165,22 @@ the code, that have already bitten us once.
 - **`wrap` PRESERVES an existing doc-id — don't make it re-mint.** The version history
   follows the baked `data-noteback-doc-id`, so re-wrapping a canvas must keep the same
   id or the history orphans. `bin/noteback.js`'s precedence is: explicit `--id` → the id
-  already baked in the `-o` target file → the id baked in the input HTML → mint a fresh
-  one (`mintDocId` / `readBakedDocId`). The `-o`-target reuse is the easy one to drop —
-  it's how `wrap` in place keeps history across re-exports.
+  already baked in the `-o` target file → the id baked in the input HTML
+  (`#noteback-doc-root[data-noteback-doc-id]` OR a source `<!-- noteback-doc-id: … -->`
+  marker, via `readBakedDocId`/`readMarkerDocId`) → mint a fresh one (`mintDocId`). The
+  `-o`-target reuse is the easy one to drop — it's how `wrap` in place keeps history
+  across re-exports.
+- **`--bake-id` anchors the id in the SOURCE so a deleted `-o` canvas can't orphan
+  history.** With a SEPARATE `-o` target (e.g. `examples/spec.html -o examples/spec.canvas.html`),
+  the resolved id lives ONLY in the gitignored canvas; `rm` it and the next `wrap`
+  re-mints, splintering history. `--bake-id` stamps `bakeDocIdIntoSource` into the
+  tracked source as a `<!-- noteback-doc-id: … -->` comment (after the doctype, so it
+  can't trigger quirks mode; prepended for fragments; idempotent — re-bake replaces,
+  never duplicates). The marker is SOURCE-ONLY: `wrapFile` runs `stripDocIdMarker` on
+  the doc content before building, so it never leaks into the canvas (which carries the
+  authoritative id on `#noteback-doc-root`). In-place wrap ignores `--bake-id` (the
+  canvas already carries the id and would clobber the marker). `examples/spec.html` is
+  anchored this way (`dmq41se03tm5q0nu8bh`).
 - **Extension history is GATED per-site (`historyAllowed`), decided at first mount.**
   `origin-policy.js` `historyAllowed(info, settings)` is default-on for
   `file`/`localhost`/`127.0.0.1` and opt-in via `historySites` for any other origin.
