@@ -336,6 +336,17 @@
     '.nb-ver-menu .nb-mi-sub{text-transform:none;letter-spacing:normal;}',
     '.nb-ver-menu .nb-menu-item:disabled{opacity:.42;cursor:default;}',
     '.nb-ver-menu .nb-menu-item:disabled .nb-mi-label{color:var(--nb-ink);}',
+    /* checkout banner: this tab is an opened past version; click → open the live
+       current draft in a new tab. Sits at the top of the versions dock. */
+    '.nb-checkout-bar{display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;',
+    '  margin:2px 0 4px;padding:8px 11px;border:1px solid var(--nb-accent);border-radius:10px;',
+    '  background:var(--nb-accent-wash);transition:background .14s ease,box-shadow .2s ease;}',
+    '.nb-checkout-bar:hover{background:#dcebe8;box-shadow:0 6px 16px -12px rgba(15,98,89,.7);}',
+    '.nb-checkout-txt{font:600 11.5px/1.3 var(--nb-ui);color:var(--nb-ink-soft);}',
+    '.nb-checkout-cta{margin-left:auto;font:700 12px/1 var(--nb-round);color:var(--nb-accent-deep);white-space:nowrap;}',
+    /* the "viewing" row (opened version, in checkout) and the "current" badge on the
+       live draft’s row */
+    '.nb-ver-current{color:var(--nb-ink-soft);}',
     '.nb-disclose{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:none;background:none;cursor:pointer;',
     '  padding:11px 4px;border-top:1px solid var(--nb-line);border-radius:0;}',
     '.nb-disclose:hover .nb-disclose-label{color:var(--nb-accent-deep);}',
@@ -499,6 +510,20 @@
     // the info dialog. Defaults to embedded (the self-contained canvas is the
     // common case); the extension passes 'extension' explicitly.
     const runMode = (cfg.mode === 'extension') ? 'extension' : 'embedded';
+    // Checkout marker: a canvas opened from a version's "Open" action carries
+    // data-noteback-checkout="<live current version key>" on #noteback-doc-root.
+    // Read it ONCE here (then strip it from the live DOM so it never lands in a
+    // later snapshot/export), so the timeline can mark "you are here" on the opened
+    // version and offer "open current". Empty string when this isn't a checkout.
+    const checkoutCurrentKey = (function () {
+      try {
+        const root = document.getElementById('noteback-doc-root');
+        if (!root || !root.getAttribute) return '';
+        const k = root.getAttribute('data-noteback-checkout') || '';
+        if (k && root.removeAttribute) root.removeAttribute('data-noteback-checkout');
+        return k;
+      } catch (e) { return ''; }
+    })();
     const onChange = cfg.onChange || function () {};
     // Prefer the runtime markdown module directly so we can hand it the document
     // markup for line references; fall back to the boot-supplied renderer.
@@ -1397,17 +1422,27 @@
       wrap.className = 'nb-versions';
       wrap.setAttribute(UI_ATTR, 'versions');
       elVersionsDock.appendChild(wrap);
+      // Checkout tab: a banner above the timeline offering a one-click return to the
+      // live/current draft. Shown regardless of how much other history is visible.
+      if (checkoutCurrentKey) wrap.appendChild(renderCheckoutBar());
       Promise.resolve(history.getHistory()).then(function (versions) {
-        // Collapse rule: 0 earlier versions \u2192 the group is not rendered at all.
-        if (!versions || versions.length === 0) { wrap.remove(); return; }
+        versions = versions || [];
+        // Collapse rule: 0 earlier versions \u2192 the group is not rendered at all. In a
+        // checkout we still render the group (label + "viewing" row + the "open
+        // current" banner) even with no OTHER versions, so "you are here" is always
+        // shown on the opened version.
+        if (versions.length === 0 && !checkoutCurrentKey) { wrap.remove(); return; }
 
         const label = doc.createElement('div');
         label.className = 'nb-group-label';
         label.textContent = 'Versions';
         wrap.appendChild(label);
 
-        // The "now" row: the live draft, no actions, status dot active.
+        // The "now" row: the live draft (or, in a checkout, the opened version),
+        // no actions, status dot active.
         wrap.appendChild(renderNowRow());
+
+        if (versions.length === 0) return; // checkout with no other versions: bar + viewing row only
 
         const total = versions.length; // earlier versions, newest-first
         // The most-recent earlier version always stays inline.
@@ -1450,12 +1485,41 @@
       });
     }
 
-    /** The current-draft "now" row. No actions; status dot active. */
+    /**
+     * Checkout banner: this tab is an opened past version. One click re-opens the
+     * live/current draft (the version key baked into the canvas at checkout). Mirrors
+     * the peek's "← Back" affordance, but as a real new-tab checkout of the current.
+     */
+    function renderCheckoutBar() {
+      const bar = doc.createElement('button');
+      bar.type = 'button';
+      bar.className = 'nb-checkout-bar';
+      bar.setAttribute(UI_ATTR, 'checkout-bar');
+      const txt = doc.createElement('span');
+      txt.className = 'nb-checkout-txt';
+      txt.textContent = 'Viewing an earlier version';
+      const cta = doc.createElement('span');
+      cta.className = 'nb-checkout-cta';
+      cta.textContent = 'Open current →';
+      bar.appendChild(txt);
+      bar.appendChild(cta);
+      bar.title = 'Open the current draft in a new tab';
+      bar.addEventListener('click', function () { openVersionTab(checkoutCurrentKey); });
+      return bar;
+    }
+
+    /**
+     * The "you are here" row at the top of the timeline. Normally it's the live
+     * current draft ("now"). In a CHECKOUT tab the live content IS the opened past
+     * version, so the row is relabelled "viewing" — it marks the version you opened,
+     * while the actual live draft sits below as a normal row (and the checkout bar
+     * offers a way back to it). No actions either way; status dot active.
+     */
     function renderNowRow() {
       const s = getState();
       const count = (s && Array.isArray(s.comments)) ? s.comments.length : 0;
       const row = doc.createElement('div');
-      row.className = 'nb-ver-row active';
+      row.className = 'nb-ver-row active' + (checkoutCurrentKey ? ' nb-ver-viewing' : '');
       row.setAttribute(UI_ATTR, 'version-now');
       const line = doc.createElement('div');
       line.className = 'nb-ver-line';
@@ -1463,7 +1527,7 @@
       dot.className = 'nb-ver-dot';
       const name = doc.createElement('span');
       name.className = 'nb-ver-name';
-      name.textContent = 'now';
+      name.textContent = checkoutCurrentKey ? 'viewing' : 'now';
       const spacer = doc.createElement('span');
       spacer.className = 'nb-ver-spacer';
       const here = doc.createElement('span');
@@ -1491,7 +1555,11 @@
      */
     function renderVersionRow(d, ordinal) {
       const row = doc.createElement('div');
-      row.className = 'nb-ver-row';
+      // In a checkout tab, the live/current draft shows up here as a normal row —
+      // flag it so we can badge it "current" (the checkout bar above is the primary
+      // way back; this just orients the reader).
+      const isCurrent = !!(checkoutCurrentKey && d.versionKey === checkoutCurrentKey);
+      row.className = 'nb-ver-row' + (isCurrent ? ' nb-ver-is-current' : '');
       row.setAttribute(UI_ATTR, 'version');
       row.setAttribute('data-version-key', d.versionKey || '');
 
@@ -1525,6 +1593,12 @@
       line.appendChild(menuBtn);
       line.appendChild(meta);
       line.appendChild(spacer);
+      if (isCurrent) {
+        const cur = doc.createElement('span');
+        cur.className = 'nb-ver-here nb-ver-current';
+        cur.textContent = 'current';
+        line.appendChild(cur);
+      }
       line.appendChild(cnt);
       row.appendChild(line);
 
@@ -1682,11 +1756,13 @@
      * comments. Opening the result boots a working canvas of that version.
      *
      * @param {Object} v        getVersion() result: { html, comments, docTitle, contentHash }
-     * @param {string} docId    the current page's baked doc-id
-     * @param {string} docTitle title for the version's state block
+     * @param {string} docId      the current page's baked doc-id
+     * @param {string} docTitle   title for the version's state block
+     * @param {string} currentKey the LIVE/current version key (so the opened tab can
+     *                            offer "open current"); baked as data-noteback-checkout
      * @returns {string} a full canvas HTML document
      */
-    function buildVersionCanvasHtml(v, docId, docTitle) {
+    function buildVersionCanvasHtml(v, docId, docTitle, currentKey) {
       // Snapshot's doc-content inner HTML (its #noteback-doc-root if present, else body).
       const parsed = new DOMParser().parseFromString(v.html, 'text/html');
       const snapRoot = parsed.querySelector('#noteback-doc-root') || parsed.body;
@@ -1718,7 +1794,17 @@
 
       // Swap in the snapshot's doc-content.
       const cloneRoot = clone.querySelector('#noteback-doc-root');
-      if (cloneRoot) cloneRoot.innerHTML = snapInner;
+      if (cloneRoot) {
+        cloneRoot.innerHTML = snapInner;
+        // Mark this build as a CHECKOUT and record which version is the live/current
+        // one, so the opened tab can label "you are here" on the opened version and
+        // offer "open current". The attribute is read once at mount and stripped, so
+        // it never affects the content hash (which is over textContent anyway) and is
+        // gone before any snapshot is captured in the opened tab. A checkout of a
+        // checkout keeps the ORIGINAL live key (currentKey already carries it).
+        if (currentKey) cloneRoot.setAttribute('data-noteback-checkout', currentKey);
+        else cloneRoot.removeAttribute('data-noteback-checkout');
+      }
 
       // Re-seed the machine-readable state block with the version's comments.
       // The JSON lands in a <script> element's textContent and is then serialized
@@ -1752,8 +1838,19 @@
      * or the current page isn't a canvas (see the fidelity note below).
      */
     function openVersionTab(versionKey) {
-      Promise.resolve(history.getVersion({ versionKey: versionKey })).then(function (v) {
-        if (!v || !v.html) return; // pruned \u2014 nothing to open
+      // Resolve the LIVE/current version key to bake into the checkout (so the opened
+      // tab can offer "open current"). In a checkout tab we already hold the original
+      // live key (checkoutCurrentKey) \u2014 propagate it so a checkout-of-a-checkout still
+      // points back at the true current, not the version this tab is itself viewing.
+      const curKeyP = checkoutCurrentKey
+        ? Promise.resolve(checkoutCurrentKey)
+        : (history && typeof history.getCurrentVersionKey === 'function'
+          ? Promise.resolve(history.getCurrentVersionKey()).catch(function () { return null; })
+          : Promise.resolve(null));
+      Promise.all([history.getVersion({ versionKey: versionKey }), curKeyP]).then(function (res) {
+        const v = res[0];
+        const currentKey = res[1] || '';
+        if (!v || !v.html) { toast('That version has no saved snapshot'); return; } // pruned \u2014 nothing to open
         let html = null;
         // Build a working canvas only when the current page IS a canvas (it has a
         // baked doc-root + the inlined runtime). Otherwise we can't clone a runtime.
@@ -1764,7 +1861,9 @@
           try {
             const docId = (rootEl.getAttribute && rootEl.getAttribute('data-noteback-doc-id')) || '';
             const docTitle = v.docTitle || document.title || '';
-            html = buildVersionCanvasHtml(v, docId, docTitle);
+            // Don't mark "open current" as a checkout of itself.
+            const ck = (currentKey && currentKey !== versionKey) ? currentKey : '';
+            html = buildVersionCanvasHtml(v, docId, docTitle, ck);
           } catch (e) { html = null; }
         }
         // Extension non-canvas fallback (a page Noteback didn't author \u2014 no inlined

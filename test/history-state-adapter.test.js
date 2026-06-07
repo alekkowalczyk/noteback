@@ -41,6 +41,21 @@ test('save captures a full-doc snapshot at the first comment; getHistory/getVers
   assert.strictEqual(v.html, '<html>FIRST</html>');
 });
 
+test('getCurrentVersionKey returns the resolved version key; null when degraded', async () => {
+  // usable: the key is the content hash of the (long-enough) content text.
+  const a = build(fakeStore());
+  const key = await a.getCurrentVersionKey();
+  assert.strictEqual(typeof key, 'string');
+  assert.ok(key && key.length > 0, 'a non-empty version key is resolved');
+  // It must match the key getHistory excludes (i.e., the CURRENT version).
+  const a2 = build(fakeStore());
+  const k2 = await a2.getCurrentVersionKey();
+  assert.strictEqual(k2, key, 'the same content resolves to the same current key');
+  // degraded (empty docId) → null.
+  const d = mod.createHistoryStateAdapter({ doc: { title: 'T' }, store: fakeStore(), inner: fakeInner(), docId: '', contentText: () => LONG, captureSnapshot: () => '<html>S</html>', draftHistory: core, codec: idCodec, now: () => 'x' });
+  assert.strictEqual(await d.getCurrentVersionKey(), null);
+});
+
 test('degrades when docId is empty (no history, comments still flow via inner)', async () => {
   const a = mod.createHistoryStateAdapter({ doc: { title: 'T' }, store: fakeStore(), inner: fakeInner(), docId: '', contentText: () => LONG, captureSnapshot: () => '<html>S</html>', draftHistory: core, codec: idCodec, now: () => 'x' });
   const s0 = await a.load();

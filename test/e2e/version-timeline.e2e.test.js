@@ -25,7 +25,7 @@ const { chromium } = require('playwright');
 const REPO = path.resolve(__dirname, '..', '..');
 const DEBOUNCE_MS = 600; // comment chip is debounced ~340ms; wait comfortably past it
 
-let browser, server, baseURL, canvasHtml, serveMode = 'd1';
+let browser, server, baseURL, originURL, canvasHtml, serveMode = 'd1', checkoutServed = null;
 
 before(async () => {
   // Build the canvas exactly as `npx noteback wrap` does, then serve it from memory.
@@ -35,15 +35,20 @@ before(async () => {
   fs.unlinkSync(out);
 
   server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'text/html; charset=utf-8');
+    // The captured checkout HTML is re-served at /checkout.html on the SAME origin,
+    // so the opened-version tab shares the canvas's localStorage history (exactly
+    // what window.open(blob:) gives a localhost-served canvas).
+    if (req.url && req.url.indexOf('/checkout') === 0 && checkoutServed) { res.end(checkoutServed); return; }
     // serveMode 'd2' rewrites visible text -> new content hash, same baked doc-id
     // -> same lineage, so the 'd1' comment shows up as an earlier version.
     let body = canvasHtml;
     if (serveMode === 'd2') body = body.split('Technical Spec').join('Technical Spec — Revision 2');
-    res.setHeader('content-type', 'text/html; charset=utf-8');
     res.end(body);
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  baseURL = 'http://127.0.0.1:' + server.address().port + '/spec.canvas.html';
+  originURL = 'http://127.0.0.1:' + server.address().port;
+  baseURL = originURL + '/spec.canvas.html';
 
   browser = await chromium.launch();
 });
@@ -117,6 +122,9 @@ test('the Versions timeline renders an earlier version row with working open + c
     serveMode = 'd2';
     await page.goto(baseURL + '?v=d2');
     await page.waitForTimeout(400);
+    // Comment on draft 2 so the CURRENT draft is itself a stored version with a
+    // snapshot — that's what lets a checkout tab later "open current" and rebuild it.
+    await createComment(page, 'Comment on draft 2 (current)');
     await page.locator('.nb-launcher').click();
     await page.waitForTimeout(300);
 
@@ -328,6 +336,93 @@ test('the Versions timeline renders an earlier version row with working open + c
       checkoutHtml.includes('onerror=alert(1)'),
       'the comment body data survives (inside the escaped JSON state block)'
     );
+
+    // --- Opened-version tab: timeline with "you are here" + open-current. ---
+    // The checkout canvas bakes data-noteback-checkout=<live current key> so the
+    // opened tab can mark the opened version "you are here" and offer a way back.
+    assert.ok(
+      checkoutHtml.indexOf('data-noteback-checkout') !== -1,
+      'the checkout canvas bakes the data-noteback-checkout marker (the live current key)'
+    );
+
+    // Re-serve the captured checkout HTML on the SAME origin and open it in a fresh
+    // page — that shares the canvas's localStorage history (as a localhost blob: tab
+    // does), so the opened tab can render the timeline + offer "open current".
+    checkoutServed = checkoutHtml;
+    const page2 = await context.newPage();
+    try {
+      await page2.goto(originURL + '/checkout.html');
+      await page2.locator('.nb-launcher').waitFor({ state: 'attached', timeout: 8000 });
+      await page2.locator('.nb-launcher').click();
+      await page2.waitForTimeout(400);
+
+      // The "you are here" row is the OPENED version, relabelled "viewing".
+      const viewing = page2.locator('.nb-ver-row.active.nb-ver-viewing');
+      assert.strictEqual(await viewing.count(), 1, 'the opened version is the active "viewing" row');
+      assert.strictEqual(
+        ((await viewing.locator('.nb-ver-name').first().textContent()) || '').trim(),
+        'viewing',
+        'the now-row is relabelled "viewing" in a checkout'
+      );
+      assert.strictEqual(
+        ((await viewing.locator('.nb-ver-here').first().textContent()) || '').trim(),
+        'you are here',
+        'the opened version is marked "you are here"'
+      );
+
+      // The "Open current" banner is present with its CTA.
+      const bar = page2.locator('.nb-checkout-bar');
+      assert.strictEqual(await bar.count(), 1, 'the checkout bar (open current) is present');
+      assert.ok(
+        /Open current/.test((await bar.locator('.nb-checkout-cta').textContent()) || ''),
+        'the checkout bar offers "Open current"'
+      );
+
+      // The live/current draft appears below, badged "current".
+      const curRow = page2.locator('.nb-ver-row.nb-ver-is-current');
+      assert.strictEqual(await curRow.count(), 1, 'the live current draft is shown as a row');
+      assert.strictEqual(
+        ((await curRow.locator('.nb-ver-current').first().textContent()) || '').trim(),
+        'current',
+        'the live current draft row is badged "current"'
+      );
+
+      // Clicking the bar opens the CURRENT draft (d2 / "Revision 2") as a new canvas,
+      // and that canvas is NOT itself marked a checkout (you can't check out current
+      // from current). Stub window.open and inspect the produced blob.
+      await page2.evaluate(() => {
+        window.__nbOpenOriginal = window.open;
+        window.__nbOpened = [];
+        window.open = (url) => { window.__nbOpened.push(url); return null; };
+      });
+      let currentHtml = null;
+      try {
+        await bar.click();
+        await page2.waitForTimeout(300);
+        currentHtml = await page2.evaluate(async () => {
+          const url = (window.__nbOpened || [])[0];
+          return url ? await (await fetch(url)).text() : null;
+        });
+      } finally {
+        await page2.evaluate(() => { if (window.__nbOpenOriginal) window.open = window.__nbOpenOriginal; });
+      }
+      assert.ok(currentHtml, 'clicking "Open current" opened a canvas');
+      assert.ok(
+        currentHtml.indexOf('Revision 2') !== -1,
+        'the "Open current" canvas carries the CURRENT draft content (the d2 revision)'
+      );
+      // Parse the produced doc to check the ACTUAL attribute (the runtime SOURCE
+      // mentions the attr name in a comment, so a substring check would false-match).
+      const reCheckedOut = await page2.evaluate((h) => {
+        const d = new DOMParser().parseFromString(h, 'text/html');
+        const r = d.getElementById('noteback-doc-root');
+        return r ? r.getAttribute('data-noteback-checkout') : 'NO-ROOT';
+      }, currentHtml);
+      assert.strictEqual(reCheckedOut, null, 'opening current from current does not re-mark it a checkout');
+    } finally {
+      await page2.close();
+      checkoutServed = null;
+    }
   } finally {
     await context.close();
   }

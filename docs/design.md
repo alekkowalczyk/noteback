@@ -315,7 +315,23 @@ A single panel adapts to where you are:
   alone collapse it to a thin strip), with highlights **styled exactly like the live
   document** (the shared `HIGHLIGHT_CSS` is re-injected into the clean snapshot). A single
   pinned **"← Back"** banner spans the top and closes it (no separate ✕ — it'd be
-  redundant). **Open** promotes the same version to a live canvas in a new tab.
+  redundant). Clicking a highlight **inside** the peek pops that comment in place (the
+  id→comment map is serialized into the iframe; bodies render via `textContent`, never
+  parsed as HTML, and any literal `</script>` is escaped). **Open** promotes the same
+  version to a live canvas in a new tab.
+- **Per-row actions live behind a chevron** next to the v-label (same dropdown
+  affordance as Save/Copy): **Open** (disabled when the snapshot is pruned) and **Copy
+  feedback**. The menu is portaled to `uiRoot` and fixed-positioned in JS because the
+  versions dock clips overflow. Clicking the row body still peeks.
+- **Opened-version tab = the same sidebar, one stage back.** A checked-out version is
+  *just a canvas*, so it boots the same overlay — its content hash makes the opened
+  version the tab's "now". So the timeline already renders there; we only add
+  orientation: the canvas bakes `data-noteback-checkout=<live current key>`, the overlay
+  relabels the now-row **"viewing"** (still `you are here`, but it's the version you
+  opened, not the live latest), badges the live draft's row **"current"**, and shows an
+  **"Open current →"** banner that re-opens the current draft. (This needs the opened tab
+  to share the canvas's history store — true for a localhost-served blob: tab; a `file://`
+  blob with no shared storage degrades to comments-only, no timeline.)
 - **Edge states:** first read (Versions list hidden until there's something in it);
   history unavailable (storage blocked or content too short to fingerprint — comments
   still save, only the timeline steps aside); a site you haven't opted into (no

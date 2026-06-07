@@ -172,6 +172,7 @@
     '      history: (adapter.getHistory ? {',
     '        getHistory: function () { return adapter.getHistory(); },',
     '        getVersion: function (ref) { return adapter.getVersion(ref); },',
+    '        getCurrentVersionKey: function () { return adapter.getCurrentVersionKey(); },',
     '        clearCurrent: function () { return adapter.clearCurrent(); }',
     '      } : null),',
     '      mode: "embedded",',

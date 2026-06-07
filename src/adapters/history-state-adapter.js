@@ -95,6 +95,14 @@
         return ensureResolved().then((r) => r.degraded ? [] : dh.history({ docId: docId, exceptVersionKey: r.versionKey }));
       },
 
+      // The version key of THIS document's current content (its content hash, or the
+      // h0:<docId> fallback). Used by checkout to bake "which version is live" into
+      // the opened canvas so that tab can offer "open current". null when degraded.
+      getCurrentVersionKey: function () {
+        if (!usable) return Promise.resolve(null);
+        return ensureResolved().then((r) => r.degraded ? null : r.versionKey);
+      },
+
       getVersion: function (ref) {
         if (!usable) return Promise.resolve(null);
         return dh.version({ versionKey: ref.versionKey });

@@ -116,6 +116,25 @@ the code, that have already bitten us once.
   `<\/script` back as `</script`, so the comment round-trips). The version timeline +
   checkout are covered by the browser e2e `test/e2e/version-timeline.e2e.test.js`
   (the old `history-popup.e2e.test.js` is deleted).
+- **The checkout marker (`data-noteback-checkout`) is read ONCE at mount, then STRIPPED.**
+  `buildVersionCanvasHtml` bakes `data-noteback-checkout="<live current version key>"` on
+  `#noteback-doc-root` so the opened tab can show "you are here" on the opened version +
+  an "Open current →" banner. The overlay reads it into `checkoutCurrentKey` at mount and
+  immediately `removeAttribute`s it — so it never lands in a later snapshot/export and
+  never perturbs the content hash (which is over `textContent` anyway, but be safe). Two
+  consequences that already tripped a test: (1) opening *current from a checkout* must NOT
+  re-mark it a checkout (`ck = currentKey !== versionKey ? currentKey : ''`); a
+  checkout-of-a-checkout instead propagates the ORIGINAL live key. (2) The runtime SOURCE
+  mentions the attribute name in comments, and overlay.js is inlined into every canvas, so
+  a substring check like `/data-noteback-checkout=/` on built HTML **false-matches the
+  comment** — assert on the parsed DOM attribute, not the source text.
+- **The "viewing" row needs the opened tab to SHARE the canvas's history store.** A
+  checkout is just a canvas; its content hash makes the opened version the tab's "now", so
+  the timeline renders *only if* `getHistory()` returns data — which needs the opened tab
+  to see the same `localStorage`. A localhost-served `blob:` tab shares it (same origin);
+  a `file://` blob may not, degrading to comments-only. The "viewing" now-row is rendered
+  even when `getHistory()` is empty *in checkout mode* (so "you are here" always shows),
+  but the rest of the timeline still depends on the shared store.
 - **`wrap` PRESERVES an existing doc-id — don't make it re-mint.** The version history
   follows the baked `data-noteback-doc-id`, so re-wrapping a canvas must keep the same
   id or the history orphans. `bin/noteback.js`'s precedence is: explicit `--id` → the id

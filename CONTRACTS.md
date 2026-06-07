@@ -63,11 +63,24 @@ Rules:
 **History-mode extension.** When the adapter is the **snapshot-history adapter**
 (`createHistoryStateAdapter`, §8) it additionally exposes
 `getHistory() -> Promise<Version[]>`, `getVersion({versionKey}) -> Promise<{html, comments, docTitle, contentHash}|null>`,
-and `clearCurrent() -> Promise<void>`. The overlay feature-detects these (via the
-`history` config passed to `boot`, §3.7) to drive the version timeline; the
-comments-only `ChromeStorageAdapter`/`InFileStateAdapter` don't have them and the
-timeline stays hidden. There is no per-comment "section" lookup — history operates on
-whole-document version snapshots, not extracted fragments.
+`getCurrentVersionKey() -> Promise<string|null>` (THIS document's current version key
+— its content hash, or `null` when degraded; used by checkout to bake "which version
+is live" into an opened tab), and `clearCurrent() -> Promise<void>`. The overlay
+feature-detects these (via the `history` config passed to `boot`, §3.7) to drive the
+version timeline; the comments-only `ChromeStorageAdapter`/`InFileStateAdapter` don't
+have them and the timeline stays hidden. There is no per-comment "section" lookup —
+history operates on whole-document version snapshots, not extracted fragments.
+
+**Checkout tab (opened version).** A canvas produced by a version's **Open** action
+bakes `data-noteback-checkout="<live current version key>"` onto `#noteback-doc-root`.
+The overlay reads it **once at mount** and **strips it** (so it never reaches a later
+snapshot/export and never perturbs the content hash, which is over `textContent`). In
+that tab the "now" row is relabelled **"viewing"** (it IS the opened version — `you
+are here`), the live/current draft appears below badged **"current"**, and an **"Open
+current →"** banner re-opens the current via `openVersionTab(currentKey)`. A
+checkout-of-a-checkout propagates the ORIGINAL live key (so "open current" always
+points at the true current, not the version this tab is viewing); opening the current
+*from* the current bakes no marker (you can't check out current from itself).
 
 Implementations (all satisfy the `load`/`save` core; covered by the adapter tests
 under `test/` — `history-state-adapter.test.js`, `chrome-kv-store.test.js`,
