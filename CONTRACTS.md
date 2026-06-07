@@ -183,9 +183,11 @@ source of truth and is shared by the content script (gating) and the popup
 - `classifyOrigin(loc) -> 'file' | 'localhost' | '127.0.0.1' | 'other'`
 - `originOf(loc) -> canonical origin` (`"file://"` for file pages)
 - `normalizeSettings(s) -> { origins, disabledSites, historySites, historyDisabledGlobal, historyDisabledSites, historyDisabledDocs }` (defaults filled)
-- `isActive({type, origin}, settings)` — **active** iff `origins[type] !== false`
-  **and** `origin ∉ disabledSites`. Per-type is the master gate; per-site only
-  subtracts a single origin. `'other'` is never active.
+- `isActive({type, origin}, settings)` — **active** iff the per-type gate is on
+  **and** `origin ∉ disabledSites`. The per-type defaults differ: `file` is **on**
+  by default; `localhost` / `127.0.0.1` are **opt-in** (off until switched on in the
+  popup — only an explicit `true` activates them). Per-type is the master gate;
+  per-site only subtracts a single origin. `'other'` is never active.
 - `historyAllowed({type, origin, docKey}, settings)` — gates the **snapshot-history
   engine** (§8). Default-**on** for `file`/`localhost`/`127.0.0.1`; for any other origin
   it is opt-in via `origin ∈ historySites`. When false the content script keeps the
@@ -224,9 +226,11 @@ embedded canvas is unaffected — it has no settings and always shows its UI.
 
 ### 1.4 Click-to-activate on unsupported origins (extension mode only)
 
-Noteback auto-injects only on `file://`, `localhost`, and `127.0.0.1` (the
-manifest match list). On any **other** origin — e.g. a doc the user hosts over
-https — the content script never loads, so `classifyOrigin` returns `'other'`
+Noteback injects its content script only on `file://`, `localhost`, and
+`127.0.0.1` (the manifest match list) — but it auto-**activates** there only on
+`file://`; on `localhost`/`127.0.0.1` the script loads **dormant** and the user
+opts in from the popup (§1.3). On any **other** origin — e.g. a doc the user hosts
+over https — the content script never loads, so `classifyOrigin` returns `'other'`
 and `isActive` is `false` (§1.3). The popup offers a manual escape hatch:
 
 - On an `'other'` origin whose `NOTEBACK_PING` goes unanswered, the popup shows

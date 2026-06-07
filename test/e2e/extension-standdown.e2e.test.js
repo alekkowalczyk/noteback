@@ -99,6 +99,13 @@ function panelCount(page) {
   return page.evaluate(() => document.querySelectorAll('[data-noteback-ui="panel"]').length);
 }
 
+/** The extension's privileged service worker (for seeding chrome.storage settings). */
+async function getWorker(ctx) {
+  let sw = ctx.serviceWorkers()[0];
+  if (!sw) { try { sw = await ctx.waitForEvent('serviceworker', { timeout: 5000 }); } catch (e) { sw = null; } }
+  return sw;
+}
+
 test('boot stamps the cross-world mount marker and mounts exactly one overlay', { timeout: 60000 }, async () => {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
@@ -138,6 +145,15 @@ test('the extension stands down on a canvas (single overlay; comment -> localSto
     } catch (e) {
       t.skip('could not launch Chromium with an unpacked extension: ' + (e && e.message));
       return;
+    }
+
+    // localhost / 127.0.0.1 are opt-in now: enable 127.0.0.1 in the extension's
+    // settings (as the popup toggle would) BEFORE any content script mounts, so
+    // the extension is actually active on this origin — otherwise it stays dormant
+    // and there is nothing to stand down. Seeded via the privileged service worker.
+    const sw = await getWorker(extContext);
+    if (sw) {
+      await sw.evaluate(() => new Promise((res) => chrome.storage.local.set({ 'nb:settings': { origins: { '127.0.0.1': true } } }, res)));
     }
 
     // Skip-gate: confirm the extension actually injects in this environment by

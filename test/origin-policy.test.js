@@ -33,9 +33,15 @@ test('originOf returns "file://" for file pages and origin otherwise', () => {
   );
 });
 
-test('isActive defaults to true when settings are absent', () => {
-  assert.strictEqual(policy.isActive({ type: 'localhost', origin: 'http://localhost:3000' }, null), true);
+test('isActive defaults: file on, localhost/127 opt-in (off) when settings are absent', () => {
+  // file:// auto-activates with no settings…
   assert.strictEqual(policy.isActive({ type: 'file', origin: 'file://' }, undefined), true);
+  // …but localhost / 127.0.0.1 are opt-in: off until enabled in the popup.
+  assert.strictEqual(policy.isActive({ type: 'localhost', origin: 'http://localhost:3000' }, null), false);
+  assert.strictEqual(policy.isActive({ type: '127.0.0.1', origin: 'http://127.0.0.1:8080' }, null), false);
+  // explicitly enabling localhost activates it (the popup's per-type toggle).
+  assert.strictEqual(policy.isActive({ type: 'localhost', origin: 'http://localhost:3000' }, { origins: { localhost: true } }), true);
+  assert.strictEqual(policy.isActive({ type: '127.0.0.1', origin: 'http://127.0.0.1:8080' }, { origins: { '127.0.0.1': true } }), true);
 });
 
 test('per-type switch off suppresses the whole type', () => {
@@ -45,7 +51,8 @@ test('per-type switch off suppresses the whole type', () => {
 });
 
 test('per-site entry subtracts one origin while its type stays on', () => {
-  const s = { disabledSites: ['http://localhost:3000'] };
+  // localhost is opt-in, so enable the type first, then subtract one site.
+  const s = { origins: { localhost: true }, disabledSites: ['http://localhost:3000'] };
   assert.strictEqual(policy.isActive({ type: 'localhost', origin: 'http://localhost:3000' }, s), false);
   assert.strictEqual(policy.isActive({ type: 'localhost', origin: 'http://localhost:8000' }, s), true);
 });
@@ -61,7 +68,8 @@ test('unknown/other origin type is never active', () => {
 
 test('normalizeSettings fills defaults and is shape-stable', () => {
   const n = policy.normalizeSettings(null);
-  assert.deepStrictEqual(n.origins, { file: true, localhost: true, '127.0.0.1': true });
+  // file defaults ON; localhost / 127.0.0.1 are opt-in (default OFF).
+  assert.deepStrictEqual(n.origins, { file: true, localhost: false, '127.0.0.1': false });
   assert.deepStrictEqual(n.disabledSites, []);
   assert.deepStrictEqual(n.historySites, []);
 });

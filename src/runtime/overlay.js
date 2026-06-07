@@ -167,7 +167,9 @@
   // the painted highlight (HIGHLIGHT_CSS, shared with the peek).
   const BUTTON_CSS = [
     '.noteback-fab{',
-    '  position:absolute;z-index:2147483646;',
+    // Max z-index: the chip is a light-DOM element, so it competes directly in the
+    // page's root stacking context — pin it on top of page content like the host.
+    '  position:absolute;z-index:2147483647;',
     '  display:inline-flex;align-items:center;gap:7px;',
     '  font:600 12.5px/1 ui-rounded,"SF Pro Rounded",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;',
     '  letter-spacing:.01em;color:#fffdf8;background:#127a72;',
@@ -669,6 +671,13 @@
     host.style.left = '0';
     host.style.width = '0';
     host.style.height = '0';
+    // ALWAYS ON TOP: the host is a position:fixed stacking context, but with
+    // z-index:auto it loses the page's ROOT stacking context to any page element
+    // that has a positive z-index — which then paints over the sidebar/launcher
+    // (both live inside this host's shadow, so their huge inner z-index values
+    // only order things WITHIN the host, never lift the host itself). Pin the
+    // host to the 32-bit max so the whole overlay wins the root context.
+    host.style.zIndex = '2147483647';
     (doc.body || doc.documentElement).appendChild(host);
 
     let shadow;

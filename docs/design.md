@@ -194,7 +194,7 @@ A saved HTML file **cannot silently overwrite itself** (browser security boundar
 ## 9. Onboarding & permissions UX
 
 - On first run / first local-doc visit, detect whether **"Allow access to file URLs"** is enabled. If not, show a one-time card with the exact steps to enable it (with a deep link to the extension's details page where possible).
-- `localhost`/`127.0.0.1` need no such toggle — call that out so users serving docs locally get a frictionless path.
+- `localhost`/`127.0.0.1` are **opt-in** (off by default): the popup's per-type toggle enables them, so a dev server doesn't get the overlay unasked-for. The onboarding card points users serving docs locally to that toggle.
 
 ---
 

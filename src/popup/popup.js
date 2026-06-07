@@ -262,7 +262,7 @@ document.addEventListener('DOMContentLoaded', function () {
       '    Open extension details' +
       '  </button>' +
       '  <p class="nb-card__note">Serving docs from <code>localhost</code> or' +
-      '   <code>127.0.0.1</code> needs no toggle.</p>' +
+      '   <code>127.0.0.1</code>? Switch them on in this popup — they’re off by default.</p>' +
       '</div>';
     const openBtn = document.getElementById('nb-open-details');
     if (openBtn) {
@@ -384,12 +384,12 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function typeOn(type) {
-    const norm = policy ? policy.normalizeSettings(settings) : { origins: { file: true, localhost: true, '127.0.0.1': true } };
+    const norm = policy ? policy.normalizeSettings(settings) : { origins: { file: true, localhost: false, '127.0.0.1': false } };
     return norm.origins[type] !== false;
   }
 
   function renderTypeSwitches() {
-    const norm = policy ? policy.normalizeSettings(settings) : { origins: { file: true, localhost: true, '127.0.0.1': true } };
+    const norm = policy ? policy.normalizeSettings(settings) : { origins: { file: true, localhost: false, '127.0.0.1': false } };
     if (typeInputs.file) typeInputs.file.checked = norm.origins.file;
     if (typeInputs.localhost) typeInputs.localhost.checked = norm.origins.localhost;
     if (typeInputs['127.0.0.1']) typeInputs['127.0.0.1'].checked = norm.origins['127.0.0.1'];
@@ -464,13 +464,13 @@ document.addEventListener('DOMContentLoaded', function () {
   function hideHistorySection() { histBlock.setAttribute('hidden', ''); }
 
   function withType(s, type, on) {
-    const norm = policy ? policy.normalizeSettings(s) : { origins: { file: true, localhost: true, '127.0.0.1': true }, disabledSites: [] };
+    const norm = policy ? policy.normalizeSettings(s) : { origins: { file: true, localhost: false, '127.0.0.1': false }, disabledSites: [] };
     norm.origins[type] = !!on;
     return norm;
   }
 
   function withSite(s, origin, on) {
-    const norm = policy ? policy.normalizeSettings(s) : { origins: { file: true, localhost: true, '127.0.0.1': true }, disabledSites: [] };
+    const norm = policy ? policy.normalizeSettings(s) : { origins: { file: true, localhost: false, '127.0.0.1': false }, disabledSites: [] };
     const list = norm.disabledSites.slice();
     const idx = list.indexOf(origin);
     if (on) { if (idx !== -1) list.splice(idx, 1); }   // enable site → remove from disabled
