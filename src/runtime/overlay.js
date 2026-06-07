@@ -57,8 +57,8 @@
 
   // The painted highlight — a filled honey swatch with rounded corners and a 1px
   // darker-yellow ring; the passage being actively commented gets a teal ring.
-  // Shared so the version-peek iframe paints highlights identically to the live
-  // document (openVersionPeek injects this into the snapshot's <head>).
+  // Shared so the inline version-view iframe paints highlights identically to the
+  // live document (openVersionInline injects this into the snapshot's <head>).
   const HIGHLIGHT_CSS =
     'mark.noteback-highlight{' +
     '  background:#ffe7a3;color:inherit;border-radius:4px;padding:0 1.5px;cursor:pointer;' +
@@ -77,7 +77,7 @@
     '}';
 
   // Styles for the popover shown INSIDE a version peek iframe when a highlight is
-  // clicked (openVersionPeek injects this into the snapshot's <head>). It lives in
+  // clicked (openVersionInline injects this into the snapshot's <head>). It lives in
   // the snapshot's own document, so it must be self-contained (no shadow vars).
   const PEEK_POP_CSS =
     '.nb-peek-pop{position:fixed;z-index:2147483647;max-width:320px;min-width:190px;' +
@@ -342,34 +342,36 @@
     '.nb-ver-menu .nb-mi-sub{text-transform:none;letter-spacing:normal;}',
     '.nb-ver-menu .nb-menu-item:disabled{opacity:.42;cursor:default;}',
     '.nb-ver-menu .nb-menu-item:disabled .nb-mi-label{color:var(--nb-ink);}',
-    /* checkout banner: this tab is an opened past version; click → open the live
-       current draft in a new tab. Sits at the top of the versions dock. */
-    '.nb-checkout-bar{display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;',
+    /* "Back to current" bar: shown atop the timeline while viewing an earlier
+       version inline; one click returns to the live current draft. */
+    '.nb-backbar{display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;',
     '  margin:2px 0 4px;padding:8px 11px;border:1px solid var(--nb-accent);border-radius:10px;',
     '  background:var(--nb-accent-wash);transition:background .14s ease,box-shadow .2s ease;}',
-    '.nb-checkout-bar:hover{background:#dcebe8;box-shadow:0 6px 16px -12px rgba(15,98,89,.7);}',
-    '.nb-checkout-txt{font:600 11.5px/1.3 var(--nb-ui);color:var(--nb-ink-soft);}',
-    '.nb-checkout-cta{margin-left:auto;font:700 12px/1 var(--nb-round);color:var(--nb-accent-deep);white-space:nowrap;}',
-    /* the "viewing" row (opened version, in checkout) and the "current" badge on the
-       live draft’s row */
-    '.nb-ver-current{color:var(--nb-ink-soft);}',
+    '.nb-backbar:hover{background:#dcebe8;box-shadow:0 6px 16px -12px rgba(15,98,89,.7);}',
+    '.nb-backbar-txt{font:600 11.5px/1.3 var(--nb-ui);color:var(--nb-ink-soft);}',
+    '.nb-backbar-cta{margin-left:auto;font:700 12px/1 var(--nb-round);color:var(--nb-accent-deep);white-space:nowrap;}',
     '.nb-disclose{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:none;background:none;cursor:pointer;',
     '  padding:11px 4px;border-top:1px solid var(--nb-line);border-radius:0;}',
     '.nb-disclose:hover .nb-disclose-label{color:var(--nb-accent-deep);}',
     '.nb-disclose-chev{display:inline-flex;color:var(--nb-ink-faint);font-size:14px;line-height:1;transition:transform .16s ease;}',
     '.nb-disclose.nb-open .nb-disclose-chev{transform:rotate(90deg);}',
     '.nb-disclose-label{font:700 10px/1 var(--nb-round);letter-spacing:.08em;text-transform:uppercase;color:var(--nb-ink-soft);}',
-    '.nb-hist-backdrop{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;}',
-    '.nb-hist-panel{position:relative;width:min(820px,92vw);height:min(80vh,720px);background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35);}',
-    '.nb-hist-back{position:absolute;top:0;left:0;right:0;z-index:2;display:flex;align-items:center;gap:6px;',
-    '  border:none;border-bottom:1px solid var(--nb-line);background:var(--nb-accent-wash);color:var(--nb-accent-deep);',
+    /* inline version view: a read-only side panel filling the doc area BESIDE the
+       sidebar (which stays at right:0 with the live timeline). z-index sits JUST
+       BELOW the sidebar (2147483647) and the panel insets by the sidebar width, so
+       "you are here" + back-to-current + switch stay reachable while viewing. */
+    '.nb-hist-view{position:fixed;top:0;left:0;right:360px;bottom:0;z-index:2147483646;',
+    '  background:#fff;display:flex;flex-direction:column;box-shadow:0 0 44px -20px rgba(40,40,38,.5);}',
+    '.nb-hist-back{flex:0 0 auto;display:flex;align-items:center;gap:6px;border:none;',
+    '  border-bottom:1px solid var(--nb-line);background:var(--nb-accent-wash);color:var(--nb-accent-deep);',
     '  font:700 12px/1 var(--nb-round);letter-spacing:.01em;padding:11px 14px;cursor:pointer;text-align:left;',
     '  transition:background .14s ease,color .14s ease;}',
     '.nb-hist-back:hover{background:var(--nb-accent);color:#fffdf8;}',
-    // The iframe is a REPLACED element: top+bottom+height:auto does NOT stretch it
-    // (it falls back to the intrinsic ~150px, leaving the doc in a thin strip at the
-    // top). Give it an explicit height so it fills the panel below the back bar.
-    '.nb-hist-frame{position:absolute;top:38px;left:0;right:0;width:100%;height:calc(100% - 38px);border:0;background:#fff;}',
+    // The iframe is a REPLACED element; as a column-flex child with flex:1 +
+    // min-height:0 it resolves to a definite height and fills below the back bar.
+    // (Do NOT switch to absolute top+bottom+height:auto — a replaced element falls
+    // back to the intrinsic ~150px and collapses into a thin strip.)
+    '.nb-hist-frame{flex:1 1 auto;min-height:0;width:100%;border:0;background:#fff;}',
 
     /* toast + success check (transitions.dev) */
     '.nb-toast{position:fixed;bottom:20px;right:20px;display:inline-flex;align-items:center;gap:9px;',
@@ -516,20 +518,13 @@
     // the info dialog. Defaults to embedded (the self-contained canvas is the
     // common case); the extension passes 'extension' explicitly.
     const runMode = (cfg.mode === 'extension') ? 'extension' : 'embedded';
-    // Checkout marker: a canvas opened from a version's "Open" action carries
-    // data-noteback-checkout="<live current version key>" on #noteback-doc-root.
-    // Read it ONCE here (then strip it from the live DOM so it never lands in a
-    // later snapshot/export), so the timeline can mark "you are here" on the opened
-    // version and offer "open current". Empty string when this isn't a checkout.
-    const checkoutCurrentKey = (function () {
-      try {
-        const root = document.getElementById('noteback-doc-root');
-        if (!root || !root.getAttribute) return '';
-        const k = root.getAttribute('data-noteback-checkout') || '';
-        if (k && root.removeAttribute) root.removeAttribute('data-noteback-checkout');
-        return k;
-      } catch (e) { return ''; }
-    })();
+    // In-tab version viewing (read-only). `viewingKey` is the version key shown
+    // inline (null = the live current draft); `inlineView` is its DOM panel.
+    // Inline viewing stays on THIS tab/origin, so the localStorage-backed history
+    // adapter remains reachable — unlike the old new-tab blob whose opaque file://
+    // origin denied localStorage (the bug this replaced).
+    let viewingKey = null;
+    let inlineView = null;
     const onChange = cfg.onChange || function () {};
     // Prefer the runtime markdown module directly so we can hand it the document
     // markup for line references; fall back to the boot-supplied renderer.
@@ -1436,9 +1431,9 @@
       wrap.className = 'nb-versions';
       wrap.setAttribute(UI_ATTR, 'versions');
       elVersionsDock.appendChild(wrap);
-      // Checkout tab: a banner above the timeline offering a one-click return to the
-      // live/current draft. Shown regardless of how much other history is visible.
-      if (checkoutCurrentKey) wrap.appendChild(renderCheckoutBar());
+      // While viewing an earlier version inline, show the "Back to current" bar
+      // above the timeline. Shown regardless of how much other history is visible.
+      if (viewingKey) wrap.appendChild(renderBackToCurrentBar());
       Promise.resolve(history.getHistory()).then(function (versions) {
         versions = versions || [];
         // The "save with comments and history" option only makes sense when there IS
@@ -1447,22 +1442,20 @@
         if (saveHistoryItem) {
           saveHistoryItem.hidden = !(versions.length >= 1 && exporter && typeof exporter.onSaveCanvasWithHistory === 'function');
         }
-        // Collapse rule: 0 earlier versions \u2192 the group is not rendered at all. In a
-        // checkout we still render the group (label + "viewing" row + the "open
-        // current" banner) even with no OTHER versions, so "you are here" is always
-        // shown on the opened version.
-        if (versions.length === 0 && !checkoutCurrentKey) { wrap.remove(); return; }
+        // Collapse rule: 0 earlier versions \u2192 the group is not rendered at all. While
+        // viewing inline we still render the group (label + now row + the "Back to
+        // current" bar) even with no OTHER versions, so the timeline is reachable.
+        if (versions.length === 0 && !viewingKey) { wrap.remove(); return; }
 
         const label = doc.createElement('div');
         label.className = 'nb-group-label';
         label.textContent = 'History';
         wrap.appendChild(label);
 
-        // The "now" row: the live draft (or, in a checkout, the opened version),
-        // no actions, status dot active.
+        // The "now" row: the live draft, no actions, status dot active.
         wrap.appendChild(renderNowRow());
 
-        if (versions.length === 0) return; // checkout with no other versions: bar + viewing row only
+        if (versions.length === 0) return; // viewing with no other versions: back bar + now row only
 
         const total = versions.length; // earlier versions, newest-first
         // The most-recent earlier version always stays inline.
@@ -1506,40 +1499,43 @@
     }
 
     /**
-     * Checkout banner: this tab is an opened past version. One click re-opens the
-     * live/current draft (the version key baked into the canvas at checkout). Mirrors
-     * the peek's "← Back" affordance, but as a real new-tab checkout of the current.
+     * "Back to current" bar, shown atop the timeline while viewing an earlier
+     * version inline. One click closes the inline view and returns to the live
+     * current draft (same tab — no new tab, no blob).
      */
-    function renderCheckoutBar() {
+    function renderBackToCurrentBar() {
       const bar = doc.createElement('button');
       bar.type = 'button';
-      bar.className = 'nb-checkout-bar';
-      bar.setAttribute(UI_ATTR, 'checkout-bar');
+      bar.className = 'nb-backbar';
+      bar.setAttribute(UI_ATTR, 'backbar');
       const txt = doc.createElement('span');
-      txt.className = 'nb-checkout-txt';
+      txt.className = 'nb-backbar-txt';
       txt.textContent = 'Viewing an earlier version';
       const cta = doc.createElement('span');
-      cta.className = 'nb-checkout-cta';
-      cta.textContent = 'Open current →';
+      cta.className = 'nb-backbar-cta';
+      cta.textContent = '← Back to current';
       bar.appendChild(txt);
       bar.appendChild(cta);
-      bar.title = 'Open the current draft in a new tab';
-      bar.addEventListener('click', function () { openVersionTab(checkoutCurrentKey); });
+      bar.title = 'Return to the current draft';
+      bar.addEventListener('click', function () { closeVersionInline(); });
       return bar;
     }
 
     /**
-     * The "you are here" row at the top of the timeline. Normally it's the live
-     * current draft ("now"). In a CHECKOUT tab the live content IS the opened past
-     * version, so the row is relabelled "viewing" — it marks the version you opened,
-     * while the actual live draft sits below as a normal row (and the checkout bar
-     * offers a way back to it). No actions either way; status dot active.
+     * The "you are here" row at the top of the timeline — always the live current
+     * draft ("now"). When viewing an earlier version inline this row loses the
+     * active highlight and becomes click-to-return (the viewed version row gets the
+     * active dot instead). No chevron/actions either way; status dot active when not
+     * viewing.
      */
     function renderNowRow() {
       const s = getState();
       const count = (s && Array.isArray(s.comments)) ? s.comments.length : 0;
+      const viewing = !!viewingKey;
       const row = doc.createElement('div');
-      row.className = 'nb-ver-row active' + (checkoutCurrentKey ? ' nb-ver-viewing' : '');
+      // The live current draft. When viewing an older version it is NOT the active
+      // row (the viewed version is) and becomes click-to-return.
+      row.className = 'nb-ver-row' + (viewing ? '' : ' active');
       row.setAttribute(UI_ATTR, 'version-now');
       const line = doc.createElement('div');
       line.className = 'nb-ver-line';
@@ -1547,21 +1543,24 @@
       dot.className = 'nb-ver-dot';
       const name = doc.createElement('span');
       name.className = 'nb-ver-name';
-      name.textContent = checkoutCurrentKey ? 'viewing' : 'now';
+      name.textContent = 'now';
       const spacer = doc.createElement('span');
       spacer.className = 'nb-ver-spacer';
-      const here = doc.createElement('span');
-      here.className = 'nb-ver-here';
-      here.textContent = 'you are here';
       const cnt = doc.createElement('span');
       cnt.className = 'nb-ver-count';
       cnt.textContent = String(count);
       line.appendChild(dot);
       line.appendChild(name);
       line.appendChild(spacer);
-      line.appendChild(here);
+      if (!viewing) {
+        const here = doc.createElement('span');
+        here.className = 'nb-ver-here';
+        here.textContent = 'you are here';
+        line.appendChild(here);
+      }
       line.appendChild(cnt);
       row.appendChild(line);
+      if (viewing) row.addEventListener('click', function () { closeVersionInline(); });
       return row;
     }
 
@@ -1575,11 +1574,10 @@
      */
     function renderVersionRow(d, ordinal) {
       const row = doc.createElement('div');
-      // In a checkout tab, the live/current draft shows up here as a normal row —
-      // flag it so we can badge it "current" (the checkout bar above is the primary
-      // way back; this just orients the reader).
-      const isCurrent = !!(checkoutCurrentKey && d.versionKey === checkoutCurrentKey);
-      row.className = 'nb-ver-row' + (isCurrent ? ' nb-ver-is-current' : '');
+      // The version currently shown inline is the "you are here" row (active dot +
+      // viewing badge); every other row is click-to-view.
+      const isViewing = !!(viewingKey && d.versionKey === viewingKey);
+      row.className = 'nb-ver-row' + (isViewing ? ' active nb-ver-viewing' : '');
       row.setAttribute(UI_ATTR, 'version');
       row.setAttribute('data-version-key', d.versionKey || '');
 
@@ -1590,7 +1588,7 @@
       const name = doc.createElement('span');
       name.className = 'nb-ver-name';
       name.textContent = 'v' + ordinal;
-      // Chevron next to the label: opens the actions menu (Open / Copy feedback).
+      // Chevron next to the label: opens the actions menu (Copy feedback).
       const menuBtn = doc.createElement('button');
       menuBtn.type = 'button';
       menuBtn.className = 'nb-ver-menu-btn';
@@ -1612,19 +1610,22 @@
       line.appendChild(name);
       line.appendChild(menuBtn);
       line.appendChild(spacer);
-      if (isCurrent) {
-        const cur = doc.createElement('span');
-        cur.className = 'nb-ver-here nb-ver-current';
-        cur.textContent = 'current';
-        line.appendChild(cur);
+      if (isViewing) {
+        const here = doc.createElement('span');
+        here.className = 'nb-ver-here';
+        here.textContent = 'you are here';
+        line.appendChild(here);
       }
       line.appendChild(meta); // date — right-aligned (after the flex spacer)
       line.appendChild(cnt);
       row.appendChild(line);
 
-      // Peek lives on the whole row; the chevron's stopPropagation keeps a menu
-      // click from also peeking.
-      row.addEventListener('click', function () { openVersionPeek(d.versionKey); });
+      // Click anywhere on the row (except the chevron, which stops propagation)
+      // opens the read-only inline view of this version.
+      row.addEventListener('click', function () {
+        if (viewingKey && d.versionKey === viewingKey) return; // already viewing this one
+        openVersionInline(d.versionKey);
+      });
       return row;
     }
 
@@ -1644,75 +1645,83 @@
     }
 
     /**
-     * Peek a past version: parse its clean-document snapshot, run the LIVE
-     * highlight painter over it (so the commented passages are wrapped in the
-     * same `<mark class="noteback-highlight">` the live doc uses), re-inject
-     * HIGHLIGHT_CSS so the marks are styled like the live doc, and show the result
-     * in the snapshot modal (iframe srcdoc, filling the panel). A full-width
-     * "\u2190 Back" banner at the top returns to the live document (same as a
-     * backdrop click). Pruned snapshots (html === '') are a no-op.
+     * Open a past version inline (read-only) in a side panel beside the sidebar.
+     * Parses the version's clean snapshot, runs the LIVE highlight painter over it
+     * (commented passages wrapped in the same <mark class="noteback-highlight">),
+     * re-injects HIGHLIGHT_CSS + PEEK_POP_CSS, and shows it in an <iframe srcdoc>
+     * under a "← Back to current draft" bar. Sets `viewingKey` and re-renders the
+     * timeline so the sidebar marks this version "you are here" and offers a way
+     * back / a switch to another version. Pruned snapshots (html === '') toast and
+     * leave the current draft in place.
      */
-    function openVersionPeek(versionKey) {
-      closeVersionMenu(true); // a row chevron may have opened it; the peek replaces it
+    function openVersionInline(versionKey) {
+      closeVersionMenu(true); // a row chevron may have opened it
       Promise.resolve(history.getVersion({ versionKey: versionKey })).then(function (v) {
-        if (!v || !v.html) return; // pruned \u2014 nothing to peek
+        if (!v || !v.html) { toast('This version has no saved snapshot'); return; } // pruned
 
-        // Parse the snapshot and paint REAL highlights into it via the live
-        // painter. paintHighlights creates each <mark> with the parsed doc's own
-        // ownerDocument (wrapRange uses nodes[0].ownerDocument), so the marks land
-        // inside `parsed` and survive serialization below. A pruned/odd snapshot
-        // must not break the peek, hence the guard.
+        // Parse the snapshot and paint REAL highlights into it via the live painter.
+        // paintHighlights creates each <mark> with the parsed doc's own ownerDocument,
+        // so the marks land inside `parsed` and survive serialization below.
         let painted = '<!DOCTYPE html>' + v.html;
         try {
           const parsed = new DOMParser().parseFromString(v.html, 'text/html');
           try {
             highlightApi.paintHighlights(parsed.body, { schemaVersion: 1, comments: v.comments || [] }, {});
           } catch (e) { /* keep the un-highlighted snapshot */ }
-          // The clean snapshot dropped Noteback's injected styles, so the painted
-          // marks would render as bare browser <mark>s. Re-inject HIGHLIGHT_CSS so
-          // the peek's highlights match the live document exactly, plus the
-          // peek-popover styles (a click on a highlight shows its comment in-place).
+          // The clean snapshot dropped Noteback's styles; re-inject HIGHLIGHT_CSS so
+          // the marks match the live document, plus PEEK_POP_CSS for the in-iframe
+          // comment popover.
           try {
             const hlStyle = parsed.createElement('style');
             hlStyle.setAttribute(UI_ATTR, 'peek-highlight-style');
             hlStyle.textContent = HIGHLIGHT_CSS + PEEK_POP_CSS;
             (parsed.head || parsed.documentElement).appendChild(hlStyle);
           } catch (e) { /* styling is best-effort */ }
-          // Scroll the first highlight into view once the iframe loads.
           const scrollScript =
             '<scr' + 'ipt>(function(){var m=document.querySelector("mark.noteback-highlight");' +
             'if(m)m.scrollIntoView({block:"center"});})();</scr' + 'ipt>';
-          // Clicking a painted highlight in the peek opens a small popover with that
-          // comment's body (and quoted passage). The id->comment map is serialized
-          // into the iframe; comment bodies are placed via textContent at runtime
-          // (no HTML injection), and any literal "</script>" in the JSON is escaped
-          // exactly as the canonical exporter does so it can't break the block.
+          // Click a painted highlight → show that comment in an in-place popover.
+          // The id->comment map is serialized into the iframe; comment bodies are
+          // placed via textContent and any literal "</script>" in the JSON is escaped.
           const peekScript = buildPeekPopoverScript(v.comments || []);
           painted = '<!DOCTYPE html>' + parsed.documentElement.outerHTML + scrollScript + peekScript;
-        } catch (e) { /* DOMParser unavailable \u2014 fall back to the raw snapshot */ }
+        } catch (e) { /* DOMParser unavailable — fall back to the raw snapshot */ }
 
-        const back = doc.createElement('div');
-        back.className = 'nb-hist-backdrop';
-        back.setAttribute(UI_ATTR, 'version-peek');
-        const panel = doc.createElement('div');
-        panel.className = 'nb-hist-panel';
-        back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
-        // "\u2190 Back" banner \u2014 the single, obvious control that closes the peek and
-        // returns to the live document (backdrop click does the same). It spans the
-        // top, so a separate \u2715 button would be redundant.
+        // Swap any existing inline view (switching versions) WITHOUT a redundant
+        // timeline re-render — we re-render once below after viewingKey is set.
+        if (inlineView && inlineView.parentNode) inlineView.parentNode.removeChild(inlineView);
+        inlineView = null;
+        viewingKey = versionKey;
+
+        const view = doc.createElement('div');
+        view.className = 'nb-hist-view';
+        view.setAttribute(UI_ATTR, 'version-view');
         const backBar = doc.createElement('button');
         backBar.type = 'button';
         backBar.className = 'nb-hist-back';
-        backBar.setAttribute(UI_ATTR, 'version-peek-back');
-        backBar.textContent = '\u2190 Back';
-        backBar.addEventListener('click', function () { back.remove(); });
+        backBar.setAttribute(UI_ATTR, 'version-view-back');
+        backBar.textContent = '← Back to current draft';
+        backBar.addEventListener('click', function () { closeVersionInline(); });
         const frame = doc.createElement('iframe');
         frame.className = 'nb-hist-frame';
         frame.srcdoc = painted; // the snapshot with live highlights painted in
-        panel.appendChild(backBar);
-        panel.appendChild(frame);
-        back.appendChild(panel); uiRoot.appendChild(back);
+        view.appendChild(backBar);
+        view.appendChild(frame);
+        uiRoot.appendChild(view);
+        inlineView = view;
+
+        openSidebar();    // ensure the timeline (with "you are here") is visible
+        renderVersions(); // re-render so the viewed row is marked + the bar shows
       });
+    }
+
+    /** Close the inline version view and return to the live current draft. */
+    function closeVersionInline() {
+      if (inlineView && inlineView.parentNode) inlineView.parentNode.removeChild(inlineView);
+      inlineView = null;
+      const had = viewingKey;
+      viewingKey = null;
+      if (had) renderVersions();
     }
 
     /**
@@ -1764,145 +1773,6 @@
         '}());</scr' + 'ipt>';
     }
 
-    /**
-     * Build a REAL annotatable canvas of a past version, as an HTML string.
-     *
-     * Factored out of openVersionTab so the e2e can assert on the produced HTML
-     * without driving window.open. Primary path (the current page is itself a
-     * canvas \u2014 embedded mode, or the extension running on a canvas): clone the
-     * CURRENT live document (keeping its inlined runtime + styles + template),
-     * strip Noteback's own UI + any live highlights, swap in the snapshot's
-     * doc-content, and re-seed the #noteback-state block with the version's
-     * comments. Opening the result boots a working canvas of that version.
-     *
-     * @param {Object} v        getVersion() result: { html, comments, docTitle, contentHash }
-     * @param {string} docId      the current page's baked doc-id
-     * @param {string} docTitle   title for the version's state block
-     * @param {string} currentKey the LIVE/current version key (so the opened tab can
-     *                            offer "open current"); baked as data-noteback-checkout
-     * @returns {string} a full canvas HTML document
-     */
-    function buildVersionCanvasHtml(v, docId, docTitle, currentKey) {
-      // Snapshot's doc-content inner HTML (its #noteback-doc-root if present, else body).
-      const parsed = new DOMParser().parseFromString(v.html, 'text/html');
-      const snapRoot = parsed.querySelector('#noteback-doc-root') || parsed.body;
-      const snapInner = snapRoot ? snapRoot.innerHTML : '';
-
-      // Clone the CURRENT live document \u2014 it carries the inlined runtime, the
-      // canvas template wrapper, and the page styles, which is what makes the
-      // opened tab a working annotatable canvas.
-      const clone = document.documentElement.cloneNode(true);
-
-      // Strip Noteback's own UI from the clone (sidebar host, launcher, fab, our
-      // injected <style>, any open peek modal). The inlined runtime <script> is
-      // NOT a [data-noteback-ui] node, so it survives \u2014 that's deliberate.
-      const ui = clone.querySelectorAll('[' + UI_ATTR + ']');
-      for (let i = 0; i < ui.length; i++) {
-        if (ui[i].parentNode) ui[i].parentNode.removeChild(ui[i]);
-      }
-      // Drop any embedded-history block — a checked-out version is a fresh canvas and
-      // must not carry the source doc's full history (it would re-seed on open).
-      const histBlk = clone.querySelector('#noteback-history');
-      if (histBlk && histBlk.parentNode) histBlk.parentNode.removeChild(histBlk);
-      // Unwrap any live highlight <mark>s left in the clone so we start clean
-      // (the snapshot content we inject below replaces the doc-root anyway, but
-      // be defensive in case the clone's root is reused).
-      const liveMarks = clone.querySelectorAll('mark.' + (highlightApi && highlightApi.HIGHLIGHT_CLASS || 'noteback-highlight'));
-      for (let i = 0; i < liveMarks.length; i++) {
-        const m = liveMarks[i];
-        const p = m.parentNode;
-        if (!p) continue;
-        while (m.firstChild) p.insertBefore(m.firstChild, m);
-        p.removeChild(m);
-      }
-
-      // Swap in the snapshot's doc-content.
-      const cloneRoot = clone.querySelector('#noteback-doc-root');
-      if (cloneRoot) {
-        cloneRoot.innerHTML = snapInner;
-        // Mark this build as a CHECKOUT and record which version is the live/current
-        // one, so the opened tab can label "you are here" on the opened version and
-        // offer "open current". The attribute is read once at mount and stripped, so
-        // it never affects the content hash (which is over textContent anyway) and is
-        // gone before any snapshot is captured in the opened tab. A checkout of a
-        // checkout keeps the ORIGINAL live key (currentKey already carries it).
-        if (currentKey) cloneRoot.setAttribute('data-noteback-checkout', currentKey);
-        else cloneRoot.removeAttribute('data-noteback-checkout');
-      }
-
-      // Re-seed the machine-readable state block with the version's comments.
-      // The JSON lands in a <script> element's textContent and is then serialized
-      // via outerHTML, which emits raw-text VERBATIM (it does NOT escape
-      // </script>). A comment body or docTitle containing "</script>" would break
-      // out of the state block, truncating the JSON and making any trailing
-      // markup live in the opened tab (self-XSS). Escape exactly as the canonical
-      // exporter does (escapeForJsonScript): "<\/script" serializes verbatim and
-      // JSON.parse reads "\/" back as "/", so the comment round-trips intact.
-      const stateEl = clone.querySelector('#noteback-state');
-      if (stateEl) {
-        const stateJson = JSON.stringify({
-          schemaVersion: 1,
-          docId: docId || '',
-          docTitle: docTitle || '',
-          comments: v.comments || []
-        });
-        stateEl.textContent = stateJson.replace(/<\/(script)/gi, '<\\/$1');
-      }
-
-      return '<!DOCTYPE html>\n' + clone.outerHTML;
-    }
-
-    /**
-     * Checkout: open a past version as a real, live, annotatable canvas tab.
-     * Pruned snapshots (html === '') are a no-op.
-     *
-     * Primary path: the clone-based builder above (works when the current page is
-     * a canvas with the inlined runtime \u2014 embedded mode and the extension on a
-     * canvas). Falls back to opening the bare clean snapshot when the build fails
-     * or the current page isn't a canvas (see the fidelity note below).
-     */
-    function openVersionTab(versionKey) {
-      // Resolve the LIVE/current version key to bake into the checkout (so the opened
-      // tab can offer "open current"). In a checkout tab we already hold the original
-      // live key (checkoutCurrentKey) \u2014 propagate it so a checkout-of-a-checkout still
-      // points back at the true current, not the version this tab is itself viewing.
-      const curKeyP = checkoutCurrentKey
-        ? Promise.resolve(checkoutCurrentKey)
-        : (history && typeof history.getCurrentVersionKey === 'function'
-          ? Promise.resolve(history.getCurrentVersionKey()).catch(function () { return null; })
-          : Promise.resolve(null));
-      Promise.all([history.getVersion({ versionKey: versionKey }), curKeyP]).then(function (res) {
-        const v = res[0];
-        const currentKey = res[1] || '';
-        if (!v || !v.html) { toast('That version has no saved snapshot'); return; } // pruned \u2014 nothing to open
-        let html = null;
-        // Build a working canvas only when the current page IS a canvas (it has a
-        // baked doc-root + the inlined runtime). Otherwise we can't clone a runtime.
-        const rootEl = document.getElementById('noteback-doc-root');
-        const stateEl = document.getElementById('noteback-state');
-        const isCanvas = !!(rootEl && stateEl);
-        if (isCanvas) {
-          try {
-            const docId = (rootEl.getAttribute && rootEl.getAttribute('data-noteback-doc-id')) || '';
-            const docTitle = v.docTitle || document.title || '';
-            // Don't mark "open current" as a checkout of itself.
-            const ck = (currentKey && currentKey !== versionKey) ? currentKey : '';
-            html = buildVersionCanvasHtml(v, docId, docTitle, ck);
-          } catch (e) { html = null; }
-        }
-        // Extension non-canvas fallback (a page Noteback didn't author \u2014 no inlined
-        // runtime in this document). Best-effort: open the bare clean snapshot, a
-        // readable but NON-annotatable view. The design's Risk \u00a7Fidelity accepts
-        // this. (A full canvas build here would need the runtime + template via
-        // chrome.runtime.getURL + exporter.buildCanvasHtml; deferred \u2014 TODO.)
-        if (html == null) html = '<!DOCTYPE html>\n' + v.html;
-        try {
-          const blob = new Blob([html], { type: 'text/html' });
-          const url = URL.createObjectURL(blob);
-          if (win && typeof win.open === 'function') win.open(url, '_blank');
-        } catch (e) { toast('Could not open version'); }
-      });
-    }
 
     function formatWhen(iso) {
       if (!iso) return 'earlier';
@@ -2278,6 +2148,7 @@
       closeSaveMenu();
       closeCopyMenu();
       closeVersionMenu(true);
+      closeVersionInline(); // a half-open version view with no timeline is a dead end
       sidebar.classList.remove('nb-open');
       launcher.classList.remove('nb-hidden');
     }
@@ -2373,27 +2244,16 @@
     versionMenu.setAttribute('role', 'menu');
     versionMenu.setAttribute(UI_ATTR, 'version-menu');
     versionMenu.innerHTML =
-      '<button type="button" class="nb-menu-item nb-vm-open" role="menuitem">' +
-      '<span class="nb-mi-label">Open</span>' +
-      '<span class="nb-mi-sub">check out as a canvas tab</span></button>' +
-      '<div class="nb-menu-sep" role="none"></div>' +
       '<button type="button" class="nb-menu-item nb-vm-copy" role="menuitem">' +
       '<span class="nb-mi-label">Copy feedback</span>' +
       '<span class="nb-mi-sub">this version’s markdown</span></button>';
     uiRoot.appendChild(versionMenu);
-    const vmOpenItem = versionMenu.querySelector('.nb-vm-open');
     const vmCopyItem = versionMenu.querySelector('.nb-vm-copy');
     let versionMenuOpen = false;
     let versionMenuCloseTimer = null;
     let versionMenuBtn = null;   // the chevron that opened it
     let versionMenuData = null;  // the version record `d`
 
-    vmOpenItem.addEventListener('click', function (e) {
-      e.stopPropagation();
-      const d = versionMenuData;
-      closeVersionMenu();
-      if (d && d.hasSnapshot) openVersionTab(d.versionKey);
-    });
     vmCopyItem.addEventListener('click', function (e) {
       e.stopPropagation();
       const d = versionMenuData;
@@ -2426,9 +2286,6 @@
         (win && win.clearTimeout ? win.clearTimeout : clearTimeout)(versionMenuCloseTimer);
         versionMenuCloseTimer = null;
       }
-      // Pruned snapshot: nothing to open, but the feedback still copies.
-      vmOpenItem.disabled = !d.hasSnapshot;
-      vmOpenItem.title = d.hasSnapshot ? '' : 'Snapshot no longer stored';
       btn.setAttribute('aria-expanded', 'true');
       versionMenu.classList.remove('is-closing');
       positionVersionMenu(btn);
