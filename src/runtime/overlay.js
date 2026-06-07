@@ -732,6 +732,12 @@
     }
 
     /* --- gear: history opt-out (EMBEDDED only) -------------------------- */
+    // Hoisted so the shared document keydown handler (onDocKeydownInfo) can close
+    // the gear dialog on Escape too. Stay null when the embedded gear block below
+    // doesn't run (extension mode / no history control) — the handler is null-safe.
+    let gearBtnRef = null;
+    let closeGearRef = null;
+    let isGearOpen = function () { return false; };
     if (runMode === 'embedded' && historyControl && historyControl.available) {
       const headCtrls = sidebar.querySelector('.nb-head-ctrls');
       const gearBtn = doc.createElement('button');
@@ -775,6 +781,7 @@
       gearBtn.addEventListener('click', function (e) { e.stopPropagation(); if (gearOpen) closeGear(); else openGear(); });
       gearDialog.querySelector('.nb-gear-x').addEventListener('click', closeGear);
       gearDialog.addEventListener('click', function (e) { if (e.target === gearDialog) closeGear(); });
+      gearBtnRef = gearBtn; closeGearRef = closeGear; isGearOpen = function () { return gearOpen; };
 
       const onGearToggle = function (wasEnabled) {
         syncGear();
@@ -795,7 +802,9 @@
     }
 
     const onDocKeydownInfo = function (e) {
-      if (e.key === 'Escape' && infoOpen) { closeInfo(); if (infoBtn && infoBtn.focus) infoBtn.focus(); }
+      if (e.key !== 'Escape') return;
+      if (infoOpen) { closeInfo(); if (infoBtn && infoBtn.focus) infoBtn.focus(); }
+      else if (isGearOpen()) { closeGearRef(); if (gearBtnRef && gearBtnRef.focus) gearBtnRef.focus(); }
     };
     doc.addEventListener('keydown', onDocKeydownInfo);
 
