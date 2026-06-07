@@ -94,19 +94,54 @@
     '.nb-peek-pop-empty{color:#a2a09b;font-style:italic;}' +
     '@media (prefers-reduced-motion: reduce){.nb-peek-pop{transition:none;}}';
 
-  // Diff coloring injected INTO the version-view iframe when diff mode is on.
-  // Separate visual channels from the comment highlight (honey background): adds
-  // are green with an inset underline, deletes are red strike-through, so the two
-  // schemes layer without colliding.
+  // Diff styling injected INTO the version-view iframe when diff mode is on.
+  // Goal: make it unmistakably a COMPARISON, not part of the document — a sticky
+  // legend header frames the panel; each changed block carries a left gutter rail
+  // (a +/-/edit glyph badge + a thick change-bar) and an Added/Removed/Edited tag,
+  // so a tinted block can't be misread as a document callout; and word-level
+  // changes use SHAPE cues (underline for adds, strike-through for deletes) on top
+  // of colour, so a single-word edit pops and stays legible without relying on hue.
   const DIFF_CSS =
-    'ins.nb-diff-ins{background:#e3f5e3;color:#137333;text-decoration:none;' +
-    '  box-shadow:inset 0 -2px 0 #4faa52;border-radius:2px;}' +
-    'del.nb-diff-del{background:#fbe4e2;color:#a50e0e;text-decoration:line-through;' +
-    '  text-decoration-color:#d2655a;border-radius:2px;}' +
-    '.nb-diff-ins-block{background:#eef8ee;box-shadow:inset 3px 0 0 #4faa52;border-radius:3px;}' +
-    '.nb-diff-del-block{background:#fdeeec;box-shadow:inset 3px 0 0 #d2655a;border-radius:3px;' +
-    '  text-decoration:line-through;text-decoration-color:rgba(165,14,14,.45);opacity:.82;}' +
-    '.nb-diff-edit-block{background:#fffdf3;border-radius:3px;}' +
+    // Legend header — sticky banner that frames everything below as a diff.
+    '.nb-diff-legend{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:7px 14px;flex-wrap:wrap;' +
+    '  margin:0 0 16px;padding:10px 15px;border-radius:0 0 11px 11px;background:#1f2a37;color:#eef2f7;' +
+    '  font:600 12.5px/1.3 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;' +
+    '  box-shadow:0 7px 20px -12px rgba(18,26,36,.7);}' +
+    '.nb-diff-legend-title{display:inline-flex;align-items:center;gap:7px;font-weight:700;letter-spacing:.01em;}' +
+    '.nb-diff-legend-title .nb-diff-swap{font-size:14px;opacity:.85;}' +
+    '.nb-diff-key{display:inline-flex;align-items:center;gap:6px;color:#aebac7;font-weight:600;}' +
+    '.nb-diff-key .nb-k-chip{display:inline-block;width:11px;height:11px;border-radius:3px;}' +
+    '.nb-diff-key.nb-k-add .nb-k-chip{background:#2faa63;}' +
+    '.nb-diff-key.nb-k-del .nb-k-chip{background:#d2473a;}' +
+    // Word-level changes: colour + a strong shape cue so single words stand out.
+    'ins.nb-diff-ins{text-decoration:underline;text-decoration-color:#1f9d57;text-decoration-thickness:2px;' +
+    '  text-underline-offset:2px;background:#d8f3e1;color:#0f7a3d;border-radius:3px;padding:0 2px;font-weight:600;}' +
+    'del.nb-diff-del{text-decoration:line-through;text-decoration-color:#cf4335;text-decoration-thickness:2px;' +
+    '  background:#fadbd7;color:#b3261e;border-radius:3px;padding:0 2px;}' +
+    // Changed BLOCKS: left gutter rail (glyph badge + thick change-bar) + a tag.
+    '.nb-diff-ins-block,.nb-diff-del-block,.nb-diff-edit-block{position:relative;margin:5px 0;' +
+    '  padding:7px 78px 7px 32px;border-radius:0 7px 7px 0;}' +
+    '.nb-diff-ins-block::before,.nb-diff-del-block::before,.nb-diff-edit-block::before{' +
+    '  content:"";position:absolute;left:7px;top:7px;width:18px;height:18px;border-radius:5px;color:#fff;' +
+    '  display:flex;align-items:center;justify-content:center;' +
+    '  font:700 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;}' +
+    '.nb-diff-ins-block::after,.nb-diff-del-block::after,.nb-diff-edit-block::after{' +
+    '  position:absolute;top:7px;right:8px;font:800 9px/1 ui-sans-serif,system-ui,-apple-system,sans-serif;' +
+    '  letter-spacing:.08em;text-transform:uppercase;padding:3px 7px;border-radius:999px;}' +
+    // Added — green rail + "+" badge + Added tag.
+    '.nb-diff-ins-block{background:#eaf7ef;border-left:4px solid #2faa63;}' +
+    '.nb-diff-ins-block::before{content:"+";background:#2faa63;}' +
+    '.nb-diff-ins-block::after{content:"Added";background:#d4efde;color:#0f7a3d;}' +
+    // Removed — red rail + minus badge + Removed tag; struck through + muted text.
+    '.nb-diff-del-block{background:#fcebe9;border-left:4px solid #d2473a;color:#9c6660;' +
+    '  text-decoration:line-through;text-decoration-color:rgba(178,38,30,.4);}' +
+    '.nb-diff-del-block::before{content:"\\2212";background:#d2473a;}' +
+    '.nb-diff-del-block::after{content:"Removed";background:#f7d9d5;color:#b3261e;text-decoration:none;}' +
+    // Edited — amber rail + pencil badge + Edited tag.
+    '.nb-diff-edit-block{background:#fff7e6;border-left:4px solid #d99a1f;}' +
+    '.nb-diff-edit-block::before{content:"\\270E";background:#d99a1f;font-size:11px;}' +
+    '.nb-diff-edit-block::after{content:"Edited";background:#f6e7c2;color:#8a6516;}' +
+    // No-changes banner.
     '.nb-diff-nochange{margin:0 0 14px;padding:9px 13px;border-radius:8px;' +
     '  background:#eef1f4;color:#54606c;' +
     '  font:600 13px/1.4 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}';
@@ -1773,6 +1808,39 @@
             banner.className = 'nb-diff-nochange';
             banner.textContent = 'No changes in this version compared with the next.';
             renderedBody.insertBefore(banner, renderedBody.firstChild);
+          } catch (e) {}
+        }
+        // Sticky legend header framing the panel as a comparison (inserted last so
+        // it lands first, above any no-changes banner). All text is controlled
+        // (ordinals + 'now'/'vN'); built with textContent, never innerHTML.
+        if (renderedBody) {
+          try {
+            const legend = parsedTarget.createElement('div');
+            legend.className = 'nb-diff-legend';
+            legend.setAttribute(UI_ATTR, 'diff-legend');
+            const title = parsedTarget.createElement('span');
+            title.className = 'nb-diff-legend-title';
+            const swap = parsedTarget.createElement('span');
+            swap.className = 'nb-diff-swap';
+            swap.textContent = '⇄';
+            title.appendChild(swap);
+            title.appendChild(parsedTarget.createTextNode(' Comparing v' + target.fromOrdinal + ' → ' + target.label));
+            const keyAdd = parsedTarget.createElement('span');
+            keyAdd.className = 'nb-diff-key nb-k-add';
+            const addChip = parsedTarget.createElement('span');
+            addChip.className = 'nb-k-chip';
+            keyAdd.appendChild(addChip);
+            keyAdd.appendChild(parsedTarget.createTextNode('added'));
+            const keyDel = parsedTarget.createElement('span');
+            keyDel.className = 'nb-diff-key nb-k-del';
+            const delChip = parsedTarget.createElement('span');
+            delChip.className = 'nb-k-chip';
+            keyDel.appendChild(delChip);
+            keyDel.appendChild(parsedTarget.createTextNode('removed'));
+            legend.appendChild(title);
+            legend.appendChild(keyAdd);
+            legend.appendChild(keyDel);
+            renderedBody.insertBefore(legend, renderedBody.firstChild);
           } catch (e) {}
         }
         const scrollScript =

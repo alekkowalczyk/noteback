@@ -91,8 +91,14 @@ the opened tab's history sidebar empty.
   the most-recent earlier version diffs against the live current draft ("now").
   Added runs are green `<ins class="nb-diff-ins">` / `.nb-diff-ins-block`, removed
   runs red `<del class="nb-diff-del">` / `.nb-diff-del-block`, edited paragraphs
-  `.nb-diff-edit-block` (word-level). Comment highlights stay painted (layered on a
-  separate visual channel). The toggle is sticky while switching version rows and
+  `.nb-diff-edit-block` (word-level). To read unmistakably as a comparison (not as
+  document content), the diff iframe gets a sticky legend header
+  (`.nb-diff-legend` — "Comparing v{from} → {to}" + a colour key) and each changed
+  block carries a left gutter rail (a `+`/`−`/`✎` badge + thick change-bar via
+  `::before`) and an `Added`/`Removed`/`Edited` tag (`::after`); word changes use a
+  shape cue (underline for adds, strike-through for deletes) on top of colour.
+  Comment highlights stay painted (layered on a separate visual channel). The
+  toggle is sticky while switching version rows and
   resets on "Back to current". Pure diff logic lives in `NotebackRuntime.diff`
   (`src/runtime/diff.js`); DOM rendering in `NotebackRuntime.diffRender`
   (`src/runtime/diff-render.js`).
