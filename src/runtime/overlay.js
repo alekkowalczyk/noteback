@@ -94,6 +94,23 @@
     '.nb-peek-pop-empty{color:#a2a09b;font-style:italic;}' +
     '@media (prefers-reduced-motion: reduce){.nb-peek-pop{transition:none;}}';
 
+  // Diff coloring injected INTO the version-view iframe when diff mode is on.
+  // Separate visual channels from the comment highlight (honey background): adds
+  // are green with an inset underline, deletes are red strike-through, so the two
+  // schemes layer without colliding.
+  const DIFF_CSS =
+    'ins.nb-diff-ins{background:#e3f5e3;color:#137333;text-decoration:none;' +
+    '  box-shadow:inset 0 -2px 0 #4faa52;border-radius:2px;}' +
+    'del.nb-diff-del{background:#fbe4e2;color:#a50e0e;text-decoration:line-through;' +
+    '  text-decoration-color:#d2655a;border-radius:2px;}' +
+    '.nb-diff-ins-block{background:#eef8ee;box-shadow:inset 3px 0 0 #4faa52;border-radius:3px;}' +
+    '.nb-diff-del-block{background:#fdeeec;box-shadow:inset 3px 0 0 #d2655a;border-radius:3px;' +
+    '  text-decoration:line-through;text-decoration-color:rgba(165,14,14,.45);opacity:.82;}' +
+    '.nb-diff-edit-block{background:#fffdf3;border-radius:3px;}' +
+    '.nb-diff-nochange{margin:0 0 14px;padding:9px 13px;border-radius:8px;' +
+    '  background:#eef1f4;color:#54606c;' +
+    '  font:600 13px/1.4 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}';
+
   // Light-DOM styles: the floating "Comment" chip that appears on selection, and
   // the painted highlight (HIGHLIGHT_CSS, shared with the peek).
   const BUTTON_CSS = [
@@ -366,6 +383,24 @@
     '  font:700 12px/1 var(--nb-round);letter-spacing:.01em;padding:11px 14px;cursor:pointer;text-align:left;',
     '  transition:background .14s ease,color .14s ease;}',
     '.nb-hist-back:hover{background:var(--nb-accent);color:#fffdf8;}',
+    /* the inline-view header is now a flex bar holding the back button (left) and
+       the diff toggle (right); the bar owns the bottom border. */
+    '.nb-hist-bar{flex:0 0 auto;display:flex;align-items:stretch;',
+    '  border-bottom:1px solid var(--nb-line);background:var(--nb-accent-wash);}',
+    '.nb-hist-bar .nb-hist-back{flex:1 1 auto;border-bottom:none;}',
+    '.nb-diff-toggle{flex:0 0 auto;display:inline-flex;align-items:center;gap:8px;',
+    '  border:none;border-left:1px solid rgba(18,122,114,.25);background:transparent;',
+    '  color:var(--nb-accent-deep);font:700 12px/1 var(--nb-round);letter-spacing:.01em;',
+    '  padding:0 14px;cursor:pointer;transition:background .14s ease,color .14s ease;}',
+    '.nb-diff-toggle:hover{background:var(--nb-accent);color:#fffdf8;}',
+    '.nb-diff-icon{font-size:13px;line-height:1;}',
+    '.nb-diff-switch{position:relative;width:30px;height:16px;border-radius:999px;',
+    '  background:var(--nb-line-strong);transition:background .16s ease;flex:none;}',
+    '.nb-diff-switch::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;',
+    '  border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .16s ease;}',
+    '.nb-diff-toggle.nb-on .nb-diff-switch{background:var(--nb-accent);}',
+    '.nb-diff-toggle.nb-on:hover .nb-diff-switch{background:#fff;}',
+    '.nb-diff-toggle.nb-on .nb-diff-switch::after{transform:translateX(14px);}',
     // The iframe is a REPLACED element; as a column-flex child with flex:1 +
     // min-height:0 it resolves to a definite height and fills below the back bar.
     // (Do NOT switch to absolute top+bottom+height:auto — a replaced element falls
@@ -503,6 +538,9 @@
     const stateApi = modules.state;
     const highlightApi = modules.highlight;
     const markdownApi = modules.markdown;
+    const diffApi = modules.diff;
+    const diffRenderApi = modules.diffRender;
+    const snapshotApi = modules.snapshotCapture;
     if (!anchorApi || !stateApi) {
       throw new Error('overlay.mountOverlay requires NotebackRuntime.anchor and .state');
     }
@@ -524,6 +562,10 @@
     // origin denied localStorage (the bug this replaced).
     let viewingKey = null;
     let inlineView = null;
+    // Diff mode for the inline version view: when true, the panel renders a diff
+    // of the viewed version against the next chronological version. Sticky while
+    // browsing versions; reset on closeVersionInline.
+    let diffMode = false;
     const onChange = cfg.onChange || function () {};
     // Prefer the runtime markdown module directly so we can hand it the document
     // markup for line references; fall back to the boot-supplied renderer.
@@ -1631,74 +1673,182 @@
     }
 
     /**
-     * Open a past version inline (read-only) in a side panel beside the sidebar.
-     * Parses the version's clean snapshot, runs the LIVE highlight painter over it
-     * (commented passages wrapped in the same <mark class="noteback-highlight">),
-     * re-injects HIGHLIGHT_CSS + PEEK_POP_CSS, and shows it in an <iframe srcdoc>
-     * under a "← Back to current draft" bar. Sets `viewingKey` and re-renders the
-     * timeline so the sidebar marks this version the active "viewing" row and offers
-     * a way back / a switch to another version. Pruned snapshots (html === '') toast
-     * and leave the current draft in place.
+     * Open a past version inline (read-only) in the side panel. Branches on
+     * diffMode: snapshot view (default) or a diff against the next version.
      */
     function openVersionInline(versionKey) {
       closeVersionMenu(true); // a row chevron may have opened it
+      if (diffMode) { openVersionDiff(versionKey); return; }
       Promise.resolve(history.getVersion({ versionKey: versionKey })).then(function (v) {
         if (!v || !v.html) { toast('This version has no saved snapshot'); return; } // pruned
-
-        // Parse the snapshot and paint REAL highlights into it via the live painter.
-        // paintHighlights creates each <mark> with the parsed doc's own ownerDocument,
-        // so the marks land inside `parsed` and survive serialization below.
-        let painted = '<!DOCTYPE html>' + v.html;
-        try {
-          const parsed = new DOMParser().parseFromString(v.html, 'text/html');
-          try {
-            highlightApi.paintHighlights(parsed.body, { schemaVersion: 1, comments: v.comments || [] }, {});
-          } catch (e) { /* keep the un-highlighted snapshot */ }
-          // The clean snapshot dropped Noteback's styles; re-inject HIGHLIGHT_CSS so
-          // the marks match the live document, plus PEEK_POP_CSS for the in-iframe
-          // comment popover.
-          try {
-            const hlStyle = parsed.createElement('style');
-            hlStyle.setAttribute(UI_ATTR, 'peek-highlight-style');
-            hlStyle.textContent = HIGHLIGHT_CSS + PEEK_POP_CSS;
-            (parsed.head || parsed.documentElement).appendChild(hlStyle);
-          } catch (e) { /* styling is best-effort */ }
-          const scrollScript =
-            '<scr' + 'ipt>(function(){var m=document.querySelector("mark.noteback-highlight");' +
-            'if(m)m.scrollIntoView({block:"center"});})();</scr' + 'ipt>';
-          // Click a painted highlight → show that comment in an in-place popover.
-          // The id->comment map is serialized into the iframe; comment bodies are
-          // placed via textContent and any literal "</script>" in the JSON is escaped.
-          const peekScript = buildPeekPopoverScript(v.comments || []);
-          painted = '<!DOCTYPE html>' + parsed.documentElement.outerHTML + scrollScript + peekScript;
-        } catch (e) { /* DOMParser unavailable — fall back to the raw snapshot */ }
-
-        // Swap any existing inline view (switching versions) WITHOUT a redundant
-        // timeline re-render — we re-render once below after viewingKey is set.
-        if (inlineView && inlineView.parentNode) inlineView.parentNode.removeChild(inlineView);
-        inlineView = null;
-        viewingKey = versionKey;
-
-        const view = doc.createElement('div');
-        view.className = 'nb-hist-view';
-        view.setAttribute(UI_ATTR, 'version-view');
-        const backBar = doc.createElement('button');
-        backBar.type = 'button';
-        backBar.className = 'nb-hist-back';
-        backBar.setAttribute(UI_ATTR, 'version-view-back');
-        backBar.textContent = '← Back to current draft';
-        backBar.addEventListener('click', function () { closeVersionInline(); });
-        const frame = doc.createElement('iframe');
-        frame.className = 'nb-hist-frame';
-        frame.srcdoc = painted; // the snapshot with live highlights painted in
-        view.appendChild(backBar);
-        view.appendChild(frame);
-        uiRoot.appendChild(view);
-        inlineView = view;
-
-        openSidebar();    // ensure the timeline (with the active viewing row) is visible
-        renderVersions(); // re-render so the viewed row is marked + the bar shows
+        mountInlineView(versionKey, buildSnapshotSrcdoc(v), null);
       });
+    }
+
+    /** Open a past version inline showing a DIFF vs the next chronological version. */
+    function openVersionDiff(versionKey) {
+      Promise.all([
+        Promise.resolve(history.getVersion({ versionKey: versionKey })),
+        resolveTargetSnapshot(versionKey)
+      ]).then(function (res) {
+        const baseV = res[0];
+        const target = res[1];
+        if (!baseV || !baseV.html) { toast('This version has no saved snapshot'); diffMode = false; openVersionInline(versionKey); return; }
+        if (!target || !target.html) { toast('No snapshot to diff against'); diffMode = false; openVersionInline(versionKey); return; }
+        const cmpLabel = 'v' + target.baseOrdinal + ' → ' + target.label;
+        mountInlineView(versionKey, buildDiffSrcdoc(baseV, target), cmpLabel);
+      });
+    }
+
+    /**
+     * Resolve the diff TARGET for a viewed version: the next chronological version.
+     * For the most-recent earlier version (index 0, newest-first), the target is
+     * the LIVE current draft (captured clean) labelled "now"; otherwise it is the
+     * next-newer stored snapshot. Returns { html, comments, label, baseOrdinal }.
+     */
+    function resolveTargetSnapshot(versionKey) {
+      return Promise.resolve(history.getHistory()).then(function (versions) {
+        versions = versions || [];
+        const total = versions.length;
+        let idx = -1;
+        for (let i = 0; i < total; i++) { if (versions[i].versionKey === versionKey) { idx = i; break; } }
+        if (idx === -1) return null;
+        const baseOrdinal = total - idx;
+        if (idx === 0) {
+          let html = '';
+          try { html = snapshotApi ? snapshotApi.captureCleanDoc(doc) : ''; } catch (e) { html = ''; }
+          const s = getState();
+          const comments = (s && Array.isArray(s.comments)) ? s.comments.slice() : [];
+          return { html: html, comments: comments, label: 'now', baseOrdinal: baseOrdinal };
+        }
+        const targetKey = versions[idx - 1].versionKey;
+        const targetOrdinal = total - (idx - 1);
+        return Promise.resolve(history.getVersion({ versionKey: targetKey })).then(function (tv) {
+          return { html: (tv && tv.html) || '', comments: (tv && tv.comments) || [], label: 'v' + targetOrdinal, baseOrdinal: baseOrdinal };
+        });
+      });
+    }
+
+    /** Build the read-only snapshot srcdoc for a version (live highlights + peek). */
+    function buildSnapshotSrcdoc(v) {
+      let painted = '<!DOCTYPE html>' + v.html;
+      try {
+        const parsed = new DOMParser().parseFromString(v.html, 'text/html');
+        try { highlightApi.paintHighlights(parsed.body, { schemaVersion: 1, comments: v.comments || [] }, {}); } catch (e) {}
+        try {
+          const hlStyle = parsed.createElement('style');
+          hlStyle.setAttribute(UI_ATTR, 'peek-highlight-style');
+          hlStyle.textContent = HIGHLIGHT_CSS + PEEK_POP_CSS;
+          (parsed.head || parsed.documentElement).appendChild(hlStyle);
+        } catch (e) {}
+        const scrollScript =
+          '<scr' + 'ipt>(function(){var m=document.querySelector("mark.noteback-highlight");' +
+          'if(m)m.scrollIntoView({block:"center"});})();</scr' + 'ipt>';
+        const peekScript = buildPeekPopoverScript(v.comments || []);
+        painted = '<!DOCTYPE html>' + parsed.documentElement.outerHTML + scrollScript + peekScript;
+      } catch (e) { /* fall back to raw snapshot */ }
+      return painted;
+    }
+
+    /** Build the DIFF srcdoc: target doc with diff markup + target comments painted. */
+    function buildDiffSrcdoc(baseV, target) {
+      let result = '<!DOCTYPE html>' + target.html;
+      try {
+        const parsedBase = new DOMParser().parseFromString(baseV.html, 'text/html');
+        const parsedTarget = new DOMParser().parseFromString(target.html, 'text/html');
+        const rendered = diffRenderApi.renderInlineDiff(parsedBase.body, parsedTarget.body, parsedTarget);
+        if (rendered.body && parsedTarget.body && parsedTarget.body.parentNode) {
+          parsedTarget.body.parentNode.replaceChild(rendered.body, parsedTarget.body);
+        }
+        const renderedBody = rendered.body || parsedTarget.body;
+        try { highlightApi.paintHighlights(renderedBody, { schemaVersion: 1, comments: target.comments || [] }, {}); } catch (e) {}
+        try {
+          const st = parsedTarget.createElement('style');
+          st.setAttribute(UI_ATTR, 'peek-diff-style');
+          st.textContent = DIFF_CSS + HIGHLIGHT_CSS + PEEK_POP_CSS;
+          (parsedTarget.head || parsedTarget.documentElement).appendChild(st);
+        } catch (e) {}
+        if (!rendered.hasChanges && renderedBody) {
+          try {
+            const banner = parsedTarget.createElement('div');
+            banner.className = 'nb-diff-nochange';
+            banner.textContent = 'No changes in this version compared with the next.';
+            renderedBody.insertBefore(banner, renderedBody.firstChild);
+          } catch (e) {}
+        }
+        const scrollScript =
+          '<scr' + 'ipt>(function(){var m=document.querySelector(".nb-diff-ins,.nb-diff-del,' +
+          '.nb-diff-ins-block,.nb-diff-del-block,mark.noteback-highlight");' +
+          'if(m)m.scrollIntoView({block:"center"});})();</scr' + 'ipt>';
+        const peekScript = buildPeekPopoverScript(target.comments || []);
+        result = '<!DOCTYPE html>' + parsedTarget.documentElement.outerHTML + scrollScript + peekScript;
+      } catch (e) { /* fall back to raw target */ }
+      return result;
+    }
+
+    /**
+     * Build + mount the inline view panel (header bar with back button + diff
+     * toggle, then the iframe). `diffLabel` non-null → diff mode is active and the
+     * toggle shows "Diff: v{base} → {target}".
+     */
+    function mountInlineView(versionKey, srcdocHtml, diffLabel) {
+      if (inlineView && inlineView.parentNode) inlineView.parentNode.removeChild(inlineView);
+      inlineView = null;
+      viewingKey = versionKey;
+
+      const view = doc.createElement('div');
+      view.className = 'nb-hist-view';
+      view.setAttribute(UI_ATTR, 'version-view');
+
+      const bar = doc.createElement('div');
+      bar.className = 'nb-hist-bar';
+      bar.setAttribute(UI_ATTR, 'version-view-bar');
+
+      const backBtn = doc.createElement('button');
+      backBtn.type = 'button';
+      backBtn.className = 'nb-hist-back';
+      backBtn.setAttribute(UI_ATTR, 'version-view-back');
+      backBtn.textContent = '← Back to current draft';
+      backBtn.addEventListener('click', function () { closeVersionInline(); });
+      bar.appendChild(backBtn);
+
+      if (diffApi && diffRenderApi) bar.appendChild(buildDiffToggle(versionKey, diffLabel));
+
+      const frame = doc.createElement('iframe');
+      frame.className = 'nb-hist-frame';
+      frame.srcdoc = srcdocHtml;
+
+      view.appendChild(bar);
+      view.appendChild(frame);
+      uiRoot.appendChild(view);
+      inlineView = view;
+
+      openSidebar();    // ensure the timeline (with "you are here") is visible
+      renderVersions(); // re-render so the viewed row is marked + the bar shows
+    }
+
+    /** The Diff on/off switch in the inline-view header. */
+    function buildDiffToggle(versionKey, diffLabel) {
+      const btn = doc.createElement('button');
+      btn.type = 'button';
+      btn.className = 'nb-diff-toggle' + (diffMode ? ' nb-on' : '');
+      btn.setAttribute(UI_ATTR, 'diff-toggle');
+      btn.setAttribute('aria-pressed', diffMode ? 'true' : 'false');
+      btn.title = diffMode ? 'Hide changes' : 'Show changes vs the next version';
+      const icon = doc.createElement('span');
+      icon.className = 'nb-diff-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = '⇄';
+      const label = doc.createElement('span');
+      label.className = 'nb-diff-label';
+      label.textContent = (diffMode && diffLabel) ? ('Diff: ' + diffLabel) : 'Diff';
+      const sw = doc.createElement('span');
+      sw.className = 'nb-diff-switch';
+      btn.appendChild(icon);
+      btn.appendChild(label);
+      btn.appendChild(sw);
+      btn.addEventListener('click', function () { diffMode = !diffMode; openVersionInline(versionKey); });
+      return btn;
     }
 
     /** Close the inline version view and return to the live current draft. */
@@ -1707,6 +1857,7 @@
       inlineView = null;
       const had = viewingKey;
       viewingKey = null;
+      diffMode = false; // reset on exit; "Back to current" is a clean reset
       if (had) renderVersions();
     }
 
