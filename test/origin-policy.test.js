@@ -104,3 +104,43 @@ test('overlayMounted: false (never throws) for a missing/invalid document', () =
   assert.strictEqual(policy.overlayMounted(undefined), false);
   assert.strictEqual(policy.overlayMounted({}), false); // no querySelector
 });
+
+test('normalizeSettings carries the history opt-out fields with safe defaults', () => {
+  const n = policy.normalizeSettings(null);
+  assert.strictEqual(n.historyDisabledGlobal, false);
+  assert.deepStrictEqual(n.historyDisabledSites, []);
+  assert.deepStrictEqual(n.historyDisabledDocs, []);
+  // garbage shapes coerce to safe defaults
+  const g = policy.normalizeSettings({ historyDisabledGlobal: 'yes', historyDisabledSites: 'x', historyDisabledDocs: 5 });
+  assert.strictEqual(g.historyDisabledGlobal, false); // only boolean true counts
+  assert.deepStrictEqual(g.historyDisabledSites, []);
+  assert.deepStrictEqual(g.historyDisabledDocs, []);
+});
+
+test('historyAllowed: global opt-out turns history off everywhere', () => {
+  const s = { historyDisabledGlobal: true };
+  assert.strictEqual(policy.historyAllowed({ type: 'file', origin: 'file://' }, s), false);
+  assert.strictEqual(policy.historyAllowed({ type: 'localhost', origin: 'http://localhost:3000' }, s), false);
+});
+
+test('historyAllowed: per-site opt-out subtracts one origin (others stay on)', () => {
+  const s = { historyDisabledSites: ['file://'] };
+  assert.strictEqual(policy.historyAllowed({ type: 'file', origin: 'file://' }, s), false);
+  assert.strictEqual(policy.historyAllowed({ type: 'localhost', origin: 'http://localhost:3000' }, s), true);
+});
+
+test('historyAllowed: per-doc opt-out subtracts one document by its docKey', () => {
+  const s = { historyDisabledDocs: ['doc-123'] };
+  assert.strictEqual(policy.historyAllowed({ type: 'file', origin: 'file://', docKey: 'doc-123' }, s), false);
+  assert.strictEqual(policy.historyAllowed({ type: 'file', origin: 'file://', docKey: 'doc-999' }, s), true);
+  // no docKey supplied → per-doc list can't match → stays on
+  assert.strictEqual(policy.historyAllowed({ type: 'file', origin: 'file://' }, s), true);
+});
+
+test('historyAllowed: opt-out beats the base allow and the opt-in', () => {
+  // local type would normally be on, but a global opt-out wins
+  assert.strictEqual(policy.historyAllowed({ type: 'file', origin: 'file://' }, { historyDisabledGlobal: true }), false);
+  // an opted-in other origin is overridden by a per-site opt-out
+  const s = { historySites: ['https://example.com'], historyDisabledSites: ['https://example.com'] };
+  assert.strictEqual(policy.historyAllowed({ type: 'other', origin: 'https://example.com' }, s), false);
+});

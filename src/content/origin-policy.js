@@ -9,9 +9,9 @@
  *
  *   classifyOrigin(loc)      -> 'file' | 'localhost' | '127.0.0.1' | 'other'
  *   originOf(loc)            -> canonical origin string ('file://' for file pages)
- *   normalizeSettings(s)     -> { origins:{file,localhost,'127.0.0.1'}, disabledSites:[], historySites:[] }
+ *   normalizeSettings(s)     -> { origins:{…}, disabledSites:[], historySites:[], historyDisabledGlobal, historyDisabledSites:[], historyDisabledDocs:[] }
  *   isActive({type,origin},s)-> boolean   (per-type master gate, per-site subtract)
- *   historyAllowed({type,origin},s) -> boolean (default-on file/localhost/127.0.0.1; opt-in via historySites)
+ *   historyAllowed({type,origin,docKey},s) -> boolean (base on for file/localhost/127 + historySites opt-in; opt-out subtract: global/site/doc)
  *   overlayMounted(doc)      -> boolean   (a Noteback overlay is already mounted on this page)
  */
 (function (root, factory) {
@@ -60,14 +60,23 @@
         '127.0.0.1': o['127.0.0.1'] !== false
       },
       disabledSites: Array.isArray(s.disabledSites) ? s.disabledSites.slice() : [],
-      historySites: Array.isArray(s.historySites) ? s.historySites.slice() : []
+      historySites: Array.isArray(s.historySites) ? s.historySites.slice() : [],
+      historyDisabledGlobal: s.historyDisabledGlobal === true,
+      historyDisabledSites: Array.isArray(s.historyDisabledSites) ? s.historyDisabledSites.slice() : [],
+      historyDisabledDocs: Array.isArray(s.historyDisabledDocs) ? s.historyDisabledDocs.slice() : []
     };
   }
 
+  // History gate: opt-OUT layer (global / per-origin / per-doc) wins, then the base
+  // rule (on for file/localhost/127; opt-in via historySites for other origins).
+  // `info.docKey` is the resolved history doc-id (baked id or nb:url minted id).
   function historyAllowed(info, settings) {
     info = info || {};
-    if (TYPES.indexOf(info.type) !== -1) return true;
     const norm = normalizeSettings(settings);
+    if (norm.historyDisabledGlobal) return false;
+    if (info.origin && norm.historyDisabledSites.indexOf(info.origin) !== -1) return false;
+    if (info.docKey && norm.historyDisabledDocs.indexOf(info.docKey) !== -1) return false;
+    if (TYPES.indexOf(info.type) !== -1) return true;
     return !!(info.origin && norm.historySites.indexOf(info.origin) !== -1);
   }
 
