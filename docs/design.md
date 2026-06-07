@@ -317,30 +317,33 @@ A single panel adapts to where you are:
   record + gzipped snapshot — into a `#noteback-history` JSON block in the file. On
   reopen the embedded runtime seeds `localStorage` from that block (**only keys not
   already present** — never clobber newer local data), so the timeline rehydrates from
-  the file itself. The block is excluded from snapshots, clean copies, and checkouts, so
-  it never nests or recurses.
-- **Peek** renders that version full-bleed in a modal: the snapshot **fills the panel**
-  (it's an `<iframe>`, a replaced element, so it needs an explicit height — top+bottom
-  alone collapse it to a thin strip), with highlights **styled exactly like the live
-  document** (the shared `HIGHLIGHT_CSS` is re-injected into the clean snapshot). A single
-  pinned **"← Back"** banner spans the top and closes it (no separate ✕ — it'd be
-  redundant). Clicking a highlight **inside** the peek pops that comment in place (the
-  id→comment map is serialized into the iframe; bodies render via `textContent`, never
-  parsed as HTML, and any literal `</script>` is escaped). **Open** promotes the same
-  version to a live canvas in a new tab.
+  the file itself. The block is excluded from snapshots, clean copies, and plain
+  "with comments" saves, so it never nests or recurses.
+- **Inline view** opens the snapshot as a read-only side panel beside the sidebar —
+  NOT a centered modal, NOT a new tab. The panel (`.nb-hist-view`) fills the document
+  area left of the 360px sidebar so the live timeline stays visible. The snapshot
+  **fills the panel** as a column-flex `<iframe>` child (`flex:1;min-height:0` — as a
+  replaced element an iframe can't be stretched by `top`+`bottom` alone; the flex model
+  gives it a definite height), with highlights **styled exactly like the live document**
+  (the shared `HIGHLIGHT_CSS` is re-injected into the clean snapshot). A slim
+  **"← Back to current draft"** bar spans the top. Clicking a highlight **inside** the
+  view pops that comment in place (the id→comment map is serialized into the iframe by
+  `buildPeekPopoverScript`; bodies render via `textContent`, never parsed as HTML, and
+  any literal `</script>` is escaped so it can't break out of the inline script block).
+  Inline viewing stays same-origin, so the `localStorage`-backed history adapter remains
+  reachable. (This replaced the old `window.open(blob:)` model: a `file://` canvas's
+  blob tab gets an opaque origin whose `localStorage` is denied — the opened tab's
+  history sidebar was empty.)
 - **Per-row actions live behind a chevron** next to the v-label (same dropdown
-  affordance as Save/Copy): **Open** (disabled when the snapshot is pruned) and **Copy
-  feedback**. The menu is portaled to `uiRoot` and fixed-positioned in JS because the
-  versions dock clips overflow. Clicking the row body still peeks.
-- **Opened-version tab = the same sidebar, one stage back.** A checked-out version is
-  *just a canvas*, so it boots the same overlay — its content hash makes the opened
-  version the tab's "now". So the timeline already renders there; we only add
-  orientation: the canvas bakes `data-noteback-checkout=<live current key>`, the overlay
-  relabels the now-row **"viewing"** (still `you are here`, but it's the version you
-  opened, not the live latest), badges the live draft's row **"current"**, and shows an
-  **"Open current →"** banner that re-opens the current draft. (This needs the opened tab
-  to share the canvas's history store — true for a localhost-served blob: tab; a `file://`
-  blob with no shared storage degrades to comments-only, no timeline.)
+  affordance as Save/Copy): **Copy feedback**. The menu is portaled to `uiRoot` and
+  fixed-positioned in JS because the versions dock clips overflow. Clicking the row body
+  opens the inline view.
+- **Viewing-aware timeline.** An in-tab `viewingKey` (null = live draft) drives the
+  sidebar: the viewed version's row is the active "you are here" row (`nb-ver-viewing`),
+  a "Back to current" bar (`renderBackToCurrentBar` → `closeVersionInline`) is shown
+  above the timeline, and every other row remains clickable to switch the inline view.
+  When `viewingKey` is null the timeline renders exactly as normal (live-draft "now"
+  row, no bar).
 - **Edge states:** first read (Versions list hidden until there's something in it);
   history unavailable (storage blocked or content too short to fingerprint — comments
   still save, only the timeline steps aside); a site you haven't opted into (no
@@ -377,7 +380,7 @@ A single panel adapts to where you are:
 
 ### 14.7 Locked decisions
 
-- **Checkout depth — full:** inline peek + open as a live canvas tab + copy feedback.
+- **Version view — inline read-only:** side panel beside the sidebar + copy feedback. No new-tab checkout.
 - **Re-wrap continuity — yes:** `wrap` preserves the baked doc-id (reuse from the `-o`
   target, plus a `--id` escape hatch). Worst case it mints a new lineage — graceful.
 - **"Return to live" wording — "Back"** (one full-width banner; the redundant ✕ is gone).
@@ -403,11 +406,13 @@ Captured during execution (the value of two-stage + whole-branch review):
   snapshot* (`!!ver.snapshotHtml`), **not** `comments.length > 0`. Seeding from the
   comment count wrongly suppressed capture for a version pre-seeded with in-file
   comments. Now regression-tested.
-- **Checkout self-XSS.** The checkout tab re-seeds `#noteback-state` via `outerHTML`,
-  which emits raw text verbatim — a comment body containing `</script>` breaks out of
-  the block. It must be escaped (`.replace(/<\/(script)/gi, '<\\/$1')`, the same escape
-  the canonical exporter uses). e2e-guarded. *(A pre-existing twin in
-  `exporter.js`'s `rebuildHtml` was noted as a separate follow-up.)*
+- **Inline view script injection.** `buildPeekPopoverScript` serializes the version's
+  comment map into an inline `<script>` block inside the `<iframe srcdoc>`. A comment
+  body containing `</script>` must be escaped (`.replace(/<\/(script)/gi, '<\\/$1')`,
+  the same escape the canonical exporter uses) so it can't break out of the block.
+  e2e-guarded by the `</script>`-breakout payload test in
+  `version-timeline.e2e.test.js`. *(A pre-existing twin in `exporter.js`'s `rebuildHtml`
+  was noted as a separate follow-up.)*
 - **Runtime-list drift (cross-task gap).** There are **three** hardcoded "canvas
   inline file" lists that must stay identical: `bin/noteback.js` `RUNTIME_FILES`,
   `examples/build-canvas.js`, and `src/background/service-worker.js`

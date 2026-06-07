@@ -84,57 +84,25 @@ the code, that have already bitten us once.
   `persist`). `history-state-adapter.js` captures the snapshot only when the version
   has **no** snapshot yet (`needSnapshot = comments.length>0 && !r.hasSnapshot`);
   `hasSnapshot` is seeded from the real stored snapshot, never the comment count.
-- **The version PEEK re-renders the snapshot with the LIVE highlight painter, not a
-  cross-node matcher.** `overlay.openVersionPeek` parses the stored snapshot with
-  `DOMParser`, runs `highlightApi.paintHighlights(parsed.body, {comments}, {})` over it
-  (the marks are created in the parsed doc's own `ownerDocument`, so they survive
-  serialization), re-injects the shared **`HIGHLIGHT_CSS`** into the snapshot's `<head>`
-  (the clean snapshot dropped Noteback's styles, so without it the marks render as bare
-  browser `<mark>`s instead of the honey live styling), and shows the result in an
-  `<iframe srcdoc>` under a single full-width **"← Back"** banner (no separate ✕). No
-  `nbHistHighlight`, no `\s*`-loose whitespace re-finder — the painter re-anchors from the
-  same comment data the live doc uses. A pruned snapshot (`html === ''`) is a no-op.
-- **The peek `<iframe>` needs an EXPLICIT height — it's a replaced element.** `top` +
-  `bottom` + `height:auto` does NOT stretch an iframe (replaced elements fall back to the
-  intrinsic ~150px), so the snapshot collapsed into a thin strip at the top of the panel
-  (~20%). `.nb-hist-frame` uses `top:38px;height:calc(100% - 38px)` to fill below the back
-  bar. Guarded by `version-timeline.e2e.test.js` (asserts the frame covers ≥80% of the
-  panel height).
+- **Version viewing is IN-TAB and read-only.** Clicking a version row opens
+  `overlay.openVersionInline` — a read-only `<iframe srcdoc>` side panel
+  (`.nb-hist-view`) beside the sidebar (NOT a new tab, NOT a centered modal). It
+  reuses the snapshot painter (`paintHighlights` + re-injected `HIGHLIGHT_CSS` +
+  `buildPeekPopoverScript`). An in-tab `viewingKey` drives the timeline: the viewed
+  row is the active "you are here" row, a "Back to current" bar
+  (`renderBackToCurrentBar` → `closeVersionInline`) returns to the live draft, and
+  other rows switch. There is NO new-tab "checkout": `openVersionTab` /
+  `buildVersionCanvasHtml` / the `data-noteback-checkout` marker were removed
+  because a `window.open(blob:)` tab from a `file://` canvas gets an opaque origin
+  whose `localStorage` is denied, leaving the opened tab's history sidebar empty
+  (the bug). The `.nb-hist-frame` iframe fills the panel as a column-flex child
+  (`flex:1;min-height:0`), not via absolute `height:calc(...)`.
 - **The Versions timeline docks at the BOTTOM of the sidebar, not inside the comment
   list.** `renderVersions()` renders into `.nb-versions-dock` (a `flex:0 0 auto` band with
   `max-height:34vh`, its own scroll, collapsing via `:empty` when there are no earlier
   versions), a sibling between `.nb-list` (`flex:1`) and `.nb-foot`. So the current
   draft's notes (or the "No notes yet" empty state) keep the available room and the
   timeline stays put above the action buttons.
-- **CHECKOUT (`open`) re-seeds `#noteback-state` and MUST escape `</script>`.**
-  `overlay.openVersionTab` → `buildVersionCanvasHtml` clones the live page shell (to
-  keep the inlined runtime + styles), swaps the snapshot's `#noteback-doc-root` content
-  in, and re-seeds the `#noteback-state` block with the version's comments. That JSON is
-  written via `outerHTML`, which emits raw text **verbatim**, so a comment body
-  containing `</script>` would break out of the block — it is escaped with the SAME
-  `.replace(/<\/(script)/gi, '<\\/$1')` the canonical exporter uses (`JSON.parse` reads
-  `<\/script` back as `</script`, so the comment round-trips). The version timeline +
-  checkout are covered by the browser e2e `test/e2e/version-timeline.e2e.test.js`
-  (the old `history-popup.e2e.test.js` is deleted).
-- **The checkout marker (`data-noteback-checkout`) is read ONCE at mount, then STRIPPED.**
-  `buildVersionCanvasHtml` bakes `data-noteback-checkout="<live current version key>"` on
-  `#noteback-doc-root` so the opened tab can show "you are here" on the opened version +
-  an "Open current →" banner. The overlay reads it into `checkoutCurrentKey` at mount and
-  immediately `removeAttribute`s it — so it never lands in a later snapshot/export and
-  never perturbs the content hash (which is over `textContent` anyway, but be safe). Two
-  consequences that already tripped a test: (1) opening *current from a checkout* must NOT
-  re-mark it a checkout (`ck = currentKey !== versionKey ? currentKey : ''`); a
-  checkout-of-a-checkout instead propagates the ORIGINAL live key. (2) The runtime SOURCE
-  mentions the attribute name in comments, and overlay.js is inlined into every canvas, so
-  a substring check like `/data-noteback-checkout=/` on built HTML **false-matches the
-  comment** — assert on the parsed DOM attribute, not the source text.
-- **The "viewing" row needs the opened tab to SHARE the canvas's history store.** A
-  checkout is just a canvas; its content hash makes the opened version the tab's "now", so
-  the timeline renders *only if* `getHistory()` returns data — which needs the opened tab
-  to see the same `localStorage`. A localhost-served `blob:` tab shares it (same origin);
-  a `file://` blob may not, degrading to comments-only. The "viewing" now-row is rendered
-  even when `getHistory()` is empty *in checkout mode* (so "you are here" always shows),
-  but the rest of the timeline still depends on the shared store.
 - **"Save · with comments and history" embeds the timeline in the FILE; the block is
   stripped everywhere else.** `onSaveCanvasWithHistory` → `adapter.exportHistory()` (core
   `exportDoc`) gathers `nb:doc:<id>` + every `nb:ver:<key>` (snapshots included) into a
@@ -143,9 +111,9 @@ the code, that have already bitten us once.
   `localStorage` from it BEFORE the adapter resolves, and **only for keys not already
   present** (never clobber newer local data — so two machines with diverged history don't
   merge their `nb:doc` version lists; a fresh machine rehydrates fully). The block must be
-  excluded from snapshots (`captureCleanDoc`), clean copies (`rebuildCleanHtml`), plain
-  "with comments" saves (`rebuildHtml` via `buildCanvasClone`), and checkouts
-  (`buildVersionCanvasHtml`) — else it nests/recurses. Do NOT mark it `data-noteback-ui`
+  excluded from snapshots (`captureCleanDoc`), clean copies (`rebuildCleanHtml`), and plain
+  "with comments" saves (`rebuildHtml` via `buildCanvasClone`) — else it nests/recurses.
+  Do NOT mark it `data-noteback-ui`
   to get free stripping: the cross-world stand-down keys off `[data-noteback-ui]`, so a
   CSP-blocked canvas carrying the block would make the extension stand down and mount
   nothing. Covered by `test/e2e/history-embed.e2e.test.js`.

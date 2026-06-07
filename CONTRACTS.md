@@ -64,8 +64,7 @@ Rules:
 (`createHistoryStateAdapter`, §8) it additionally exposes
 `getHistory() -> Promise<Version[]>`, `getVersion({versionKey}) -> Promise<{html, comments, docTitle, contentHash}|null>`,
 `getCurrentVersionKey() -> Promise<string|null>` (THIS document's current version key
-— its content hash, or `null` when degraded; used by checkout to bake "which version
-is live" into an opened tab), `exportHistory() -> Promise<{schemaVersion, entries}|null>`
+— its content hash, or `null` when degraded), `exportHistory() -> Promise<{schemaVersion, entries}|null>`
 (this doc's full history as a kv-key → record map, snapshots included; used by "save
 with comments and history" to embed history in the file), and
 `clearCurrent() -> Promise<void>`. The overlay
@@ -74,16 +73,17 @@ version timeline; the comments-only `ChromeStorageAdapter`/`InFileStateAdapter` 
 have them and the timeline stays hidden. There is no per-comment "section" lookup —
 history operates on whole-document version snapshots, not extracted fragments.
 
-**Checkout tab (opened version).** A canvas produced by a version's **Open** action
-bakes `data-noteback-checkout="<live current version key>"` onto `#noteback-doc-root`.
-The overlay reads it **once at mount** and **strips it** (so it never reaches a later
-snapshot/export and never perturbs the content hash, which is over `textContent`). In
-that tab the "now" row is relabelled **"viewing"** (it IS the opened version — `you
-are here`), the live/current draft appears below badged **"current"**, and an **"Open
-current →"** banner re-opens the current via `openVersionTab(currentKey)`. A
-checkout-of-a-checkout propagates the ORIGINAL live key (so "open current" always
-points at the true current, not the version this tab is viewing); opening the current
-*from* the current bakes no marker (you can't check out current from itself).
+**Inline version view.** Clicking a version row calls `openVersionInline(versionKey)`,
+which opens a read-only `<iframe srcdoc>` side panel (`.nb-hist-view`) beside the
+sidebar — same tab, same origin. An in-tab `viewingKey` (null = live draft) drives the
+timeline: the viewed row is the active "you are here" row (`nb-ver-viewing`), a "Back
+to current" bar (`renderBackToCurrentBar`) is shown above the timeline and calls
+`closeVersionInline()` to return to the live draft, and every other row remains
+clickable to switch the view. Inline viewing never mutates the live document. There is
+no new-tab checkout: `openVersionTab`, `buildVersionCanvasHtml`, and the
+`data-noteback-checkout` marker were removed because a `window.open(blob:)` tab
+spawned from a `file://` canvas gets an opaque origin whose `localStorage` is denied,
+leaving the opened tab's history sidebar empty.
 
 Implementations (all satisfy the `load`/`save` core; covered by the adapter tests
 under `test/` — `history-state-adapter.test.js`, `chrome-kv-store.test.js`,
@@ -448,7 +448,7 @@ can't close it). On reopen the embedded boot **synchronously** seeds `localStora
 that block — **only keys not already present** (never clobber newer local data) — before
 the history adapter first resolves. The block is excluded from snapshots
 (`captureCleanDoc`), clean copies (`rebuildCleanHtml`), plain "with comments" saves
-(`rebuildHtml`), and checkouts (`buildVersionCanvasHtml`), so it never nests/recurses.
+(`rebuildHtml`), so it never nests/recurses.
 
 Footer **Copy ▾** menu → `onCopyHtml`: *Copy html (with feedback)* →
 `onCopyHtml(state, {clean:false})` (same bytes as `onSaveCanvas`), *Copy html
@@ -721,7 +721,7 @@ stripped, the snapshot is **paint-independent** — it does not matter whether h
 are painted when `save` runs. `stripNotebackFromHtml(html)` is the string-only Node-test
 equivalent (no DOM); `identityCodec` is the no-op gzip fallback.
 
-### 8.7 Overlay — version timeline + peek + checkout
+### 8.7 Overlay — version timeline + inline view
 
 The overlay renders a **version timeline** (`renderVersions`) instead of the old
 history popup. It docks at the **bottom** of the sidebar — `.nb-versions-dock`, a
@@ -729,22 +729,21 @@ bounded (`max-height:34vh`), self-scrolling band between the scrolling comment l
 (`.nb-list`, `flex:1`) and the action footer (`.nb-foot`), collapsing via `:empty` when
 there are no earlier versions — so the current draft's notes keep the available space.
 Collapse rule: **0** earlier versions → hidden; **1** → inline; **2+** → newest inline +
-a "+N older versions" disclosure. Each row has **open** and **copy feedback** actions and
-a whole-row **peek**:
+a "+N older versions" disclosure. Each row has a **copy feedback** action (chevron menu)
+and is click-to-view:
 
-- **Peek** (`openVersionPeek`) parses the stored snapshot and re-renders it by running
-  the **live** highlight painter (`highlightApi.paintHighlights`) over the parsed doc —
-  no cross-node re-highlighter — then **re-injects the shared `HIGHLIGHT_CSS`** into the
-  snapshot `<head>` so the marks match the live document (the clean snapshot dropped
-  Noteback's styles). It renders inside an `<iframe srcdoc>` that **fills the panel**
-  (`height:calc(100% - 38px)` — an iframe is a replaced element, so `top`+`bottom` alone
-  collapse it to ~150px), under a single full-width **"← Back"** banner (no separate ✕).
-- **Checkout** (`openVersionTab` → `buildVersionCanvasHtml`) opens a version as a real,
-  annotatable canvas: it clones the live page shell (keeping the inlined runtime +
-  styles), strips Noteback UI/marks, swaps in the snapshot's `#noteback-doc-root`
-  content, and **re-seeds** `#noteback-state` with the version's comments — escaping
-  `</script>` via the same `.replace(/<\/(script)/gi, '<\\/$1')` the exporter uses, so a
-  comment body containing `</script>` can't break out of the JSON block.
+- **Inline view** (`openVersionInline`) parses the stored snapshot and re-renders it by
+  running the **live** highlight painter (`highlightApi.paintHighlights`) over the parsed
+  doc — no cross-node re-highlighter — then **re-injects the shared `HIGHLIGHT_CSS`**
+  (plus `PEEK_POP_CSS` for the in-iframe comment popover) into the snapshot `<head>` so
+  the marks match the live document. It renders inside an `<iframe srcdoc>` that
+  **fills the panel** as a column-flex child (`flex:1;min-height:0`), in a side panel
+  (`.nb-hist-view`) that sits **beside the sidebar** (not a centered modal — the sidebar
+  stays visible on the right with the live timeline). An in-tab `viewingKey` marks the
+  viewed version "you are here"; a "Back to current" bar (`renderBackToCurrentBar` →
+  `closeVersionInline`) returns to the live draft. Pruned snapshots (`html === ''`) toast
+  and leave the view closed. The `</script>` escape applies to `buildPeekPopoverScript`,
+  which serializes comment data into the iframe's inline script.
 
 ### 8.8 Per-site opt-in
 
