@@ -81,6 +81,48 @@ function readBakedDocId(html) {
   return m ? m[1] : null;
 }
 
+// A source-level doc-id anchor. The wrapped canvas keys version history off the
+// id baked on #noteback-doc-root, but a PLAIN source (no #noteback-doc-root yet)
+// has nowhere to carry it — so `--bake-id` stamps this shape-agnostic comment
+// marker into the source. It survives re-wraps and a deleted (gitignored) canvas,
+// keeping the same id (and thus the same localStorage history) across exports.
+const DOC_ID_MARKER_RE = /<!--\s*noteback-doc-id:\s*([A-Za-z0-9_-]+)\s*-->/i;
+
+/**
+ * Read a source-level `<!-- noteback-doc-id: … -->` marker, or return null.
+ * @param {string} html
+ * @returns {string|null}
+ */
+function readMarkerDocId(html) {
+  const m = DOC_ID_MARKER_RE.exec(String(html || ''));
+  return m ? m[1] : null;
+}
+
+/** Strip the source-level doc-id marker (and its trailing newline) from `html`. */
+function stripDocIdMarker(html) {
+  return String(html == null ? '' : html).replace(
+    /[ \t]*<!--\s*noteback-doc-id:\s*[A-Za-z0-9_-]+\s*-->[ \t]*\r?\n?/i, ''
+  );
+}
+
+/**
+ * Return `html` with a `<!-- noteback-doc-id: <id> -->` marker. Idempotent: an
+ * existing marker is replaced (never duplicated). A fresh marker is inserted just
+ * after a leading `<!DOCTYPE html>` (so it can't trigger quirks mode), else at the
+ * very top — which also covers fragment inputs that have no doctype.
+ * @param {string} html
+ * @param {string} id
+ * @returns {string}
+ */
+function bakeDocIdIntoSource(html, id) {
+  const s = String(html == null ? '' : html);
+  const marker = '<!-- noteback-doc-id: ' + id + ' -->';
+  if (DOC_ID_MARKER_RE.test(s)) return s.replace(DOC_ID_MARKER_RE, marker);
+  const dt = /^(\uFEFF?\s*<!doctype html>[^\n]*\n?)/i.exec(s);
+  if (dt) return s.slice(0, dt[0].length) + marker + '\n' + s.slice(dt[0].length);
+  return marker + '\n' + s;
+}
+
 /**
  * Derive a human document title: the input's <title>, else the file name.
  * Strips a trailing " — Noteback feedback canvas" so re-wrapping is idempotent.
@@ -126,17 +168,29 @@ function wrapHtml(docHtml, opts) {
 
 /**
  * Read `inputPath`, wrap it, and write to `outputPath` (defaults to in place).
- * Precedence for doc-id: explicitId → baked id in the existing -o file → baked id in the input itself → mint.
+ * Precedence for doc-id: explicitId → baked id in the existing -o file → baked id
+ * in the input (#noteback-doc-root OR a `<!-- noteback-doc-id -->` marker) → mint.
+ * When `bakeId` and the output is a SEPARATE file, the resolved id is stamped back
+ * into the source as a comment marker so re-wraps survive a deleted canvas.
  * @returns {{out: string, bytes: number, title: string}}
  */
-function wrapFile(inputPath, outputPath, explicitId) {
+function wrapFile(inputPath, outputPath, explicitId, bakeId) {
   const out = outputPath || inputPath;
   const docHtml = fs.readFileSync(inputPath, 'utf8');
   var docId = explicitId || null;
   if (!docId && fs.existsSync(out)) docId = readBakedDocId(fs.readFileSync(out, 'utf8'));
-  if (!docId) docId = readBakedDocId(docHtml);
-  const html = wrapHtml(docHtml, { sourceName: path.basename(inputPath), docId: docId || undefined });
+  if (!docId) docId = readBakedDocId(docHtml) || readMarkerDocId(docHtml);
+  if (!docId) docId = mintDocId();
+  // The marker is a source-only anchor — never carry it into the canvas content.
+  const html = wrapHtml(stripDocIdMarker(docHtml), { sourceName: path.basename(inputPath), docId: docId });
   fs.writeFileSync(out, html);
+  // Anchor the id in the source. Pointless in place (the canvas already carries it
+  // on #noteback-doc-root and would clobber the marker); only meaningful when the
+  // -o target is a separate file.
+  if (bakeId && out !== inputPath) {
+    const stamped = bakeDocIdIntoSource(docHtml, docId);
+    if (stamped !== docHtml) fs.writeFileSync(inputPath, stamped);
+  }
   return { out: out, bytes: html.length, title: deriveTitle(docHtml, path.basename(inputPath)) };
 }
 
@@ -252,6 +306,8 @@ const USAGE = [
   '  -o, --out <path>   (wrap) write the canvas to <path> instead of rewriting in place',
   '  --id <id>          (wrap) set/override the document id baked into the canvas (normally inferred',
   '                     from the -o target; use this to chain version history across re-wraps)',
+  '  --bake-id          (wrap, with -o) stamp the resolved doc-id into the SOURCE as a comment',
+  '                     marker so history survives even if the generated canvas is deleted',
   '  --project          (install-skill) install into ./ (this repo) instead of your home dir',
   '  --dir <path>       (install-skill) plain-copy into a specific skills directory (no symlink)',
   '  -h, --help         show this help',
@@ -261,13 +317,14 @@ const USAGE = [
 ].join('\n');
 
 function parseArgs(argv) {
-  const args = { cmd: null, input: null, out: null, dir: null, project: false, help: false, id: null };
+  const args = { cmd: null, input: null, out: null, dir: null, project: false, help: false, id: null, bakeId: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '-h' || a === '--help') args.help = true;
     else if (a === '-o' || a === '--out') args.out = argv[++i];
     else if (a === '--dir') args.dir = argv[++i];
     else if (a === '--id') args.id = argv[++i];
+    else if (a === '--bake-id') args.bakeId = true;
     else if (a === '--project') args.project = true;
     else if (a[0] === '-') { /* unknown flag — ignore */ }
     else if (!args.cmd) args.cmd = a;       // first bare token is the command
@@ -300,7 +357,7 @@ function main(argv) {
   }
 
   try {
-    const r = wrapFile(args.input, args.out, args.id);
+    const r = wrapFile(args.input, args.out, args.id, args.bakeId);
     process.stdout.write(
       'Wrapped "' + r.title + '" → ' + r.out + ' (' + r.bytes + ' bytes).\n' +
       'Open it in a browser to comment, then "Copy feedback as markdown".\n'
@@ -316,4 +373,4 @@ if (require.main === module) {
   process.exit(main(process.argv.slice(2)));
 }
 
-module.exports = { wrapHtml, wrapFile, deriveTitle, mintDocId, readBakedDocId, main, installSkill, planInstall, RUNTIME_FILES, SKILL_NAME };
+module.exports = { wrapHtml, wrapFile, deriveTitle, mintDocId, readBakedDocId, readMarkerDocId, bakeDocIdIntoSource, stripDocIdMarker, main, installSkill, planInstall, RUNTIME_FILES, SKILL_NAME };

@@ -154,9 +154,22 @@ the code, that have already bitten us once.
 - **`wrap` PRESERVES an existing doc-id — don't make it re-mint.** The version history
   follows the baked `data-noteback-doc-id`, so re-wrapping a canvas must keep the same
   id or the history orphans. `bin/noteback.js`'s precedence is: explicit `--id` → the id
-  already baked in the `-o` target file → the id baked in the input HTML → mint a fresh
-  one (`mintDocId` / `readBakedDocId`). The `-o`-target reuse is the easy one to drop —
-  it's how `wrap` in place keeps history across re-exports.
+  already baked in the `-o` target file → the id baked in the input HTML
+  (`#noteback-doc-root[data-noteback-doc-id]` OR a source `<!-- noteback-doc-id: … -->`
+  marker, via `readBakedDocId`/`readMarkerDocId`) → mint a fresh one (`mintDocId`). The
+  `-o`-target reuse is the easy one to drop — it's how `wrap` in place keeps history
+  across re-exports.
+- **`--bake-id` anchors the id in the SOURCE so a deleted `-o` canvas can't orphan
+  history.** With a SEPARATE `-o` target (e.g. `examples/spec.html -o examples/spec.canvas.html`),
+  the resolved id lives ONLY in the gitignored canvas; `rm` it and the next `wrap`
+  re-mints, splintering history. `--bake-id` stamps `bakeDocIdIntoSource` into the
+  tracked source as a `<!-- noteback-doc-id: … -->` comment (after the doctype, so it
+  can't trigger quirks mode; prepended for fragments; idempotent — re-bake replaces,
+  never duplicates). The marker is SOURCE-ONLY: `wrapFile` runs `stripDocIdMarker` on
+  the doc content before building, so it never leaks into the canvas (which carries the
+  authoritative id on `#noteback-doc-root`). In-place wrap ignores `--bake-id` (the
+  canvas already carries the id and would clobber the marker). `examples/spec.html` is
+  anchored this way (`dmq41se03tm5q0nu8bh`).
 - **Extension history is GATED per-site (`historyAllowed`), decided at first mount.**
   `origin-policy.js` `historyAllowed(info, settings)` is default-on for
   `file`/`localhost`/`127.0.0.1` and opt-in via `historySites` for any other origin.

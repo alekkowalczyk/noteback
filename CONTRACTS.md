@@ -678,9 +678,14 @@ Identity is an **explicit doc-id**, not derived at runtime:
 
 - **Canvas:** baked into `#noteback-doc-root[data-noteback-doc-id]` (§5).
 - **`wrap` CLI** (`bin/noteback.js`): precedence is explicit `--id <id>` → the id
-  already baked in the `-o` target → the id baked in the input HTML → otherwise
-  **mint** a fresh one. Helpers: `mintDocId`, `readBakedDocId`. Re-export preserves the
-  existing id, so a re-wrapped canvas keeps its history.
+  already baked in the `-o` target → the id baked in the input HTML
+  (`#noteback-doc-root` attr OR a source `<!-- noteback-doc-id: … -->` marker) →
+  otherwise **mint** a fresh one. Helpers: `mintDocId`, `readBakedDocId`,
+  `readMarkerDocId`. Re-export preserves the existing id, so a re-wrapped canvas keeps
+  its history. **`--bake-id`** (with a separate `-o` target) stamps the resolved id
+  into the SOURCE as that comment marker (`bakeDocIdIntoSource`, idempotent, after the
+  doctype) so history survives even if the generated canvas is deleted; the marker is
+  stripped from the canvas content (`stripDocIdMarker`) so it never double-anchors.
 - **Extension on a page it didn't author** (no baked id): a per-URL minted id stored
   under `nb:url:<normalizedHref>` (fragment stripped) in `chrome.storage.local`. A
   baked id always wins. This is distinct from the comments-only `docId`
