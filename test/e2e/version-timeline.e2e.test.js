@@ -7,9 +7,9 @@
  * "History" group, its rows, and the read-only INLINE view (a side panel beside
  * the sidebar). It drives real drag-select comments across three drafts (same
  * baked doc-id, changing visible text → new content hash each time), so two
- * EARLIER versions exist, then exercises: open a version inline, the sidebar
- * marks it "you are here" while staying visible, switch to another version, and
- * return to the current draft.
+ * EARLIER versions exist, then exercises: open a version inline (the sidebar marks
+ * it the active "viewing" row while staying visible), switch to another version,
+ * return to the current draft, and the version chevron's Copy/Save actions.
  *
  * Runtime stays zero-dependency; Playwright is a devDependency used only here.
  * Requires the chromium binary: `npx playwright install chromium`.
@@ -106,7 +106,7 @@ function readInlineFrame(page) {
   });
 }
 
-test('inline version viewing: timeline rows, "you are here", switch versions, back to current', { timeout: 120000 }, async () => {
+test('inline version viewing: timeline rows, viewing state, switch versions, back to current, save actions', { timeout: 120000 }, async () => {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
   try {
@@ -140,10 +140,11 @@ test('inline version viewing: timeline rows, "you are here", switch versions, ba
     assert.strictEqual(await page.locator('.nb-versions-dock .nb-versions').count(), 1, 'the timeline lives in the bottom versions dock');
     assert.strictEqual(await page.locator('.nb-list .nb-versions').count(), 0, 'the timeline is NOT inside the scrolling comment list');
 
-    // Exactly one active "now" row (the live draft), no actions chevron, "you are here".
+    // Exactly one active "now" row (the live draft), no actions chevron, no "you are here" text.
     assert.strictEqual(await page.locator('.nb-ver-row.active').count(), 1, 'exactly one active "now" row');
     assert.strictEqual(await page.locator('.nb-ver-row.active .nb-ver-menu-btn').count(), 0, 'the "now" row has no actions chevron');
-    assert.strictEqual(((await page.locator('.nb-ver-row.active .nb-ver-here').first().textContent()) || '').trim(), 'you are here', 'the "now" row is "you are here" when not viewing');
+    assert.strictEqual(await page.locator('.nb-ver-here').count(), 0, 'no "you are here" text anywhere (removed)');
+    assert.strictEqual(((await page.locator('.nb-ver-row.active .nb-ver-name').first().textContent()) || '').trim(), 'now', 'the active row is the live "now" draft when not viewing');
 
     // The newest earlier version (v2) is shown inline; reveal the rest (v1) via disclosure.
     await page.locator('.nb-disclose').click();
@@ -165,11 +166,11 @@ test('inline version viewing: timeline rows, "you are here", switch versions, ba
     assert.strictEqual(await page.locator('.nb-hist-backdrop').count(), 0, 'the old centered modal is gone');
     assert.strictEqual(await page.locator('.nb-sidebar.nb-open').count(), 1, 'the sidebar stays open beside the inline view');
 
-    // The viewed version is the active "viewing / you are here" row; "now" is no longer active.
+    // The viewed version is the active "viewing" row; "now" is no longer active.
     const viewingRow = page.locator('.nb-ver-row.active.nb-ver-viewing');
     assert.strictEqual(await viewingRow.count(), 1, 'the viewed version is the active "viewing" row');
     assert.strictEqual(await viewingRow.getAttribute('data-version-key'), v2key, 'the viewing row is v2 (the one clicked)');
-    assert.strictEqual(((await viewingRow.locator('.nb-ver-here').first().textContent()) || '').trim(), 'you are here', 'the viewed version is marked "you are here"');
+    assert.strictEqual(await page.locator('.nb-ver-here').count(), 0, 'still no "you are here" text (removed)');
     assert.strictEqual(await page.locator('.nb-ver-row.active').count(), 1, 'still exactly one active row (now it is the viewed version)');
 
     // A "Back to current" bar is present.
@@ -229,6 +230,48 @@ test('inline version viewing: timeline rows, "you are here", switch versions, ba
     assert.strictEqual(await page.locator('.nb-hist-view').count(), 0, '"Back to current" closes the inline view');
     assert.strictEqual(await page.locator('.nb-ver-row.nb-ver-viewing').count(), 0, 'no row is marked "viewing" after returning to current');
     assert.strictEqual(((await page.locator('.nb-ver-row.active .nb-ver-name').first().textContent()) || '').trim(), 'now', 'the active row is the live "now" draft again');
+
+    // --- Version chevron menu: Copy feedback + the two Save options. ---
+    // Stub the save primitives so the "download" is captured in-page (the headless
+    // pattern history-embed.e2e uses) instead of hitting disk.
+    await page.evaluate(() => {
+      const RT = window.NotebackRuntime;
+      window.__saved = null;
+      RT.exporter.saveCanvasInPlace = (html) => { window.__saved = html; return Promise.resolve(); };
+      RT.exporter.downloadCanvas = (html) => { window.__saved = html; };
+    });
+    // Operate on v1 — it carries the </script> breakout payload; reach it via the disclosure.
+    await page.locator('.nb-disclose').click();
+    await page.waitForTimeout(200);
+    const v1row = page.locator('.nb-ver-row[data-version-key="' + v1key + '"]');
+    await v1row.locator('.nb-ver-menu-btn').click();
+    await page.waitForTimeout(250);
+    const vmenu = page.locator('.nb-ver-menu.is-open');
+    assert.strictEqual(await vmenu.count(), 1, 'the version chevron opens the actions menu');
+    assert.strictEqual(await vmenu.locator('.nb-vm-copy').count(), 1, 'menu has Copy feedback');
+    assert.strictEqual(await vmenu.locator('.nb-vm-save').count(), 1, 'menu has "Save HTML with comments"');
+    assert.strictEqual(await vmenu.locator('.nb-vm-saveclean').count(), 1, 'menu has "Save clean HTML"');
+    assert.strictEqual(await vmenu.locator('.nb-vm-save').isDisabled(), false, 'Save with comments is enabled (snapshot stored)');
+    assert.strictEqual(await vmenu.locator('.nb-vm-saveclean').isDisabled(), false, 'Save clean is enabled (snapshot stored)');
+
+    // "Save HTML with comments" → a re-openable canvas of THIS version (runtime + its comment).
+    await vmenu.locator('.nb-vm-save').click();
+    await page.waitForTimeout(300);
+    const savedCanvas = await page.evaluate(() => window.__saved);
+    assert.ok(savedCanvas && savedCanvas.indexOf('noteback-state') !== -1, 'the saved canvas carries the #noteback-state block');
+    assert.ok(savedCanvas.indexOf('NotebackRuntime') !== -1, 'the saved canvas carries the inlined runtime (re-openable)');
+    assert.ok(savedCanvas.indexOf('Draft-1 feedback note') !== -1, 'the saved canvas embeds the version\'s comment body');
+    assert.ok(!savedCanvas.includes('</script><img src=x onerror=alert(1)>'), 'the </script> breakout is NOT present unescaped in the saved canvas');
+    assert.ok(savedCanvas.includes('<\\/script'), 'the </script> in the comment body is escaped in the re-seeded state block');
+
+    // "Save clean HTML" → the version's clean snapshot (no runtime, no state block).
+    await v1row.locator('.nb-ver-menu-btn').click();
+    await page.waitForTimeout(250);
+    await page.locator('.nb-ver-menu.is-open .nb-vm-saveclean').click();
+    await page.waitForTimeout(300);
+    const savedClean = await page.evaluate(() => window.__saved);
+    assert.ok(savedClean && savedClean.indexOf('noteback-state') === -1, 'the clean save has NO #noteback-state block');
+    assert.ok(savedClean.indexOf('NotebackRuntime') === -1, 'the clean save has NO inlined runtime');
   } finally {
     await context.close();
   }

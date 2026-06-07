@@ -335,13 +335,16 @@ A single panel adapts to where you are:
   blob tab gets an opaque origin whose `localStorage` is denied — the opened tab's
   history sidebar was empty.)
 - **Per-row actions live behind a chevron** next to the v-label (same dropdown
-  affordance as Save/Copy): **Copy feedback**. The menu is portaled to `uiRoot` and
-  fixed-positioned in JS because the versions dock clips overflow. Clicking the row body
-  opens the inline view.
+  affordance as Save/Copy): **Copy feedback**, **Save HTML with comments** (a re-openable
+  canvas of the version, via `buildVersionCanvasHtml` → `onSaveHtml` download), and **Save
+  clean HTML** (the raw snapshot); both saves disable when the snapshot is pruned. The menu
+  is portaled to `uiRoot` and fixed-positioned in JS because the versions dock clips
+  overflow. Clicking the row body opens the inline view.
 - **Viewing-aware timeline.** An in-tab `viewingKey` (null = live draft) drives the
-  sidebar: the viewed version's row is the active "you are here" row (`nb-ver-viewing`),
-  a "Back to current" bar (`renderBackToCurrentBar` → `closeVersionInline`) is shown
-  above the timeline, and every other row remains clickable to switch the inline view.
+  sidebar: the viewed version's row is the active `nb-ver-viewing` row (active dot +
+  highlight, no text label), a "Back to current" bar (`renderBackToCurrentBar` →
+  `closeVersionInline`) is shown above the timeline, and every other row remains clickable
+  to switch the inline view.
   When `viewingKey` is null the timeline renders exactly as normal (live-draft "now"
   row, no bar).
 - **Edge states:** first read (Versions list hidden until there's something in it);

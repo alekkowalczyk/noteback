@@ -89,14 +89,26 @@ the code, that have already bitten us once.
   (`.nb-hist-view`) beside the sidebar (NOT a new tab, NOT a centered modal). It
   reuses the snapshot painter (`paintHighlights` + re-injected `HIGHLIGHT_CSS` +
   `buildPeekPopoverScript`). An in-tab `viewingKey` drives the timeline: the viewed
-  row is the active "you are here" row, a "Back to current" bar
-  (`renderBackToCurrentBar` → `closeVersionInline`) returns to the live draft, and
-  other rows switch. There is NO new-tab "checkout": `openVersionTab` /
-  `buildVersionCanvasHtml` / the `data-noteback-checkout` marker were removed
-  because a `window.open(blob:)` tab from a `file://` canvas gets an opaque origin
-  whose `localStorage` is denied, leaving the opened tab's history sidebar empty
-  (the bug). The `.nb-hist-frame` iframe fills the panel as a column-flex child
+  row is the active `nb-ver-viewing` row (active dot + highlight — there is **no**
+  "you are here" text label), a "Back to current" bar (`renderBackToCurrentBar` →
+  `closeVersionInline`) returns to the live draft, and other rows switch. There is
+  NO new-tab "checkout" (`openVersionTab` / the `data-noteback-checkout` marker were
+  removed) because a `window.open(blob:)` tab from a `file://` canvas gets an opaque
+  origin whose `localStorage` is denied, leaving the opened tab's history sidebar
+  empty (the bug). The `.nb-hist-frame` iframe fills the panel as a column-flex child
   (`flex:1;min-height:0`), not via absolute `height:calc(...)`.
+- **The version chevron menu SAVES via download, not a tab.** A version row's `▾`
+  menu has **Copy feedback** + **Save HTML with comments** + **Save clean HTML**
+  (both saves disabled when the version's snapshot is pruned). "Save HTML with
+  comments" rebuilds a re-openable canvas of that version with
+  `buildVersionCanvasHtml` (re-added — clones the live shell, swaps in the snapshot
+  content, re-seeds `#noteback-state` with the version's comments, escaping
+  `</script>`; it does NOT bake a checkout marker); "Save clean HTML" saves the raw
+  `v.html` snapshot. Both route through a new `exporter.onSaveHtml(html, name)` hook
+  (embedded: `saveCanvasInPlace` → `downloadCanvas`). Because the result is
+  **downloaded** (a fresh `file://` canvas when reopened, with its own storage), it
+  sidesteps the opaque-origin `localStorage` problem that retired the new-tab open —
+  this is why `buildVersionCanvasHtml` is back but `openVersionTab` is not.
 - **The Versions timeline docks at the BOTTOM of the sidebar, not inside the comment
   list.** `renderVersions()` renders into `.nb-versions-dock` (a `flex:0 0 auto` band with
   `max-height:34vh`, its own scroll, collapsing via `:empty` when there are no earlier

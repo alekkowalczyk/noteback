@@ -322,7 +322,6 @@
     '.nb-ver-name{font:700 13px/1.2 var(--nb-round);color:var(--nb-ink);}',
     '.nb-ver-meta{font:400 11.5px/1.2 var(--nb-ui);color:var(--nb-ink-soft);}',
     '.nb-ver-spacer{flex:1;}',
-    '.nb-ver-here{font:700 9.5px/1 var(--nb-round);letter-spacing:.08em;text-transform:uppercase;color:var(--nb-accent-deep);}',
     '.nb-ver-count{font:600 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;background:#efe7d6;',
     '  border:1px solid var(--nb-line);border-radius:999px;padding:2px 9px;color:var(--nb-ink-soft);}',
     '.nb-ver-row.active .nb-ver-count{background:#fff;}',
@@ -359,7 +358,7 @@
     /* inline version view: a read-only side panel filling the doc area BESIDE the
        sidebar (which stays at right:0 with the live timeline). z-index sits JUST
        BELOW the sidebar (2147483647) and the panel insets by the sidebar width, so
-       "you are here" + back-to-current + switch stay reachable while viewing. */
+       the active viewing row + back-to-current + switch stay reachable while viewing. */
     '.nb-hist-view{position:fixed;top:0;left:0;right:360px;bottom:0;z-index:2147483646;',
     '  background:#fff;display:flex;flex-direction:column;box-shadow:0 0 44px -20px rgba(40,40,38,.5);}',
     '.nb-hist-back{flex:0 0 auto;display:flex;align-items:center;gap:6px;border:none;',
@@ -1522,11 +1521,10 @@
     }
 
     /**
-     * The "you are here" row at the top of the timeline — always the live current
-     * draft ("now"). When viewing an earlier version inline this row loses the
-     * active highlight and becomes click-to-return (the viewed version row gets the
-     * active dot instead). No chevron/actions either way; status dot active when not
-     * viewing.
+     * The "now" row at the top of the timeline — always the live current draft.
+     * When viewing an earlier version inline this row loses the active highlight and
+     * becomes click-to-return (the viewed version row gets the active dot instead).
+     * No chevron/actions either way; status dot active when not viewing.
      */
     function renderNowRow() {
       const s = getState();
@@ -1552,12 +1550,6 @@
       line.appendChild(dot);
       line.appendChild(name);
       line.appendChild(spacer);
-      if (!viewing) {
-        const here = doc.createElement('span');
-        here.className = 'nb-ver-here';
-        here.textContent = 'you are here';
-        line.appendChild(here);
-      }
       line.appendChild(cnt);
       row.appendChild(line);
       if (viewing) row.addEventListener('click', function () { closeVersionInline(); });
@@ -1565,17 +1557,17 @@
     }
 
     /**
-     * One earlier-version row: dot, v-label, time, count, and open + copy-feedback
-     * actions. Clicking ANYWHERE on the row (line or the actions strip's empty
-     * space) peeks the snapshot; the open / copy-feedback buttons stopPropagation
-     * so a button click runs only its own action and doesn't also peek.
+     * One earlier-version row: dot, v-label, a chevron actions menu (copy feedback /
+     * save HTML), time, and count. Clicking the row body opens the read-only inline
+     * view of that version; the chevron stopPropagations so a menu click doesn't also
+     * open the view.
      * @param {Object} d      a getHistory() entry
      * @param {number} ordinal the v-number (oldest = 1)
      */
     function renderVersionRow(d, ordinal) {
       const row = doc.createElement('div');
-      // The version currently shown inline is the "you are here" row (active dot +
-      // viewing badge); every other row is click-to-view.
+      // The version currently shown inline gets the active dot + highlight; every
+      // other row is click-to-view.
       const isViewing = !!(viewingKey && d.versionKey === viewingKey);
       row.className = 'nb-ver-row' + (isViewing ? ' active nb-ver-viewing' : '');
       row.setAttribute(UI_ATTR, 'version');
@@ -1610,12 +1602,6 @@
       line.appendChild(name);
       line.appendChild(menuBtn);
       line.appendChild(spacer);
-      if (isViewing) {
-        const here = doc.createElement('span');
-        here.className = 'nb-ver-here';
-        here.textContent = 'you are here';
-        line.appendChild(here);
-      }
       line.appendChild(meta); // date — right-aligned (after the flex spacer)
       line.appendChild(cnt);
       row.appendChild(line);
@@ -1650,9 +1636,9 @@
      * (commented passages wrapped in the same <mark class="noteback-highlight">),
      * re-injects HIGHLIGHT_CSS + PEEK_POP_CSS, and shows it in an <iframe srcdoc>
      * under a "← Back to current draft" bar. Sets `viewingKey` and re-renders the
-     * timeline so the sidebar marks this version "you are here" and offers a way
-     * back / a switch to another version. Pruned snapshots (html === '') toast and
-     * leave the current draft in place.
+     * timeline so the sidebar marks this version the active "viewing" row and offers
+     * a way back / a switch to another version. Pruned snapshots (html === '') toast
+     * and leave the current draft in place.
      */
     function openVersionInline(versionKey) {
       closeVersionMenu(true); // a row chevron may have opened it
@@ -1710,7 +1696,7 @@
         uiRoot.appendChild(view);
         inlineView = view;
 
-        openSidebar();    // ensure the timeline (with "you are here") is visible
+        openSidebar();    // ensure the timeline (with the active viewing row) is visible
         renderVersions(); // re-render so the viewed row is marked + the bar shows
       });
     }
@@ -1773,6 +1759,119 @@
         '}());</scr' + 'ipt>';
     }
 
+    /**
+     * Build a re-openable Noteback canvas of a past version, as an HTML string.
+     * Clones the CURRENT live document (keeping its inlined runtime + styles +
+     * template), strips Noteback's own UI + live highlights + any stale embedded-
+     * history block, swaps in the snapshot's doc-content, and re-seeds the
+     * #noteback-state block with the version's comments. The result is a working
+     * annotatable canvas of that version — used by the version row's "Save HTML with
+     * comments" action. It is DOWNLOADED as a file (never window.open'd), so opening
+     * it later is a fresh file:// canvas with its own working storage — sidestepping
+     * the opaque-origin localStorage problem that retired the old new-tab checkout.
+     *
+     * @param {Object} v        getVersion() result: { html, comments, docTitle, contentHash }
+     * @param {string} docId    the current page's baked doc-id
+     * @param {string} docTitle title for the version's state block
+     * @returns {string} a full canvas HTML document
+     */
+    function buildVersionCanvasHtml(v, docId, docTitle) {
+      // Snapshot's doc-content inner HTML (its #noteback-doc-root if present, else body).
+      const parsed = new DOMParser().parseFromString(v.html, 'text/html');
+      const snapRoot = parsed.querySelector('#noteback-doc-root') || parsed.body;
+      const snapInner = snapRoot ? snapRoot.innerHTML : '';
+
+      // Clone the CURRENT live document — it carries the inlined runtime, the canvas
+      // template wrapper, and the page styles, which is what makes the result a
+      // working annotatable canvas.
+      const clone = document.documentElement.cloneNode(true);
+
+      // Strip Noteback's own UI from the clone (sidebar host, launcher, fab, our
+      // injected <style>, any open inline view). The inlined runtime <script> is NOT
+      // a [data-noteback-ui] node, so it survives — that's deliberate.
+      const ui = clone.querySelectorAll('[' + UI_ATTR + ']');
+      for (let i = 0; i < ui.length; i++) {
+        if (ui[i].parentNode) ui[i].parentNode.removeChild(ui[i]);
+      }
+      // Drop any embedded-history block — a saved version is a fresh canvas and must
+      // not carry the source doc's full history (it would re-seed on open).
+      const histBlk = clone.querySelector('#noteback-history');
+      if (histBlk && histBlk.parentNode) histBlk.parentNode.removeChild(histBlk);
+      // Unwrap any live highlight <mark>s left in the clone.
+      const liveMarks = clone.querySelectorAll('mark.' + (highlightApi && highlightApi.HIGHLIGHT_CLASS || 'noteback-highlight'));
+      for (let i = 0; i < liveMarks.length; i++) {
+        const m = liveMarks[i];
+        const p = m.parentNode;
+        if (!p) continue;
+        while (m.firstChild) p.insertBefore(m.firstChild, m);
+        p.removeChild(m);
+      }
+
+      // Swap in the snapshot's doc-content.
+      const cloneRoot = clone.querySelector('#noteback-doc-root');
+      if (cloneRoot) cloneRoot.innerHTML = snapInner;
+
+      // Re-seed the machine-readable state block with the version's comments. The
+      // JSON lands in a <script> element's textContent serialized via outerHTML, which
+      // emits raw text VERBATIM — a comment body or docTitle containing the closing
+      // script sequence would break out of the block (self-XSS). Escape exactly as the
+      // canonical exporter does (JSON.parse reads "\/" back as "/", so it round-trips).
+      const stateEl = clone.querySelector('#noteback-state');
+      if (stateEl) {
+        const stateJson = JSON.stringify({
+          schemaVersion: 1,
+          docId: docId || '',
+          docTitle: docTitle || '',
+          comments: v.comments || []
+        });
+        stateEl.textContent = stateJson.replace(/<\/(script)/gi, '<\\/$1');
+      }
+
+      return '<!DOCTYPE html>\n' + clone.outerHTML;
+    }
+
+    /**
+     * A filesystem-safe download name for a saved version, derived from the doc title
+     * (with the canvas suffix stripped). `clean` tags the no-Noteback variant.
+     */
+    function versionSaveName(d, clean) {
+      let t = (document.title || 'noteback').replace(/ — Noteback feedback canvas$/, '');
+      t = t.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'noteback';
+      return t + (clean ? ' (version, clean)' : ' (version)') + '.html';
+    }
+
+    /** Save a past version as a re-openable canvas (its snapshot + its comments). */
+    async function saveVersionCanvas(d) {
+      if (!d || !d.hasSnapshot) { toast('That version has no saved snapshot'); return; }
+      if (!exporter || typeof exporter.onSaveHtml !== 'function') {
+        toast('Saving is only available in the saved canvas here.');
+        return;
+      }
+      try {
+        const v = await history.getVersion({ versionKey: d.versionKey });
+        if (!v || !v.html) { toast('That version has no saved snapshot'); return; }
+        const rootEl = document.getElementById('noteback-doc-root');
+        const docId = (rootEl && rootEl.getAttribute && rootEl.getAttribute('data-noteback-doc-id')) || '';
+        const html = buildVersionCanvasHtml(v, docId, v.docTitle || document.title || '');
+        await exporter.onSaveHtml(html, versionSaveName(d, false));
+        toast('Saving HTML with comments…');
+      } catch (e) { toast('Save failed'); }
+    }
+
+    /** Save a past version's CLEAN snapshot (the original, no Noteback). */
+    async function saveVersionClean(d) {
+      if (!d || !d.hasSnapshot) { toast('That version has no saved snapshot'); return; }
+      if (!exporter || typeof exporter.onSaveHtml !== 'function') {
+        toast('Saving is only available in the saved canvas here.');
+        return;
+      }
+      try {
+        const v = await history.getVersion({ versionKey: d.versionKey });
+        if (!v || !v.html) { toast('That version has no saved snapshot'); return; }
+        await exporter.onSaveHtml('<!DOCTYPE html>\n' + v.html, versionSaveName(d, true));
+        toast('Saving clean HTML…');
+      } catch (e) { toast('Save failed'); }
+    }
 
     function formatWhen(iso) {
       if (!iso) return 'earlier';
@@ -2246,9 +2345,18 @@
     versionMenu.innerHTML =
       '<button type="button" class="nb-menu-item nb-vm-copy" role="menuitem">' +
       '<span class="nb-mi-label">Copy feedback</span>' +
-      '<span class="nb-mi-sub">this version’s markdown</span></button>';
+      '<span class="nb-mi-sub">this version’s markdown</span></button>' +
+      '<div class="nb-menu-sep" role="none"></div>' +
+      '<button type="button" class="nb-menu-item nb-vm-save" role="menuitem">' +
+      '<span class="nb-mi-label">Save HTML with comments</span>' +
+      '<span class="nb-mi-sub">re-openable canvas of this version</span></button>' +
+      '<button type="button" class="nb-menu-item nb-vm-saveclean" role="menuitem">' +
+      '<span class="nb-mi-label">Save clean HTML</span>' +
+      '<span class="nb-mi-sub">the original, no Noteback</span></button>';
     uiRoot.appendChild(versionMenu);
     const vmCopyItem = versionMenu.querySelector('.nb-vm-copy');
+    const vmSaveItem = versionMenu.querySelector('.nb-vm-save');
+    const vmSaveCleanItem = versionMenu.querySelector('.nb-vm-saveclean');
     let versionMenuOpen = false;
     let versionMenuCloseTimer = null;
     let versionMenuBtn = null;   // the chevron that opened it
@@ -2259,6 +2367,18 @@
       const d = versionMenuData;
       closeVersionMenu();
       if (d) copyVersionFeedback(d);
+    });
+    vmSaveItem.addEventListener('click', function (e) {
+      e.stopPropagation();
+      const d = versionMenuData;
+      closeVersionMenu();
+      if (d) saveVersionCanvas(d);
+    });
+    vmSaveCleanItem.addEventListener('click', function (e) {
+      e.stopPropagation();
+      const d = versionMenuData;
+      closeVersionMenu();
+      if (d) saveVersionClean(d);
     });
 
     function positionVersionMenu(btn) {
@@ -2286,6 +2406,12 @@
         (win && win.clearTimeout ? win.clearTimeout : clearTimeout)(versionMenuCloseTimer);
         versionMenuCloseTimer = null;
       }
+      // The two "Save…" items need the version's stored snapshot; disable when pruned.
+      // "Copy feedback" only needs the comments, so it stays enabled.
+      vmSaveItem.disabled = !d.hasSnapshot;
+      vmSaveItem.title = d.hasSnapshot ? '' : 'Snapshot no longer stored';
+      vmSaveCleanItem.disabled = !d.hasSnapshot;
+      vmSaveCleanItem.title = d.hasSnapshot ? '' : 'Snapshot no longer stored';
       btn.setAttribute('aria-expanded', 'true');
       versionMenu.classList.remove('is-closing');
       positionVersionMenu(btn);

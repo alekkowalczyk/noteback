@@ -76,14 +76,24 @@ history operates on whole-document version snapshots, not extracted fragments.
 **Inline version view.** Clicking a version row calls `openVersionInline(versionKey)`,
 which opens a read-only `<iframe srcdoc>` side panel (`.nb-hist-view`) beside the
 sidebar — same tab, same origin. An in-tab `viewingKey` (null = live draft) drives the
-timeline: the viewed row is the active "you are here" row (`nb-ver-viewing`), a "Back
-to current" bar (`renderBackToCurrentBar`) is shown above the timeline and calls
-`closeVersionInline()` to return to the live draft, and every other row remains
-clickable to switch the view. Inline viewing never mutates the live document. There is
-no new-tab checkout: `openVersionTab`, `buildVersionCanvasHtml`, and the
-`data-noteback-checkout` marker were removed because a `window.open(blob:)` tab
-spawned from a `file://` canvas gets an opaque origin whose `localStorage` is denied,
-leaving the opened tab's history sidebar empty.
+timeline: the viewed row is the active `nb-ver-viewing` row (active dot + highlight, no
+text label), a "Back to current" bar (`renderBackToCurrentBar`) is shown above the
+timeline and calls `closeVersionInline()` to return to the live draft, and every other
+row remains clickable to switch the view. Inline viewing never mutates the live
+document. There is no new-tab checkout: `openVersionTab` and the
+`data-noteback-checkout` marker were removed because a `window.open(blob:)` tab spawned
+from a `file://` canvas gets an opaque origin whose `localStorage` is denied, leaving
+the opened tab's history sidebar empty.
+
+**Version save actions.** A version row's `▾` actions menu offers **Copy feedback**,
+**Save HTML with comments**, and **Save clean HTML** (both saves disabled when the
+version's snapshot is pruned). "Save HTML with comments" rebuilds a re-openable canvas
+of that version via `buildVersionCanvasHtml(v, docId, docTitle)` (clone the live shell,
+swap in the snapshot content, re-seed `#noteback-state` with the version's comments,
+escaping `</script>`; no checkout marker); "Save clean HTML" saves the raw `v.html`
+snapshot. Both route through `exporter.onSaveHtml(html, name)` and are **downloaded** —
+opening the file later is a fresh `file://` canvas with its own storage, which is why
+this re-uses a version-canvas builder without reintroducing the opaque-origin bug.
 
 Implementations (all satisfy the `load`/`save` core; covered by the adapter tests
 under `test/` — `history-state-adapter.test.js`, `chrome-kv-store.test.js`,
@@ -431,6 +441,7 @@ Each receives the current `State`.
  * @property {(state: State) => void|Promise<void>}   [onSaveCanvas]   Save HTML *with* comments (re-shareable canvas).
  * @property {(state: State) => void|Promise<void>}   [onSaveCanvasWithHistory] Save HTML with comments AND the embedded version history (a `#noteback-history` JSON block). Present only on the embedded canvas. The overlay shows the "with comments and history" item only when this hook exists AND `getHistory()` is non-empty.
  * @property {(state: State) => void|Promise<void>}   [onSaveClean]    Save HTML *without* Noteback (the original document).
+ * @property {(html: string, name: string) => void|Promise<void>} [onSaveHtml] Save a PRE-BUILT HTML string to a file (the overlay builds it — e.g. a past version's canvas or clean snapshot — and this routes it through the same save-in-place/download primitives the live-doc saves use). Present only on the embedded canvas.
  * @property {(state: State) => void}                 [onSavePdf]      Produce a PDF. Omit to use the overlay's default (`window.print()`).
  */
 ```
@@ -729,8 +740,8 @@ bounded (`max-height:34vh`), self-scrolling band between the scrolling comment l
 (`.nb-list`, `flex:1`) and the action footer (`.nb-foot`), collapsing via `:empty` when
 there are no earlier versions — so the current draft's notes keep the available space.
 Collapse rule: **0** earlier versions → hidden; **1** → inline; **2+** → newest inline +
-a "+N older versions" disclosure. Each row has a **copy feedback** action (chevron menu)
-and is click-to-view:
+a "+N older versions" disclosure. Each row's chevron menu has **copy feedback**, **save
+HTML with comments**, and **save clean HTML** actions, and the row body is click-to-view:
 
 - **Inline view** (`openVersionInline`) parses the stored snapshot and re-renders it by
   running the **live** highlight painter (`highlightApi.paintHighlights`) over the parsed
@@ -740,10 +751,19 @@ and is click-to-view:
   **fills the panel** as a column-flex child (`flex:1;min-height:0`), in a side panel
   (`.nb-hist-view`) that sits **beside the sidebar** (not a centered modal — the sidebar
   stays visible on the right with the live timeline). An in-tab `viewingKey` marks the
-  viewed version "you are here"; a "Back to current" bar (`renderBackToCurrentBar` →
-  `closeVersionInline`) returns to the live draft. Pruned snapshots (`html === ''`) toast
-  and leave the view closed. The `</script>` escape applies to `buildPeekPopoverScript`,
-  which serializes comment data into the iframe's inline script.
+  viewed version the active `nb-ver-viewing` row (active dot + highlight, no text label);
+  a "Back to current" bar (`renderBackToCurrentBar` → `closeVersionInline`) returns to the
+  live draft. Pruned snapshots (`html === ''`) toast and leave the view closed. The
+  `</script>` escape applies to `buildPeekPopoverScript`, which serializes comment data
+  into the iframe's inline script.
+
+- **Save actions** (chevron menu): **Save HTML with comments** rebuilds a re-openable
+  canvas of the version with `buildVersionCanvasHtml` (clone the live shell, swap in the
+  snapshot content, re-seed `#noteback-state` with the version's comments, escaping
+  `</script>`); **Save clean HTML** saves the raw `v.html` snapshot. Both call
+  `exporter.onSaveHtml(html, name)` (download), are disabled when the snapshot is pruned,
+  and never `window.open` — so a re-opened saved file is a fresh `file://` canvas with its
+  own storage, avoiding the opaque-origin `localStorage` bug that retired `openVersionTab`.
 
 ### 8.8 Per-site opt-in
 

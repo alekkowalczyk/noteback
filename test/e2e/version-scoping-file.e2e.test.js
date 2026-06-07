@@ -149,7 +149,7 @@ test('file://: editing the doc in place moves the comment to an earlier version 
   }
 });
 
-test('file://: opening a version inline shows the timeline + "you are here", then returns to current', { timeout: 90000 }, async () => {
+test('file://: opening a version inline shows the timeline + viewing state, then returns to current', { timeout: 90000 }, async () => {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
   try {
@@ -182,10 +182,10 @@ test('file://: opening a version inline shows the timeline + "you are here", the
     assert.strictEqual(await page.locator('.nb-hist-view').count(), 1, 'the inline version view opens on file://');
     assert.strictEqual(await page.locator('.nb-sidebar.nb-open').count(), 1, 'the sidebar stays visible beside the inline view');
 
-    // The viewed version is the "you are here" row, and a "Back to current" bar shows.
+    // The viewed version is the active "viewing" row, and a "Back to current" bar shows.
     const viewingRow = page.locator('.nb-ver-row.active.nb-ver-viewing');
     assert.strictEqual(await viewingRow.count(), 1, 'the opened version is marked the active "viewing" row');
-    assert.strictEqual(((await viewingRow.locator('.nb-ver-here').first().textContent()) || '').trim(), 'you are here', 'the opened version is marked "you are here"');
+    assert.strictEqual(await page.locator('.nb-ver-here').count(), 0, 'no "you are here" text (removed)');
     assert.strictEqual(await page.locator('.nb-backbar').count(), 1, 'a "Back to current" bar is offered');
 
     // The inline iframe actually rendered the snapshot (history was reachable).
