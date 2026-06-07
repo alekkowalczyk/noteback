@@ -502,7 +502,9 @@
     (doc.body || doc.documentElement).appendChild(fab);
 
     let pendingAnchor = null;   // anchor described from the current selection
-    let pendingFabRect = null;  // selection rect the chip should sit above
+    let pendingFabRect = null;  // full selection rect — used to place the COMPOSER
+    let pendingCaretRect = null;// zero-width rect at the cursor — used to place the CHIP
+    let pendingFabBelow = true; // chip prefers the side the cursor is on (below for fwd)
     let fabTimer = null;        // debounce: show the chip a beat after settling
     const FAB_DELAY_MS = 340;
 
@@ -695,13 +697,19 @@
       if (!anchor) { hideFab(); return; }
       pendingAnchor = anchor;
       pendingFabRect = range.getBoundingClientRect();
+      // The chip hugs the CURSOR (the selection's focus point), not the centre of
+      // the whole passage: below it for a forward drag, flipped above for a
+      // backward one so it never covers the just-selected text.
+      const backward = isSelectionBackward(sel);
+      pendingCaretRect = selectionCaretRect(range, backward);
+      pendingFabBelow = !backward;
 
       // If the chip is already up, just follow the growing selection. Otherwise
       // debounce its first appearance: wait until the selection settles for a
       // beat, then pop it in — so it doesn't flicker mid-drag and the entrance
       // animation is actually seen rather than snapping in under the cursor.
       if (fab.style.display !== 'none') {
-        positionFab(pendingFabRect);
+        positionFab(pendingCaretRect, pendingFabBelow);
       } else {
         scheduleFab();
       }
@@ -709,11 +717,11 @@
 
     /** (Re)arm the debounce; the chip pops in once the selection holds still. */
     function scheduleFab() {
-      if (!win || !win.setTimeout) { if (pendingFabRect) positionFab(pendingFabRect); return; }
+      if (!win || !win.setTimeout) { if (pendingCaretRect) positionFab(pendingCaretRect, pendingFabBelow); return; }
       if (fabTimer) win.clearTimeout(fabTimer);
       fabTimer = win.setTimeout(function () {
         fabTimer = null;
-        if (pendingAnchor && pendingFabRect) positionFab(pendingFabRect);
+        if (pendingAnchor && pendingCaretRect) positionFab(pendingCaretRect, pendingFabBelow);
       }, FAB_DELAY_MS);
     }
 
@@ -722,20 +730,76 @@
       fabTimer = null;
     }
 
-    function positionFab(rect) {
+    /**
+     * Place the chip next to the cursor. `rect` is a zero-width rect at the
+     * cursor (selection focus); `preferBelow` puts the chip on the side the
+     * cursor sits on — below for a forward drag, above for a backward one —
+     * flipping to the other side only when the viewport has no room there. We
+     * centre on the cursor's x and clamp BOTH edges (we're centring on a point
+     * now, not a wide selection box, so the right edge matters too).
+     */
+    function positionFab(rect, preferBelow) {
       fab.style.display = 'inline-flex';
       const scrollX = win ? (win.scrollX || win.pageXOffset || 0) : 0;
       const scrollY = win ? (win.scrollY || win.pageYOffset || 0) : 0;
+      const vw = win ? (win.innerWidth || (doc.documentElement && doc.documentElement.clientWidth) || 0) : 0;
+      const vh = win ? (win.innerHeight || (doc.documentElement && doc.documentElement.clientHeight) || 0) : 0;
       const fabW = fab.offsetWidth || 110;
+      const fabH = fab.offsetHeight || 0;
+
       let left = rect.left + scrollX + (rect.width / 2) - (fabW / 2);
-      let top = rect.top + scrollY - fab.offsetHeight - 8;
-      if (top < scrollY + 4) top = rect.bottom + scrollY + 8; // flip below
+
+      const below = rect.bottom + scrollY + 8;
+      const above = rect.top + scrollY - fabH - 8;
+      let top;
+      if (preferBelow) {
+        top = below;
+        if (vh && rect.bottom + fabH + 8 > vh) top = above; // no room below → flip up
+      } else {
+        top = above;
+        if (rect.top - fabH - 8 < 0) top = below;           // no room above → flip down
+      }
+
       if (left < scrollX + 4) left = scrollX + 4;
+      if (vw && left + fabW > scrollX + vw - 4) left = scrollX + vw - fabW - 4;
+      if (top < scrollY + 4) top = scrollY + 4;             // never above the viewport
       fab.style.left = left + 'px';
       fab.style.top = top + 'px';
       // Play the pop-in once when first shown for this selection; while the user
       // keeps dragging the selection we only reposition (nb-in already on).
       if (!fab.classList.contains('nb-in')) playFabIn();
+    }
+
+    /**
+     * True when the selection runs backward (focus precedes anchor) — i.e. the
+     * user dragged right-to-left / bottom-to-top, so the cursor is at the START
+     * of the document-ordered range. Uses the standard collapse trick: a range
+     * built start=anchor / end=focus collapses iff focus is before anchor.
+     */
+    function isSelectionBackward(sel) {
+      if (!sel || !sel.anchorNode || !sel.focusNode) return false;
+      try {
+        const r = doc.createRange();
+        r.setStart(sel.anchorNode, sel.anchorOffset);
+        r.setEnd(sel.focusNode, sel.focusOffset);
+        return r.collapsed;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    /**
+     * A zero-width rect at the cursor (selection focus) — the right edge of the
+     * last line for a forward selection, the left edge of the first line for a
+     * backward one. Falls back to the whole-selection box when per-line rects
+     * aren't available.
+     */
+    function selectionCaretRect(range, backward) {
+      const rects = (range && range.getClientRects) ? range.getClientRects() : null;
+      if (!rects || rects.length === 0) return range.getBoundingClientRect();
+      const edge = backward ? rects[0] : rects[rects.length - 1];
+      const x = backward ? edge.left : edge.right;
+      return { left: x, right: x, width: 0, top: edge.top, bottom: edge.bottom, height: edge.height };
     }
 
     /**
@@ -756,6 +820,7 @@
       fab.classList.remove('nb-in');
       pendingAnchor = null;
       pendingFabRect = null;
+      pendingCaretRect = null;
     }
 
     fab.addEventListener('mousedown', function (e) {
@@ -767,8 +832,8 @@
       e.stopPropagation();
       if (!pendingAnchor) return;
       const anchor = pendingAnchor;
-      // Position the composer relative to the SELECTION (not the chip, which sits
-      // above it) so the composer can sit clear of the highlighted passage.
+      // Position the composer relative to the SELECTION (the full passage box,
+      // not the cursor-hugging chip) so it can sit clear of the highlighted text.
       const rect = pendingFabRect || fabRect();
       hideFab();
       openPopover({ anchor: anchor, body: '', id: null, rect: rect });

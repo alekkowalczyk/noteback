@@ -354,6 +354,12 @@ function mountOverlay(cfg) { ... }
   **keyframe animation restarted via reflow** (`classList.remove` →
   `void el.offsetWidth` → `classList.add`), NOT a CSS `transition` — a transition
   out of `display:none` does not reliably fire. See the gotcha in `CLAUDE.md`.
+- **The chip hugs the cursor**, not the centre of the passage: it's anchored to
+  the selection's *focus point* (where the drag ended) and centred on that x —
+  **below** the cursor for a forward drag, flipped **above** for a backward one
+  (so it never covers the just-selected text), flipping again only when the
+  viewport lacks room. The *composer*, by contrast, is still placed off the full
+  selection box (see below). Covered by `test/e2e/comment-chip-position.e2e.test.js`.
 - **Comment composer** is positioned to stay clear of the selection's vertical
   band when there's room (prefer below, flip above, else hug the nearer edge),
   is **draggable by its handle**, and is dismissed **only** by Cancel / Save /
