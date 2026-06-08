@@ -6,3 +6,4 @@ examples/*.canvas*.html
 
 # generated review canvases at repo root (regenerate via `noteback wrap`)
 /*.canvas.html
+noteback-1.1.0.zip
