@@ -182,12 +182,17 @@ source of truth and is shared by the content script (gating) and the popup
 
 - `classifyOrigin(loc) -> 'file' | 'localhost' | '127.0.0.1' | 'other'`
 - `originOf(loc) -> canonical origin` (`"file://"` for file pages)
-- `normalizeSettings(s) -> { origins, disabledSites, historySites, historyDisabledGlobal, historyDisabledSites, historyDisabledDocs }` (defaults filled)
-- `isActive({type, origin}, settings)` — **active** iff the per-type gate is on
-  **and** `origin ∉ disabledSites`. The per-type defaults differ: `file` is **on**
-  by default; `localhost` / `127.0.0.1` are **opt-in** (off until switched on in the
-  popup — only an explicit `true` activates them). Per-type is the master gate;
-  per-site only subtracts a single origin. `'other'` is never active.
+- `normalizeSettings(s) -> { origins, disabledSites, enabledSites, historySites, historyDisabledGlobal, historyDisabledSites, historyDisabledDocs }` (defaults filled)
+- `isActive({type, origin}, settings)` — resolves in precedence order: `origin ∈
+  disabledSites` ⇒ **off** (per-site opt-out always wins); else `origin ∈
+  enabledSites` ⇒ **on** (per-site opt-in activates this ONE origin even when its
+  type default is off — the permanent per-port opt-in for a dev server); else the
+  per-type default. The per-type defaults differ: `file` is **on**; `localhost` /
+  `127.0.0.1` are **opt-in** (off until switched on in the popup — only an explicit
+  `true`). `'other'` is never active (not in the injectable types, so `enabledSites`
+  can't reach it). The popup's per-site toggle keeps the two lists disjoint:
+  `enabledSites` holds opt-ins for off-types, `disabledSites` holds opt-outs for
+  on-types.
 - `historyAllowed({type, origin, docKey}, settings)` — gates the **snapshot-history
   engine** (§8). Default-**on** for `file`/`localhost`/`127.0.0.1`; for any other origin
   it is opt-in via `origin ∈ historySites`. When false the content script keeps the

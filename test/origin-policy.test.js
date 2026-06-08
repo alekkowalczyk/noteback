@@ -62,6 +62,30 @@ test('type-off wins regardless of disabledSites', () => {
   assert.strictEqual(policy.isActive({ type: 'localhost', origin: 'http://localhost:8000' }, s), false);
 });
 
+test('enabledSites opts ONE origin in even when its type is opt-in/off', () => {
+  // localhost is opt-in (off by default); a per-site opt-in activates just this port.
+  const s = { enabledSites: ['http://localhost:3000'] };
+  assert.strictEqual(policy.isActive({ type: 'localhost', origin: 'http://localhost:3000' }, s), true);
+  // a different localhost origin stays off (the type default still applies)
+  assert.strictEqual(policy.isActive({ type: 'localhost', origin: 'http://localhost:8000' }, s), false);
+});
+
+test('disabledSites (opt-out) beats enabledSites (opt-in) for the same origin', () => {
+  const s = { enabledSites: ['http://localhost:3000'], disabledSites: ['http://localhost:3000'] };
+  assert.strictEqual(policy.isActive({ type: 'localhost', origin: 'http://localhost:3000' }, s), false);
+});
+
+test('enabledSites never activates an other-origin (not in the injectable types)', () => {
+  const s = { enabledSites: ['https://example.com'] };
+  assert.strictEqual(policy.isActive({ type: 'other', origin: 'https://example.com' }, s), false);
+});
+
+test('normalizeSettings carries enabledSites (safe default [])', () => {
+  assert.deepStrictEqual(policy.normalizeSettings(null).enabledSites, []);
+  assert.deepStrictEqual(policy.normalizeSettings({ enabledSites: 'x' }).enabledSites, []);
+  assert.deepStrictEqual(policy.normalizeSettings({ enabledSites: ['a'] }).enabledSites, ['a']);
+});
+
 test('unknown/other origin type is never active', () => {
   assert.strictEqual(policy.isActive({ type: 'other', origin: 'https://example.com' }, null), false);
 });
