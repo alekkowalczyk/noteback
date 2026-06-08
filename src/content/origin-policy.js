@@ -9,8 +9,8 @@
  *
  *   classifyOrigin(loc)      -> 'file' | 'localhost' | '127.0.0.1' | 'other'
  *   originOf(loc)            -> canonical origin string ('file://' for file pages)
- *   normalizeSettings(s)     -> { origins:{…}, disabledSites:[], historySites:[], historyDisabledGlobal, historyDisabledSites:[], historyDisabledDocs:[] }
- *   isActive({type,origin},s)-> boolean   (per-type master gate, per-site subtract)
+ *   normalizeSettings(s)     -> { origins:{…}, disabledSites:[], enabledSites:[], historySites:[], historyDisabledGlobal, historyDisabledSites:[], historyDisabledDocs:[] }
+ *   isActive({type,origin},s)-> boolean   (per-site opt-out wins; per-site opt-in (enabledSites) activates one origin; else per-type default)
  *   historyAllowed({type,origin,docKey},s) -> boolean (base on for file/localhost/127 + historySites opt-in; opt-out subtract: global/site/doc)
  *   overlayMounted(doc)      -> boolean   (a Noteback overlay is already mounted on this page)
  */
@@ -63,6 +63,7 @@
         '127.0.0.1': o['127.0.0.1'] === true
       },
       disabledSites: Array.isArray(s.disabledSites) ? s.disabledSites.slice() : [],
+      enabledSites: Array.isArray(s.enabledSites) ? s.enabledSites.slice() : [],
       historySites: Array.isArray(s.historySites) ? s.historySites.slice() : [],
       historyDisabledGlobal: s.historyDisabledGlobal === true,
       historyDisabledSites: Array.isArray(s.historyDisabledSites) ? s.historyDisabledSites.slice() : [],
@@ -85,11 +86,15 @@
 
   function isActive(info, settings) {
     info = info || {};
-    if (TYPES.indexOf(info.type) === -1) return false;          // 'other'/unknown
+    if (TYPES.indexOf(info.type) === -1) return false;          // 'other'/unknown — not injectable
     const norm = normalizeSettings(settings);
-    if (norm.origins[info.type] === false) return false;        // per-type master gate
-    if (info.origin && norm.disabledSites.indexOf(info.origin) !== -1) return false; // per-site subtract
-    return true;
+    // Explicit per-site opt-OUT always wins.
+    if (info.origin && norm.disabledSites.indexOf(info.origin) !== -1) return false;
+    // Explicit per-site opt-IN activates this ONE origin even when its type default
+    // is off (the permanent per-port opt-in for localhost/127 dev servers).
+    if (info.origin && norm.enabledSites.indexOf(info.origin) !== -1) return true;
+    // Otherwise the per-type default: file on; localhost / 127.0.0.1 opt-in (off).
+    return norm.origins[info.type] !== false;
   }
 
   // True when a Noteback overlay is already mounted on this document, detected via

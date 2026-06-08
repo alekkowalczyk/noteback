@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const siteRow = byId('nb-site-row');
   const siteOriginEl = byId('nb-site-origin');
   const siteToggle = byId('nb-site-toggle');
-  const siteHint = byId('nb-site-hint');
+  const siteEnableAll = byId('nb-site-enable-all');
   const typeInputs = {
     file: byId('nb-type-file'),
     localhost: byId('nb-type-localhost'),
@@ -89,8 +89,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
     siteToggle.addEventListener('change', function () {
       if (!tabInfo || tabInfo.type === 'other') return;
-      settings = withSite(settings, tabInfo.origin, siteToggle.checked);
+      settings = withSite(settings, tabInfo.origin, siteToggle.checked, typeOn(tabInfo.type));
       saveSettings(settings).then(function () { refreshState(activeTab); });
+    });
+
+    // "Enable all <type> sites" — flip the per-type switch on for the current
+    // origin's type (localhost / 127.0.0.1), activating every site of that type.
+    siteEnableAll.addEventListener('click', function () {
+      if (!tabInfo || tabInfo.type === 'other') return;
+      settings = withType(settings, tabInfo.type, true);
+      saveSettings(settings).then(function () { renderTypeSwitches(); refreshState(activeTab); });
     });
 
     histGlobal.addEventListener('change', function () {
@@ -399,17 +407,17 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!tabInfo || tabInfo.type === 'other') { hideSiteRow(); return; }
     siteRow.removeAttribute('hidden');
     siteOriginEl.textContent = tabInfo.origin;
-    if (!typeOn(tabInfo.type)) {
-      // Per-site can't override a type that's switched off.
-      siteToggle.checked = false;
-      siteToggle.disabled = true;
-      siteHint.textContent = tabInfo.type + ' is off in settings';
-      siteHint.hidden = false;
+    // The toggle reflects (and controls) whether THIS exact origin is active. When
+    // the type default is on it subtracts a single origin; when the type is opt-in
+    // and off it opts this one port in — permanently, taking effect live.
+    siteToggle.disabled = false;
+    siteToggle.checked = !!active;
+    if (typeOn(tabInfo.type)) {
+      siteEnableAll.hidden = true;
     } else {
-      siteToggle.disabled = false;
-      siteToggle.checked = !!active;
-      siteHint.hidden = true;
-      siteHint.textContent = '';
+      // Opt-in type, off: offer a one-click shortcut to enable the whole type.
+      siteEnableAll.textContent = 'Enable all ' + tabInfo.type + ' sites';
+      siteEnableAll.hidden = false;
     }
   }
 
@@ -469,13 +477,26 @@ document.addEventListener('DOMContentLoaded', function () {
     return norm;
   }
 
-  function withSite(s, origin, on) {
-    const norm = policy ? policy.normalizeSettings(s) : { origins: { file: true, localhost: false, '127.0.0.1': false }, disabledSites: [] };
-    const list = norm.disabledSites.slice();
-    const idx = list.indexOf(origin);
-    if (on) { if (idx !== -1) list.splice(idx, 1); }   // enable site → remove from disabled
-    else { if (idx === -1) list.push(origin); }        // disable site → add to disabled
-    norm.disabledSites = list;
+  // Toggle a single origin's activation. The two lists stay minimal and disjoint:
+  // enabledSites holds per-port opt-INS (only meaningful when the type default is
+  // off); disabledSites holds per-port opt-OUTS (only meaningful when it is on).
+  function withSite(s, origin, on, typeDefaultOn) {
+    const norm = policy ? policy.normalizeSettings(s) : { origins: { file: true, localhost: false, '127.0.0.1': false }, disabledSites: [], enabledSites: [] };
+    const dis = norm.disabledSites.slice();
+    const en = (norm.enabledSites || []).slice();
+    const di = dis.indexOf(origin);
+    const ei = en.indexOf(origin);
+    if (on) {
+      if (di !== -1) dis.splice(di, 1);                                  // clear any opt-out
+      if (!typeDefaultOn) { if (ei === -1) en.push(origin); }            // type off → opt this port in
+      else if (ei !== -1) en.splice(ei, 1);                              // type on → opt-in is moot
+    } else {
+      if (ei !== -1) en.splice(ei, 1);                                   // clear any opt-in
+      if (typeDefaultOn) { if (di === -1) dis.push(origin); }            // type on → opt this port out
+      else if (di !== -1) dis.splice(di, 1);                             // type off → opt-out is moot
+    }
+    norm.disabledSites = dis;
+    norm.enabledSites = en;
     return norm;
   }
 
