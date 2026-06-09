@@ -286,6 +286,9 @@
     '  font:700 9.5px/1 var(--nb-round);letter-spacing:.07em;text-transform:uppercase;',
     '  color:var(--nb-ink-faint);white-space:nowrap;}',
     '.nb-info-mode::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--nb-accent);flex:none;}',
+    /* embedded-only "also a Chrome extension" section in the info card */
+    '.nb-info-ext{margin-top:14px;padding-top:12px;border-top:1px solid var(--nb-line);}',
+    '.nb-info-ext .nb-info-note{margin:0 0 8px;}',
 
     /* gear dialog (history opt-out) — reuses .nb-info-dialog/.nb-info-card styling */
     '.nb-gear-btn[hidden]{display:none;}',
@@ -773,6 +776,14 @@
       '      <button type="button" class="nb-cmd-copy" data-cmd="npx skills add alekkowalczyk/noteback" title="Copy command">Copy</button></div>' +
       '    <div class="nb-cmd"><code>npx noteback install-skill</code>' +
       '      <button type="button" class="nb-cmd-copy" data-cmd="npx noteback install-skill" title="Copy command">Copy</button></div>' +
+      // Embedded-only: this canvas is a standalone file, so point the reader to the
+      // Chrome extension (in extension mode they already have it — omit).
+      (runMode === 'embedded'
+        ? '    <div class="nb-info-ext">' +
+          '      <p class="nb-info-note">Also available as a Chrome extension — annotate any local page without saving a canvas.</p>' +
+          '      <a class="nb-info-link" href="https://chromewebstore.google.com/detail/noteback/bgmcjepifnlgenbjlplaeapllkamcejc" target="_blank" rel="noopener noreferrer">Get the Chrome extension ↗</a>' +
+          '    </div>'
+        : '') +
       '    <div class="nb-info-foot">' +
       '      <a class="nb-info-link" href="https://github.com/alekkowalczyk/noteback" target="_blank" rel="noopener noreferrer">View the project on GitHub ↗</a>' +
       '      <span class="nb-info-mode" title="How Noteback is running on this page"></span>' +

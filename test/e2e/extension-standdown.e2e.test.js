@@ -178,6 +178,12 @@ test('the extension stands down on a canvas (single overlay; comment -> localSto
       'extension mode',
       'the extension-mounted overlay shows the extension-mode indicator'
     );
+    // The "also a Chrome extension" link is embedded-only — never in extension mode.
+    assert.strictEqual(
+      await probe.locator('.nb-info-ext a.nb-info-link').count(),
+      0,
+      'the Chrome-extension link is hidden in extension mode (embedded-only)'
+    );
     await probe.close();
 
     // The real scenario: open the canvas with the extension active.
