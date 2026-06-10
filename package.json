@@ -1,6 +1,6 @@
 {
   "name": "noteback",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Annotate AI docs & copy/share feedback for Claude, ChatGPT & co. Zero-backend Chrome extension (Manifest V3) + `npx noteback wrap` feedback canvas + agent skill.",
   "type": "commonjs",
   "license": "MIT",

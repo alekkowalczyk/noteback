@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Noteback",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Give your AI feedback on the docs it writes: highlight text, attach comments, copy as Markdown or save a feedback canvas.",
   "permissions": [
     "storage",
