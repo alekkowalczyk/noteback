@@ -13,15 +13,22 @@ It runs **100% locally**: no server, no account, no telemetry, no network calls.
 
 ## What it looks like
 
-**1. Select text → leave a comment.** A floating button opens a composer anchored
-to the exact quote.
+**1. A born-annotatable doc.** Your AI writes a spec, plan, or report as HTML;
+`wrap` (or the extension) turns it into a feedback canvas that opens like any
+ordinary styled page — no app, no account.
 
-![Selecting a passage and writing a comment](examples/screenshots/noteback-readme-composer.png)
+![A styled technical spec rendered as a Noteback feedback canvas](examples/screenshots/spec-redesign.png)
 
-**2. The sidebar lists every comment** — anchored notes and notes on the whole
+**2. Highlight a passage → it sticks.** Select text and the Noteback tab on the
+edge lets you anchor a comment to that exact quote; every annotated passage is
+marked inline.
+
+![The same spec with a highlighted passage and the Noteback launcher tab](examples/screenshots/spec-canvas-overlay.png)
+
+**3. The sidebar lists every comment** — anchored notes and notes on the whole
 document — and lets you copy the feedback or save the canvas.
 
-![The Noteback sidebar listing comments](examples/screenshots/noteback-readme-sidebar.png)
+![The Noteback sidebar listing comments beside the highlighted document](examples/screenshots/spec-canvas-comments.png)
 
 Comments use text-quote anchoring (W3C / Hypothesis style), so highlights survive
 minor edits; a lost quote becomes an *unanchored* note instead of disappearing.
