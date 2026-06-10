@@ -49,13 +49,15 @@ The agent then runs `npx noteback wrap doc.html` to turn any HTML into a canvas.
 
 ### As a Chrome extension
 
-1. Clone this repo.
-2. Open `chrome://extensions` and enable **Developer mode** (top-right).
-3. Click **Load unpacked** and select the repo root (the folder with
-   `manifest.json`).
-4. To annotate `file://` docs, open the extension's **Details** page and enable
-   **"Allow access to file URLs."** (`localhost` / `127.0.0.1` are opt-in — switch
-   them on from the extension popup; they're off by default.)
+Install from the **[Chrome Web Store](https://chromewebstore.google.com/detail/noteback/bgmcjepifnlgenbjlplaeapllkamcejc)** —
+one click, and it auto-updates. To annotate `file://` docs, open the extension's
+**Details** page and enable **"Allow access to file URLs."** (`localhost` /
+`127.0.0.1` are opt-in — switch them on from the extension popup; they're off by
+default.)
+
+To run from source instead (for development): enable **Developer mode** at
+`chrome://extensions`, click **Load unpacked**, and select the repo root (the
+folder with `manifest.json`).
 
 ## Docs
 

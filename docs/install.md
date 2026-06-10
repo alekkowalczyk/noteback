@@ -10,7 +10,7 @@ There are two on-ramps and they are decoupled — you can use either on its own:
 |---------|--------------|----------|
 | **Agent skill** | An AI agent hands you docs that are *already* annotatable | **GitHub** serves the skill |
 | **`wrap` CLI** | Turn any HTML into a feedback canvas yourself | **npm** serves the CLI |
-| **Chrome extension** | Annotate any local `file://` / `localhost` page | — (load unpacked) |
+| **Chrome extension** | Annotate any local `file://` / `localhost` page | **[Chrome Web Store](https://chromewebstore.google.com/detail/noteback/bgmcjepifnlgenbjlplaeapllkamcejc)** |
 
 ---
 
@@ -58,16 +58,22 @@ with comments** export, so all three on-ramps produce the same embedded mode.
 Re-wrapping an existing canvas is idempotent (the old runtime + comment state are
 stripped before a fresh empty one is embedded).
 
-## As a Chrome extension (unpacked, for development)
+## As a Chrome extension
+
+Install from the **[Chrome Web Store](https://chromewebstore.google.com/detail/noteback/bgmcjepifnlgenbjlplaeapllkamcejc)**
+(one click, auto-updates).
+
+To annotate `file://` docs, open the extension's **Details** page and enable
+**"Allow access to file URLs."** (`localhost` / `127.0.0.1` are opt-in — switch
+them on from the extension popup; they're off by default.)
+
+### From source (unpacked, for development)
 
 1. Clone this repo.
 2. Open `chrome://extensions`.
 3. Enable **Developer mode** (top-right).
 4. Click **Load unpacked** and select the repo root (the folder with
    `manifest.json`).
-5. To annotate `file://` docs, open the extension's **Details** page and enable
-   **"Allow access to file URLs."** (`localhost` / `127.0.0.1` are opt-in — switch
-   them on from the extension popup; they're off by default.)
 
 ### Permissions (minimal by design)
 
