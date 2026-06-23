@@ -61,7 +61,12 @@
   // live document (openVersionInline injects this into the snapshot's <head>).
   const HIGHLIGHT_CSS =
     'mark.noteback-highlight{' +
-    '  background:#ffe7a3;color:inherit;border-radius:4px;padding:0 1.5px;cursor:pointer;' +
+    // The honey background is ALWAYS light, so the text on it must always be a dark
+    // ink — never `inherit`. Inheriting broke dark-mode docs: light page text landed
+    // on the light-yellow swatch and was unreadable. A fixed warm-brown ink reads at
+    // high contrast on honey in both light and dark documents. (Print resets this to
+    // `inherit` below, where the background is transparent and the original colour wins.)
+    '  background:#ffe7a3;color:#3a2e05;border-radius:4px;padding:0 1.5px;cursor:pointer;' +
     '  box-shadow:0 0 0 1px rgba(210,158,40,.55);' +
     '  -webkit-box-decoration-break:clone;box-decoration-break:clone;' +
     '  transition:background .2s ease,box-shadow .2s ease;' +
